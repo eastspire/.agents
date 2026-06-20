@@ -1,0 +1,96 @@
+{
+  "version": 3,
+  "skills": {
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
+      "skillPath": "skills/react-best-practices/SKILL.md",
+      "skillFolderHash": "bd8feeee219216aac928d1d8e5c61a928dba23dc",
+      "installedAt": "2026-03-28T00:45:30.074Z",
+      "updatedAt": "2026-03-28T00:45:30.074Z"
+    },
+    "remotion-best-practices": {
+      "source": "remotion-dev/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/remotion-dev/skills.git",
+      "skillPath": "skills/remotion/SKILL.md",
+      "skillFolderHash": "d0bc7b74666ce228ba1e37156520d5ada5bbc889",
+      "installedAt": "2026-03-28T00:45:46.050Z",
+      "updatedAt": "2026-03-28T00:45:46.050Z"
+    },
+    "supabase-postgres-best-practices": {
+      "source": "supabase/agent-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/supabase/agent-skills.git",
+      "skillPath": "skills/supabase-postgres-best-practices/SKILL.md",
+      "skillFolderHash": "95fe6d29daaf88aa9bc3b505ca4defe19ceabf92",
+      "pluginName": "postgres-best-practices",
+      "installedAt": "2026-03-28T00:46:03.008Z",
+      "updatedAt": "2026-03-28T00:46:03.008Z"
+    },
+    "next-best-practices": {
+      "source": "vercel-labs/next-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/next-skills.git",
+      "skillPath": "skills/next-best-practices/SKILL.md",
+      "skillFolderHash": "ad17eb27952b39a6ab0061bd50e8a2213b63a3ec",
+      "installedAt": "2026-03-28T00:46:19.666Z",
+      "updatedAt": "2026-03-28T00:46:19.666Z"
+    },
+    "better-auth-best-practices": {
+      "source": "better-auth/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/better-auth/skills.git",
+      "skillPath": "better-auth/best-practices/SKILL.md",
+      "skillFolderHash": "58f87c7fe7c2c487779728c1e73ea43717612d37",
+      "pluginName": "auth-skills",
+      "installedAt": "2026-03-28T00:46:35.440Z",
+      "updatedAt": "2026-03-28T00:46:35.440Z"
+    },
+    "dotnet-best-practices": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/github/awesome-copilot.git",
+      "skillPath": "skills/dotnet-best-practices/SKILL.md",
+      "skillFolderHash": "348f6a99189c92bae1654b58f77904a0734b1e34",
+      "installedAt": "2026-03-28T00:47:31.552Z",
+      "updatedAt": "2026-03-28T00:47:31.552Z"
+    },
+    "web-access": {
+      "source": "eze-is/web-access",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/eze-is/web-access.git",
+      "skillPath": "SKILL.md",
+      "skillFolderHash": "6532d4da491fc6af2a7f3a161d7d7c69d67bca80",
+      "installedAt": "2026-04-21T23:51:31.827Z",
+      "updatedAt": "2026-04-21T23:51:31.827Z"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/skills.git",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "skillFolderHash": "3013fdeb8a11b10b1eb795ec3ae8bfca38f7c26d",
+      "installedAt": "2026-04-21T23:51:38.184Z",
+      "updatedAt": "2026-04-21T23:51:38.184Z"
+    }
+  },
+  "dismissed": {
+    "findSkillsPrompt": true
+  },
+  "lastSelectedAgents": [
+    "amp",
+    "antigravity",
+    "cline",
+    "codex",
+    "cursor",
+    "deepagents",
+    "firebender",
+    "gemini-cli",
+    "github-copilot",
+    "kimi-cli",
+    "opencode",
+    "warp"
+  ]
+}
