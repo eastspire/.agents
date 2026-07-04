@@ -88,6 +88,13 @@
       "skillPath": "skills/development-standards/SKILL.md",
       "installedAt": "2026-07-05T00:00:00.000Z",
       "updatedAt": "2026-07-05T00:00:00.000Z"
+    },
+    "agent-file-standards": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/agent-file-standards/SKILL.md",
+      "installedAt": "2026-07-05T00:00:00.000Z",
+      "updatedAt": "2026-07-05T00:00:00.000Z"
     }
   },
   "dismissed": {
