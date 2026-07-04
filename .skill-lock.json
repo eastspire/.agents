@@ -74,6 +74,20 @@
       "skillFolderHash": "3013fdeb8a11b10b1eb795ec3ae8bfca38f7c26d",
       "installedAt": "2026-04-21T23:51:38.184Z",
       "updatedAt": "2026-04-21T23:51:38.184Z"
+    },
+    "euv-standards": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/euv-standards/SKILL.md",
+      "installedAt": "2026-07-05T00:00:00.000Z",
+      "updatedAt": "2026-07-05T00:00:00.000Z"
+    },
+    "development-standards": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/development-standards/SKILL.md",
+      "installedAt": "2026-07-05T00:00:00.000Z",
+      "updatedAt": "2026-07-05T00:00:00.000Z"
     }
   },
   "dismissed": {
