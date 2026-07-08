@@ -95,6 +95,15 @@
       "skillPath": "skills/agent-file-standards/SKILL.md",
       "installedAt": "2026-07-05T00:00:00.000Z",
       "updatedAt": "2026-07-05T00:00:00.000Z"
+    },
+    "mmx-cli": {
+      "source": "MiniMax-AI/cli",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/cli.git",
+      "skillPath": "skill/SKILL.md",
+      "skillFolderHash": "dc9128e7a79e896a31fe3e5a1acb0f0434879a5a",
+      "installedAt": "2026-07-07T23:38:09.226Z",
+      "updatedAt": "2026-07-07T23:38:27.427Z"
     }
   },
   "dismissed": {
