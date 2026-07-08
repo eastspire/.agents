@@ -19,25 +19,6 @@
       "installedAt": "2026-03-28T00:46:19.666Z",
       "updatedAt": "2026-03-28T00:46:19.666Z"
     },
-    "better-auth-best-practices": {
-      "source": "better-auth/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/better-auth/skills.git",
-      "skillPath": "better-auth/best-practices/SKILL.md",
-      "skillFolderHash": "58f87c7fe7c2c487779728c1e73ea43717612d37",
-      "pluginName": "auth-skills",
-      "installedAt": "2026-03-28T00:46:35.440Z",
-      "updatedAt": "2026-03-28T00:46:35.440Z"
-    },
-    "dotnet-best-practices": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/github/awesome-copilot.git",
-      "skillPath": "skills/dotnet-best-practices/SKILL.md",
-      "skillFolderHash": "348f6a99189c92bae1654b58f77904a0734b1e34",
-      "installedAt": "2026-03-28T00:47:31.552Z",
-      "updatedAt": "2026-03-28T00:47:31.552Z"
-    },
     "web-access": {
       "source": "eze-is/web-access",
       "sourceType": "github",
