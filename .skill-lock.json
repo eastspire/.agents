@@ -10,16 +10,6 @@
       "installedAt": "2026-03-28T00:45:46.050Z",
       "updatedAt": "2026-03-28T00:45:46.050Z"
     },
-    "supabase-postgres-best-practices": {
-      "source": "supabase/agent-skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/supabase/agent-skills.git",
-      "skillPath": "skills/supabase-postgres-best-practices/SKILL.md",
-      "skillFolderHash": "95fe6d29daaf88aa9bc3b505ca4defe19ceabf92",
-      "pluginName": "postgres-best-practices",
-      "installedAt": "2026-03-28T00:46:03.008Z",
-      "updatedAt": "2026-03-28T00:46:03.008Z"
-    },
     "next-best-practices": {
       "source": "vercel-labs/next-skills",
       "sourceType": "github",
