@@ -1,46 +1,10 @@
 {
   "version": 3,
   "skills": {
-    "remotion-best-practices": {
-      "source": "remotion-dev/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/remotion-dev/skills.git",
-      "skillPath": "skills/remotion/SKILL.md",
-      "skillFolderHash": "d0bc7b74666ce228ba1e37156520d5ada5bbc889",
-      "installedAt": "2026-03-28T00:45:46.050Z",
-      "updatedAt": "2026-03-28T00:45:46.050Z"
-    },
-    "next-best-practices": {
-      "source": "vercel-labs/next-skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/vercel-labs/next-skills.git",
-      "skillPath": "skills/next-best-practices/SKILL.md",
-      "skillFolderHash": "ad17eb27952b39a6ab0061bd50e8a2213b63a3ec",
-      "installedAt": "2026-03-28T00:46:19.666Z",
-      "updatedAt": "2026-03-28T00:46:19.666Z"
-    },
-    "web-access": {
-      "source": "eze-is/web-access",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/eze-is/web-access.git",
-      "skillPath": "SKILL.md",
-      "skillFolderHash": "6532d4da491fc6af2a7f3a161d7d7c69d67bca80",
-      "installedAt": "2026-04-21T23:51:31.827Z",
-      "updatedAt": "2026-04-21T23:51:31.827Z"
-    },
-    "find-skills": {
-      "source": "vercel-labs/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/vercel-labs/skills.git",
-      "skillPath": "skills/find-skills/SKILL.md",
-      "skillFolderHash": "3013fdeb8a11b10b1eb795ec3ae8bfca38f7c26d",
-      "installedAt": "2026-04-21T23:51:38.184Z",
-      "updatedAt": "2026-04-21T23:51:38.184Z"
-    },
-    "euv-standards": {
+    "agent-file-standards": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/euv-standards/SKILL.md",
+      "skillPath": "skills/agent-file-standards/SKILL.md",
       "installedAt": "2026-07-05T00:00:00.000Z",
       "updatedAt": "2026-07-05T00:00:00.000Z"
     },
@@ -51,12 +15,21 @@
       "installedAt": "2026-07-05T00:00:00.000Z",
       "updatedAt": "2026-07-05T00:00:00.000Z"
     },
-    "agent-file-standards": {
+    "euv-standards": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/agent-file-standards/SKILL.md",
+      "skillPath": "skills/euv-standards/SKILL.md",
       "installedAt": "2026-07-05T00:00:00.000Z",
       "updatedAt": "2026-07-05T00:00:00.000Z"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/skills.git",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "skillFolderHash": "3013fdeb8a11b10b1eb795ec3ae8bfca38f7c26d",
+      "installedAt": "2026-04-21T23:51:38.184Z",
+      "updatedAt": "2026-04-21T23:51:38.184Z"
     },
     "mmx-cli": {
       "source": "MiniMax-AI/cli",
@@ -66,6 +39,334 @@
       "skillFolderHash": "dc9128e7a79e896a31fe3e5a1acb0f0434879a5a",
       "installedAt": "2026-07-07T23:38:09.226Z",
       "updatedAt": "2026-07-07T23:38:27.427Z"
+    },
+    "next-best-practices": {
+      "source": "vercel-labs/next-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/next-skills.git",
+      "skillPath": "skills/next-best-practices/SKILL.md",
+      "skillFolderHash": "ad17eb27952b39a6ab0061bd50e8a2213b63a3ec",
+      "installedAt": "2026-03-28T00:46:19.666Z",
+      "updatedAt": "2026-03-28T00:46:19.666Z"
+    },
+    "remotion-best-practices": {
+      "source": "remotion-dev/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/remotion-dev/skills.git",
+      "skillPath": "skills/remotion/SKILL.md",
+      "skillFolderHash": "d0bc7b74666ce228ba1e37156520d5ada5bbc889",
+      "installedAt": "2026-03-28T00:45:46.050Z",
+      "updatedAt": "2026-03-28T00:45:46.050Z"
+    },
+    "web-access": {
+      "source": "eze-is/web-access",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/eze-is/web-access.git",
+      "skillPath": "SKILL.md",
+      "skillFolderHash": "6532d4da491fc6af2a7f3a161d7d7c69d67bca80",
+      "installedAt": "2026-04-21T23:51:31.827Z",
+      "updatedAt": "2026-04-21T23:51:31.827Z"
+    },
+    "bin-encode-decode": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/bin-encode-decode/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "certbot-letencrypt-txy-ssl": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/certbot-letencrypt-txy-ssl/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "china-identification-card": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/china-identification-card/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "chunkify": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/chunkify/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "clonelicious": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/clonelicious/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "color-output": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/color-output/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "compare-version": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/compare-version/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "computer-use": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/computer-use/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "dogfood": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/dogfood/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "euv": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/euv/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "euv-app": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/euv-app/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "euv-ui-standards": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/euv-ui-standards/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "file-operation": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/file-operation/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "future-fn": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/future-fn/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "gtl": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/gtl/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hot-restart": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hot-restart/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "http-compress": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/http-compress/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "http-constant": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/http-constant/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "http-request": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/http-request/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "http-type": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/http-type/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane-ai": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane-ai/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane-broadcast": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane-broadcast/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane-cli": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane-cli/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane-log": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane-log/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane-macros": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane-macros/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane-plugin-websocket": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane-plugin-websocket/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane-quick-start": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane-quick-start/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane-time": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane-time/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane-upload": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane-upload/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "hyperlane-utils": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/hyperlane-utils/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "instrument-level": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/instrument-level/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "jwt-service": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/jwt-service/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "lombok-macros": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/lombok-macros/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "recoverable-spawn": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/recoverable-spawn/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "recoverable-thread-pool": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/recoverable-thread-pool/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "rust-standards": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/rust-standards/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "server-manager": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/server-manager/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "std-macro-extensions": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/std-macro-extensions/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "tcp-request": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/tcp-request/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "tcplane": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/tcplane/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "udp": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/udp/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "udp-request": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/udp-request/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-07-10T13:50:00.000Z"
     }
   },
   "dismissed": {
