@@ -61,15 +61,45 @@ src/
 /// Extended explanation if needed.
 ///
 /// # Arguments
-/// - `The type of the first parameter`: Description of argument 1.
-/// - `The type of the second parameter`: Description of argument 2.
+///
+/// - `The type of the first parameter` - Description of argument 1.
+/// - `The type of the second parameter` - Description of argument 2.
+/// - `GenericName: GenericConstraint` - Description of argument 3.
 ///
 /// # Returns
+///
 /// - `Type of return value`: Explanation of return value.
 ///
 /// # Panics
 ///
 /// Explanation of when this function might panic.
+```
+
+比如
+
+```rust
+/// Brief description of the item.
+///
+/// Extended explanation if needed.
+///
+/// # Arguments
+///
+/// - `A: AsRef<str>` - Description of argument 1.
+/// - `B: String` - Description of argument 2.
+///
+/// # Returns
+///
+/// - `String`: Explanation of return value.
+///
+/// # Panics
+///
+/// Explanation of when this function might panic.
+fn test<A>(_: A, _: String) -> String
+where
+    A: AsRef<str>,
+{
+    String::new()
+}
 ```
 
 - `impl` 块顶部需添加注释说明其实现目的

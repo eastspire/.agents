@@ -8,13 +8,6 @@
       "installedAt": "2026-07-05T00:00:00.000Z",
       "updatedAt": "2026-07-05T00:00:00.000Z"
     },
-    "development-standards": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/development-standards/SKILL.md",
-      "installedAt": "2026-07-05T00:00:00.000Z",
-      "updatedAt": "2026-07-05T00:00:00.000Z"
-    },
     "euv-standards": {
       "source": "local",
       "sourceType": "local",
