@@ -35,10 +35,10 @@
       "source": "MiniMax-AI/cli",
       "sourceType": "github",
       "sourceUrl": "https://github.com/MiniMax-AI/cli.git",
-      "skillPath": "skill/SKILL.md",
+      "skillPath": "skills/mmx-cli/SKILL.md",
       "skillFolderHash": "dc9128e7a79e896a31fe3e5a1acb0f0434879a5a",
       "installedAt": "2026-07-07T23:38:09.226Z",
-      "updatedAt": "2026-07-07T23:38:27.427Z"
+      "updatedAt": "2026-07-13T00:25:01.446723Z"
     },
     "next-best-practices": {
       "source": "vercel-labs/next-skills",
@@ -53,19 +53,19 @@
       "source": "remotion-dev/skills",
       "sourceType": "github",
       "sourceUrl": "https://github.com/remotion-dev/skills.git",
-      "skillPath": "skills/remotion/SKILL.md",
+      "skillPath": "skills/remotion-best-practices/SKILL.md",
       "skillFolderHash": "d0bc7b74666ce228ba1e37156520d5ada5bbc889",
       "installedAt": "2026-03-28T00:45:46.050Z",
-      "updatedAt": "2026-03-28T00:45:46.050Z"
+      "updatedAt": "2026-07-13T00:25:01.446723Z"
     },
     "web-access": {
       "source": "eze-is/web-access",
       "sourceType": "github",
       "sourceUrl": "https://github.com/eze-is/web-access.git",
-      "skillPath": "SKILL.md",
+      "skillPath": "skills/web-access/SKILL.md",
       "skillFolderHash": "6532d4da491fc6af2a7f3a161d7d7c69d67bca80",
       "installedAt": "2026-04-21T23:51:31.827Z",
-      "updatedAt": "2026-04-21T23:51:31.827Z"
+      "updatedAt": "2026-07-13T00:25:01.446723Z"
     },
     "bin-encode-decode": {
       "source": "local",
