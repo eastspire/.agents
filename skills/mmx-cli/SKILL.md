@@ -13,11 +13,8 @@ Use `mmx` to generate text, images, video, speech, music, and perform web search
 # Install
 npm install -g mmx-cli
 
-# Auth (OAuth persists to ~/.mmx/credentials.json, API key persists to ~/.mmx/config.json)
+# Auth (persisted to ~/.mmx/credentials.json)
 mmx auth login --api-key sk-xxxxx
-
-# Verify active auth source
-mmx auth status
 
 # Or pass per-call
 mmx text chat --api-key sk-xxxxx --message "Hello"
@@ -93,15 +90,9 @@ mmx image generate --prompt <text> [flags]
 | Flag | Type | Description |
 |---|---|---|
 | `--prompt <text>` | string, **required** | Image description |
-| `--aspect-ratio <ratio>` | string | e.g. `16:9`, `1:1`. Ignored if `--width` and `--height` are both set |
+| `--aspect-ratio <ratio>` | string | e.g. `16:9`, `1:1` |
 | `--n <count>` | number | Number of images (default: 1) |
-| `--seed <n>` | number | Random seed for reproducible generation |
-| `--width <px>` | number | Width in pixels (512–2048, multiple of 8). Requires `--height` |
-| `--height <px>` | number | Height in pixels (512–2048, multiple of 8). Requires `--width` |
-| `--prompt-optimizer` | boolean | Optimize prompt before generation |
-| `--aigc-watermark` | boolean | Embed AI-generated content watermark |
 | `--subject-ref <params>` | string | Subject reference: `type=character,image=path-or-url` |
-| `--response-format <format>` | string | `url` (default) or `base64`. Base64 bypasses CDN download |
 | `--out-dir <dir>` | string | Download images to directory |
 | `--out-prefix <prefix>` | string | Filename prefix (default: `image`) |
 
@@ -184,7 +175,7 @@ mmx speech synthesize --text <text> [flags]
 | `--bitrate <bps>` | number | Bitrate (default: 128000) |
 | `--channels <n>` | number | Audio channels (default: 1) |
 | `--language <code>` | string | Language boost |
-| `--subtitles` | boolean | Download and save subtitles as `.srt` file (alongside `--out` audio file). API must support subtitles for the selected model.
+| `--subtitles` | boolean | Include subtitle timing data |
 | `--pronunciation <from/to>` | string, repeatable | Custom pronunciation |
 | `--sound-effect <effect>` | string | Add sound effect |
 | `--out <path>` | string | Save audio to file |
@@ -194,9 +185,6 @@ mmx speech synthesize --text <text> [flags]
 mmx speech synthesize --text "Hello world" --out hello.mp3 --quiet
 # stdout: hello.mp3
 
-mmx speech synthesize --text "Hello" --subtitles --out hello.mp3
-# saves hello.mp3 + hello.srt (SRT subtitle file)
-
 echo "Breaking news." | mmx speech synthesize --text-file - --out news.mp3
 ```
 
@@ -204,9 +192,7 @@ echo "Breaking news." | mmx speech synthesize --text-file - --out news.mp3
 
 ### music generate
 
-Generate music. Responds well to rich, structured descriptions.
-
-**Model:** `music-2.6-free` — unlimited for API key users, RPM = 3.
+Generate music. Model: `music-2.5`. Responds well to rich, structured descriptions.
 
 ```bash
 mmx music generate --prompt <text> [--lyrics <text>] [flags]
@@ -215,10 +201,8 @@ mmx music generate --prompt <text> [--lyrics <text>] [flags]
 | Flag | Type | Description |
 |---|---|---|
 | `--prompt <text>` | string | Music style description (can be detailed) |
-| `--lyrics <text>` | string | Song lyrics with structure tags. Required unless `--instrumental` or `--lyrics-optimizer` is used. |
+| `--lyrics <text>` | string | Song lyrics with structure tags. Use `"\u65e0\u6b4c\u8bcd"` for instrumental. Cannot be used with `--instrumental` |
 | `--lyrics-file <path>` | string | Read lyrics from file. Use `-` for stdin |
-| `--lyrics-optimizer` | boolean | Auto-generate lyrics from prompt. Cannot be used with `--lyrics` or `--instrumental`. |
-| `--instrumental` | boolean | Generate instrumental music (no vocals). Cannot be used with `--lyrics`. |
 | `--vocals <text>` | string | Vocal style, e.g. `"warm male baritone"`, `"bright female soprano"`, `"duet with harmonies"` |
 | `--genre <text>` | string | Music genre, e.g. folk, pop, jazz |
 | `--mood <text>` | string | Mood or emotion, e.g. warm, melancholic, uplifting |
@@ -231,6 +215,7 @@ mmx music generate --prompt <text> [--lyrics <text>] [flags]
 | `--structure <text>` | string | Song structure, e.g. `"verse-chorus-verse-bridge-chorus"` |
 | `--references <text>` | string | Reference tracks or artists, e.g. `"similar to Ed Sheeran"` |
 | `--extra <text>` | string | Additional fine-grained requirements |
+| `--instrumental` | boolean | Generate instrumental music (no vocals). Cannot be used with `--lyrics` or `--lyrics-file` |
 | `--aigc-watermark` | boolean | Embed AI-generated content watermark |
 | `--format <fmt>` | string | Audio format (default: `mp3`) |
 | `--sample-rate <hz>` | number | Sample rate (default: 44100) |
@@ -241,14 +226,8 @@ mmx music generate --prompt <text> [--lyrics <text>] [flags]
 At least one of `--prompt` or `--lyrics` is required.
 
 ```bash
-# With lyrics
+# Simple usage
 mmx music generate --prompt "Upbeat pop" --lyrics "La la la..." --out song.mp3 --quiet
-
-# Auto-generate lyrics from prompt
-mmx music generate --prompt "Upbeat pop about summer" --lyrics-optimizer --out summer.mp3 --quiet
-
-# Instrumental
-mmx music generate --prompt "Cinematic orchestral, building tension" --instrumental --out bgm.mp3 --quiet
 
 # Detailed prompt with vocal characteristics
 mmx music generate --prompt "Warm morning folk" \
@@ -257,46 +236,9 @@ mmx music generate --prompt "Warm morning folk" \
   --bpm 95 \
   --lyrics-file song.txt \
   --out duet.mp3
-```
 
----
-
-### music cover
-
-Generate a cover version of a song based on reference audio.
-
-**Model:** `music-cover-free` — unlimited for API key users, RPM = 3.
-
-```bash
-mmx music cover --prompt <text> (--audio <url> | --audio-file <path>) [flags]
-```
-
-| Flag | Type | Description |
-|---|---|---|
-| `--prompt <text>` | string, **required** | Target cover style, e.g. `"Indie folk, acoustic guitar, warm male vocal"` |
-| `--audio <url>` | string | URL of reference audio (mp3, wav, flac, etc. — 6s to 6min, max 50MB) |
-| `--audio-file <path>` | string | Local reference audio file (auto base64-encoded) |
-| `--lyrics <text>` | string | Cover lyrics. If omitted, extracted from reference audio via ASR. |
-| `--lyrics-file <path>` | string | Read lyrics from file. Use `-` for stdin |
-| `--seed <number>` | number | Random seed 0–1000000 for reproducible results |
-| `--format <fmt>` | string | Audio format: `mp3`, `wav`, `pcm` (default: `mp3`) |
-| `--sample-rate <hz>` | number | Sample rate (default: 44100) |
-| `--bitrate <bps>` | number | Bitrate (default: 256000) |
-| `--channel <n>` | number | Channels: `1` (mono) or `2` (stereo, default) |
-| `--out <path>` | string | Save audio to file |
-| `--stream` | boolean | Stream raw audio to stdout |
-
-```bash
-# Cover from URL
-mmx music cover --prompt "Indie folk, acoustic guitar, warm male vocal" \
-  --audio https://filecdn.minimax.chat/public/d20eda57-2e36-45bf-9e12-82d9f2e69a86.mp3 --out cover.mp3 --quiet
-
-# Cover from local file with custom lyrics
-mmx music cover --prompt "Jazz, piano, slow" \
-  --audio-file original.mp3 --lyrics-file lyrics.txt --out jazz_cover.mp3 --quiet
-
-# Reproducible result with seed
-mmx music cover --prompt "Pop, upbeat" --audio https://filecdn.minimax.chat/public/d20eda57-2e36-45bf-9e12-82d9f2e69a86.mp3 --seed 42 --out cover.mp3
+# Instrumental (use --instrumental flag)
+mmx music generate --prompt "Cinematic orchestral, building tension" --instrumental --out bgm.mp3
 ```
 
 ---
@@ -415,26 +357,3 @@ mmx config show
 export MINIMAX_API_KEY=sk-xxxxx
 export MINIMAX_REGION=cn
 ```
-
-### Default Model Configuration
-
-Set per-modality defaults so you don't need `--model` every time:
-
-```bash
-# Set defaults
-mmx config set --key default-text-model --value MiniMax-M2.7-highspeed
-mmx config set --key default-speech-model --value speech-2.8-hd
-mmx config set --key default-video-model --value MiniMax-Hailuo-2.3
-mmx config set --key default-music-model --value music-2.6
-
-# Use without --model
-mmx text chat --message "Hello"
-mmx speech synthesize --text "Hello" --out hello.mp3
-mmx video generate --prompt "Ocean waves"
-mmx music generate --prompt "Upbeat pop" --instrumental
-
-# --model still overrides per-call
-mmx text chat --model MiniMax-M2.7 --message "Hello"
-```
-
-**Resolution priority**: `--model` flag > config default > hardcoded fallback.

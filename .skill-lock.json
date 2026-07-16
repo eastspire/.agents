@@ -25,13 +25,14 @@
       "updatedAt": "2026-04-21T23:51:38.184Z"
     },
     "mmx-cli": {
-      "source": "MiniMax-AI/cli",
+      "source": "MiniMax-AI/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/cli.git",
-      "skillPath": "skills/mmx-cli/SKILL.md",
-      "skillFolderHash": "dc9128e7a79e896a31fe3e5a1acb0f0434879a5a",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/minimax-multimodal-toolkit/SKILL.md",
+      "skillFolderHash": "9f62508c08bf4042b95b1b7df444ed5d3080be5e",
       "installedAt": "2026-07-07T23:38:09.226Z",
-      "updatedAt": "2026-07-13T00:25:01.446723Z"
+      "updatedAt": "2026-07-16T04:09:21.778Z"
     },
     "next-best-practices": {
       "source": "vercel-labs/next-skills",
@@ -360,6 +361,166 @@
       "skillPath": "skills/udp-request/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
       "updatedAt": "2026-07-10T13:50:00.000Z"
+    },
+    "android-native-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/android-native-dev/SKILL.md",
+      "skillFolderHash": "cdaadb554c6d5e7d65f35f5052e81c3d839ebdd2",
+      "installedAt": "2026-07-16T04:07:49.142Z",
+      "updatedAt": "2026-07-16T04:07:49.142Z"
+    },
+    "buddy-sings": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/buddy-sings/SKILL.md",
+      "skillFolderHash": "55105bec2e93efb912d3c49e22e75c5132a76495",
+      "installedAt": "2026-07-16T04:07:58.236Z",
+      "updatedAt": "2026-07-16T04:07:58.236Z"
+    },
+    "flutter-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/flutter-dev/SKILL.md",
+      "skillFolderHash": "9cc8974128a133883a8c8623dcecdb5948f7c3fe",
+      "installedAt": "2026-07-16T04:08:08.431Z",
+      "updatedAt": "2026-07-16T04:08:08.431Z"
+    },
+    "frontend-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/frontend-dev/SKILL.md",
+      "skillFolderHash": "1e9470090ef6dabe6cbf664c5760317c33e8f7d4",
+      "installedAt": "2026-07-16T04:08:22.666Z",
+      "updatedAt": "2026-07-16T04:08:22.666Z"
+    },
+    "fullstack-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/fullstack-dev/SKILL.md",
+      "skillFolderHash": "3e9efa276da42981df8fe3128ed04919ae7f0929",
+      "installedAt": "2026-07-16T04:08:35.844Z",
+      "updatedAt": "2026-07-16T04:08:35.844Z"
+    },
+    "gif-sticker-maker": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/gif-sticker-maker/SKILL.md",
+      "skillFolderHash": "652eb1b7c1144006bc9d61df005ebe85134255d4",
+      "installedAt": "2026-07-16T04:08:46.732Z",
+      "updatedAt": "2026-07-16T04:08:46.732Z"
+    },
+    "ios-application-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/ios-application-dev/SKILL.md",
+      "skillFolderHash": "65b3d8ef19960ab7555f19401a3bf6ce6b5ba6a2",
+      "installedAt": "2026-07-16T04:08:58.298Z",
+      "updatedAt": "2026-07-16T04:08:58.298Z"
+    },
+    "minimax-docx": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/minimax-docx/SKILL.md",
+      "skillFolderHash": "e55cc73859c0fd9bcd6507f062eedca0f470a7ed",
+      "installedAt": "2026-07-16T04:09:09.743Z",
+      "updatedAt": "2026-07-16T04:09:09.743Z"
+    },
+    "minimax-music-gen": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/minimax-music-gen/SKILL.md",
+      "skillFolderHash": "b82ce1f1a3fd1f4357a44d0c9e9e96ab3eaf6c89",
+      "installedAt": "2026-07-16T04:09:34.147Z",
+      "updatedAt": "2026-07-16T04:09:34.147Z"
+    },
+    "minimax-music-playlist": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/minimax-music-playlist/SKILL.md",
+      "skillFolderHash": "7f522159d8b56724891618e2b65da8c59ecb2153",
+      "installedAt": "2026-07-16T04:09:45.747Z",
+      "updatedAt": "2026-07-16T04:09:45.747Z"
+    },
+    "minimax-pdf": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/minimax-pdf/SKILL.md",
+      "skillFolderHash": "ce691d0e4e34b7f1d73bd3c3560b658df0dbdb3a",
+      "installedAt": "2026-07-16T04:09:56.639Z",
+      "updatedAt": "2026-07-16T04:09:56.639Z"
+    },
+    "minimax-xlsx": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/minimax-xlsx/SKILL.md",
+      "skillFolderHash": "5df30fd8f8669f34850767e1d99ba93c97d6ffc7",
+      "installedAt": "2026-07-16T04:10:08.091Z",
+      "updatedAt": "2026-07-16T04:10:08.091Z"
+    },
+    "pptx-generator": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/pptx-generator/SKILL.md",
+      "skillFolderHash": "871f9dcc96fb46f1ee7883b8fed87140b430a2ae",
+      "installedAt": "2026-07-16T04:10:23.268Z",
+      "updatedAt": "2026-07-16T04:10:23.268Z"
+    },
+    "react-native-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/react-native-dev/SKILL.md",
+      "skillFolderHash": "6e850847f1fe5beff15b9e37322af6d2e1b49fb0",
+      "installedAt": "2026-07-16T04:10:43.858Z",
+      "updatedAt": "2026-07-16T04:10:43.858Z"
+    },
+    "shader-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/shader-dev/SKILL.md",
+      "skillFolderHash": "593609dbd12329296dc29e825db767709f3cdd61",
+      "installedAt": "2026-07-16T04:11:05.878Z",
+      "updatedAt": "2026-07-16T04:11:05.878Z"
+    },
+    "vision-analysis": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main",
+      "skillPath": "skills/vision-analysis/SKILL.md",
+      "skillFolderHash": "a10bbd273581314befacb7c2ce95b8bc904074d9",
+      "installedAt": "2026-07-16T04:11:21.274Z",
+      "updatedAt": "2026-07-16T04:11:21.274Z"
     }
   },
   "dismissed": {
