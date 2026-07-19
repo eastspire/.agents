@@ -1,6 +1,7 @@
 ---
 name: euv-ui-standards
-description: euv example/example 项目 UI 设计系统全量规范。涵盖 306 个 class! 的全局 class 名表（按前缀分类）、design tokens（colors / spacing / font-size / radius / shadow / animation / transition / safe-area）、核心组件 HTML 结构（euv_button / euv_card / euv_badge / euv_tag / euv_alert / euv_input / euv_checkbox / euv_nav_item / euv_card / euv_home）、页面骨架（app 壳、page_container、page_title、page_subtitle）、断点（@media (max-width: 767px)）、响应式规则、class 编写约定（不在 page 内写 class! 块）。触发词：euv UI、euv 样式、euv design token、c_page_container、c_home_、c_euv_button、c_card、c_badge、c_euv_tag、c_euv_input、c_modal_content、c_nav_item_active、c_app_root、c_app_nav、c_app_main、euv-ui-standards。
+description: >
+  euv example/example 项目 UI 设计系统全量规范。涵盖 304 个 class! 的全局 class 名表（按前缀分类）、design tokens（colors / spacing / font-size / radius / shadow / animation / transition / safe-area）、核心组件 HTML 结构（euv_button / euv_card / euv_badge / euv_tag / euv_alert / euv_input / euv_checkbox / euv_nav_item / euv_card / euv_home）、页面骨架（app 壳、page_container、page_title、page_subtitle）、断点（@media (max-width: 767px)）、响应式规则、class 编写约定（不在 page 内写 class! 块）。触发词：euv UI、euv 样式、euv design token、c_page_container、c_home_、c_euv_button、c_card、c_badge、c_euv_tag、c_euv_input、c_modal_content、c_nav_item_active、c_app_root、c_app_nav、c_app_main、euv-ui-standards。
 ---
 
 # euv example 项目 UI 设计规范（全量）
@@ -9,7 +10,7 @@ description: euv example/example 项目 UI 设计系统全量规范。涵盖 306
 
 ## 0. 规范来源（事实依据）
 
-- 全局 class! 注册表：`ui/src/style/class/fn.rs`（306 个 class，单文件统一维护）
+- 全局 class! 注册表：`ui/src/style/class/fn.rs`（304 个 class，单文件统一维护）
 - 全局 vars! token：`ui/src/style/var/fn.rs`（light + dark 主题）
 - 全局 CSS reset & keyframes：`ui/src/style/css/fn.rs`（由 `inject_app_global_css()` 注入）
 - 组件 view HTML：`ui/src/component/<name>/view/fn.rs`

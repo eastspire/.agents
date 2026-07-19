@@ -243,6 +243,10 @@ mmx music generate --prompt "Cinematic orchestral, building tension" --instrumen
 
 ---
 
+### Batch image generation (N>1 ordered images)
+
+See `references/batch-image-generation.md` for the verified workflow: prompt authoring in a Python dict, concurrent MCP calls in batches of 5, Python urllib batch download (NOT bash curl — OSS signature URLs have shell-escape pitfalls), the persistent `dl_full.py` + `append_dl.py` script pair (see `scripts/dl_full_template.py` and `scripts/append_dl.py`), the agent-iteration-cap recovery procedure, and the 3-step verification (file count + size threshold + visual spot-check via `vision_analyze` on local path). Validated N=100 on 2026-07-19.
+
 ### vision describe
 
 Image understanding via VLM. Provide either `--image` or `--file-id`, not both.

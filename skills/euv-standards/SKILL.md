@@ -39,11 +39,11 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub fn main() {
     console_error_panic_hook::set_once();
-    mount("#app", app);
+    App::mount("#app", app);
 }
 
 fn app() -> VirtualNode {
-    let count: Signal<i32> = use_signal(|| 0);
+    let count: Signal<i32> = App::use_signal(|| 0);
     html! {
         div {
             h1 { "Hello, euv!" }
@@ -147,20 +147,20 @@ html! { div { data_role: "container" aria_label: "Demo" "Content" } }
 // 响应式 if——条件用 {} 包裹，信号变化时自动重新求值
 let show: Signal<bool> = App::use_signal(|| true);
 html! {
-    if { show.get() } { div { "Visible" } } else { "" }
+    if { show } { div { "Visible" } } else { "" }
 }
 // 响应式 if 的 else 分支不能省略
 
 // 内联 if——条件直接写，在父级渲染时一次性求值，适合 for 循环内
 html! {
-    ul { for item in items.get() {
+    ul { for item in items {
         if item.len() > 5 { li { "Long" } } else { li { "Short" } }
     } }
 }
 
 // 响应式 match
 html! {
-    match { route.get().as_str() } {
+    match { route } {
         "/" => { page_home() }
         _ => { page_not_found() }
     }
@@ -168,8 +168,10 @@ html! {
 // match 必须包含 _ 通配分支
 
 // 属性值条件渲染
-html! { div { class: if { is_active.get() } { c_active() } else { c_inactive() } } }
+html! { div { class: if { is_active } { c_active() } else { c_inactive() } } }
 ```
+
+`{}` 包裹的 Signal 会通过 `Signal::auto_value()` 自动 `.get()`，无需手动调用（详见 3.7 自动 .get()）。
 
 ### 3.3 列表渲染
 
@@ -177,40 +179,82 @@ html! { div { class: if { is_active.get() } { c_active() } else { c_inactive() }
 // for 本身不是响应式结构，是一个普通 Rust for 循环，在父级渲染时运行
 // 迭代表达式支持两种写法（功能完全等价）：
 // 带花括号 {expr}：花括号作为表达式边界
-for item in { items.get() } { li { item } }
+for item in { items } { li { item } }
 // 不带花括号 expr：宏直接解析，以循环体 { 为边界
-for item in items.get() { li { item } }
+for item in items { li { item } }
 for index in 0..100 { li { format!("Item {}", index + 1) } }
 
 // 带索引
-for (index, item) in items.get().iter().enumerate() { li { span { index } span { item } } }
+for (index, item) in items.iter().enumerate() { li { span { index } span { item } } }
 
 // 带 key 的列表渲染（启用 Keyed Diffing）
-html! { ul { for item in { items.get() } { li { key: item.id item.name } } } }
+html! { ul { for item in { items } { li { key: item.id item.name } } } }
 ```
 
 ### 3.4 嵌入表达式
 
 ```rust
 // 动态表达式 {expr}——自动包装为动态节点，响应式
-html! { div { {format!("Count: {}", count.get())} } }
+html! { div { {format!("Count: {}", count)} } }
 
-// 静态表达式（裸标识符）——一次性转换，非响应式
+// 静态表达式（裸标识符）——对于 Signal<T> 类型，自动创建响应式文本节点
 html! { div { count } }
 ```
 
-### 3.5 字符串字面量标签
+### 3.5 自动 .get()（Signal 解包）
+
+在以下位置，`html!` 宏会自动对 Signal 调用 `.get()`，无需手动写 `.get()`：
+
+| 位置                          | 示例                              |
+| ----------------------------- | --------------------------------- |
+| `if { ... }` 条件             | `if { show } { ... }`             |
+| `match { ... }` 条件表达式     | `match { tab } { ... }`           |
+| `for x in { ... }` 迭代表达式  | `for x in { items } { ... }`      |
+| `class: if { ... }` 属性条件  | `class: if { active } { ... }`    |
+| `class: match { ... }` 属性   | `class: match { tab } { ... }`    |
+| `{ expr }` DOM 动态子节点      | `div { {name} }`                  |
+
+**实现原理**：`Signal<T>` 提供固有方法 `auto_value(self) -> T`，等价于 `self.get()`。`{}` 内的表达式会被宏自动加上 `.auto_value()`：
+- Signal 类型 → 固有方法触发，返回内部 `T`（带依赖追踪）
+- 非 Signal 类型 → 由 `AutoValue` blanket impl 处理，原值返回
+
+```rust
+// 等价写法（宏会自动展开）
+if { show_details } { ... }
+// 展开为：
+if { show_details.auto_value() } { ... }
+```
+
+**比较运算符自动解包**：Signal 与其内部类型比较时也自动 `.get()`：
+
+```rust
+// 不需要写 tab.get() == ConditionalTab::Info
+if { tab == ConditionalTab::Info } { ... }
+```
+
+由 `impl<T: PartialEq> PartialEq<T> for Signal<T>` 提供支持。
+
+**链式调用** 仍需显式 `.auto_value()`：
+
+```rust
+// state.get_add_error() 返回 Signal<String>，.is_empty() 需要先解包
+if { state.get_add_error().auto_value().is_empty() } { ... }
+```
+
+**裸信号在 DOM** 中保持响应式文本节点（由 `From<Signal<T>> for VirtualNode` 提供，限于 `Display` 类型）。如需纯静态值，使用 `{ signal }`。
+
+### 3.6 字符串字面量标签
 
 ```rust
 // 用于 Web Components，始终为 Tag::Element
 html! { "my-custom-element" { class: c_container() "Content" } }
 ```
 
-### 3.6 动态标签
+### 3.7 动态标签
 
 ```rust
 let tag_name: Signal<String> = App::use_signal(|| "div".to_string());
-html! { { tag_name.get() } { "Dynamic tag content" } }
+html! { { tag_name } { "Dynamic tag content" } }
 ```
 
 ## 4. class! 宏

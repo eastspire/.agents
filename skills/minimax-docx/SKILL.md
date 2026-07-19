@@ -42,6 +42,66 @@ Create, edit, and format DOCX documents via CLI tools or direct C# scripts built
 
 **First operation in session:** `scripts/env_check.sh` — do not proceed if `NOT READY`. (Skip on subsequent operations within the same session.)
 
+### ⚠️ Windows git-bash setup pitfalls (verified 2026-07-19)
+
+`scripts/setup.sh` detects `MINGW*` and **refuses to install .NET SDK automatically** — it falls through the `none` branch which only succeeds on Linux/macOS (Windows line: `fail "On Windows, install .NET SDK from: https://dotnet.microsoft.com/download"; return 1`). On Windows git-bash you must install the SDK yourself before `setup.sh` can finish.
+
+**Working recipe (use Microsoft official `dotnet-install.ps1`, install to `~/.dotnet`, then run setup.sh):**
+
+```bash
+# 1. Download official install script (URL is HTTP 301-redirected — curl follows automatically)
+curl -sSL "https://dot.net/v1/dotnet-install.ps1" -o /tmp/dotnet-install.ps1
+
+# 2. Install .NET 8 SDK into %USERPROFILE%\.dotnet (does not require admin)
+#    IMPORTANT: invoke via pwsh (PowerShell 7), NOT system32\powershell.exe, on git-bash.
+#    System32 PowerShell 5 under MSYS silently fails (output goes nowhere, no error).
+pwsh -NoProfile -ExecutionPolicy Bypass -File /tmp/dotnet-install.ps1 \
+     -Channel 8.0 -InstallDir "$HOME/.dotnet"
+
+# 3. Persist to user PATH so future git-bash sessions see it (does not affect current session)
+powershell -NoProfile -Command \
+  '[Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\Users\<you>\.dotnet", "User")'
+
+# 4. Set PATH for current shell + run setup.sh (which will skip optional deps on its own)
+export PATH="/c/Users/<you>/.dotnet:$PATH"
+bash scripts/setup.sh
+```
+
+After setup, `env_check.sh` should report `Status: READY`.
+
+### ⚠️ `MiniMaxAIDocx.slnx` requires .NET 9 SDK (verified 2026-07-19)
+
+The bundled `scripts/dotnet/MiniMaxAIDocx.slnx` uses the new slnx v2 format (`<Solution>...</Solution>`) which MSBuild only recognizes starting in **.NET 9 SDK**. `setup.sh` installs .NET 8 (`--channel 8.0`) so a naive `dotnet restore MiniMaxAIDocx.slnx` fails with:
+
+```
+error MSB4068: 无法识别元素 <Solution>，或者在此上下文中不支持该元素。
+```
+
+**Workaround that doesn't require upgrading the SDK** — restore each project directly, bypassing the solution file:
+
+```bash
+export PATH="/c/Users/<you>/.dotnet:$PATH"
+cd scripts/dotnet/MiniMaxAIDocx.Core && dotnet restore && dotnet build --no-restore
+cd ../MiniMaxAIDocx.Cli && dotnet restore && dotnet build --no-restore
+```
+
+`dotnet run --project MiniMaxAIDocx.Cli -- <command>` still works after this — the slnx file is only used by `dotnet build`/`restore` at the solution level, not by `--project` invocations.
+
+If you want `dotnet build` at the slnx level to work, install .NET 9 SDK alongside 8.0 (the install script's `-Channel 9.0` flag does side-by-side install).
+
+### Verifying after install
+
+Smoke test that the CLI actually generates a docx (catches PATH/SDK/runtime mismatches that env_check can miss):
+
+```bash
+dotnet run --project scripts/dotnet/MiniMaxAIDocx.Cli -- create \
+  --type report --output /tmp/setup-smoke-test.docx --title "Setup Verify"
+ls -la /tmp/setup-smoke-test.docx   # expect ~2 KB file
+rm /tmp/setup-smoke-test.docx
+```
+
+See `references/windows-setup.md` for the full transcript including `dotnet --list-sdks` output, expected warning counts (Core: 24 nullable warnings / 0 errors, CLI: 0/0), the dual-copy trap (`AppData/Local/hermes/skills/minimax-docx/` and `~/.agents/skills/minimax-docx/` are two identical copies; either works for build but pick one to maintain), and a suggested upstream patch to `scripts/setup.sh`.
+
 ## Quick Start: Direct C# Path
 
 When the task requires structural document manipulation (custom styles, complex tables, multi-section layouts, headers/footers, TOC, images), write C# directly instead of wrestling with CLI limitations. Use this scaffold:
@@ -272,3 +332,4 @@ Note: `Samples/` path is relative to `scripts/dotnet/MiniMaxAIDocx.Core/`.
 | `references/design_good_bad_examples.md` | **Good vs Bad comparisons**: 10 categories of typography mistakes with OpenXML values, ASCII mockups, and fixes |
 | `references/track_changes_guide.md` | Revision marks deep dive |
 | `references/troubleshooting.md` | **Symptom-driven fixes**: 13 common problems indexed by what you SEE (headings wrong, images missing, TOC broken, etc.) — search by symptom, find the fix |
+| `references/windows-setup.md` | **Windows git-bash setup recipe**: verified end-to-end transcript for installing .NET 8 SDK via official `dotnet-install.ps1`, the slnx v2 / .NET 8 MSBuild incompatibility, dual-copy trap, and a suggested upstream patch to `scripts/setup.sh`. Load when `setup.sh` reports `NOT READY` on Windows or `dotnet restore MiniMaxAIDocx.slnx` fails with `MSB4068`. |

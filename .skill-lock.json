@@ -13,7 +13,7 @@
       "sourceType": "local",
       "skillPath": "skills/euv-standards/SKILL.md",
       "installedAt": "2026-07-05T00:00:00.000Z",
-      "updatedAt": "2026-07-05T00:00:00.000Z"
+      "updatedAt": "2026-07-19T15:22:17.186603Z"
     },
     "find-skills": {
       "source": "vercel-labs/skills",
@@ -129,21 +129,21 @@
       "sourceType": "local",
       "skillPath": "skills/euv/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-07-19T15:05:29.182243Z"
     },
     "euv-app": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/euv-app/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-07-19T15:22:17.186603Z"
     },
     "euv-ui-standards": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/euv-ui-standards/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-07-19T15:22:17.186603Z"
     },
     "file-operation": {
       "source": "local",
@@ -206,7 +206,7 @@
       "sourceType": "local",
       "skillPath": "skills/hyperlane/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-07-19T15:05:29.182243Z"
     },
     "hyperlane-ai": {
       "source": "local",
@@ -220,7 +220,7 @@
       "sourceType": "local",
       "skillPath": "skills/hyperlane-broadcast/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-07-19T15:22:17.186603Z"
     },
     "hyperlane-cli": {
       "source": "local",
@@ -248,14 +248,14 @@
       "sourceType": "local",
       "skillPath": "skills/hyperlane-plugin-websocket/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-07-19T15:22:17.186603Z"
     },
     "hyperlane-quick-start": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/hyperlane-quick-start/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-07-19T15:22:17.186603Z"
     },
     "hyperlane-time": {
       "source": "local",
