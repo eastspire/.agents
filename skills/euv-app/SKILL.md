@@ -1,6 +1,6 @@
 ---
 name: euv-app
-description: "Tauri 2.x Android packaging for the euv framework. Bundles the euv web frontend as a standalone Android APK (productName `Euv`, identifier `com.euv`). Uses tauri-plugin-log + tauri-plugin-opener + reqwest, exposes a Rust bridge (`src-tauri/src/bridge/`) for the web view, and ships a `bundled-cache` + `sdk` for offline use. Triggers: euv-app, euv APK, Euv Tauri Android, src-tauri, com.euv, tauri-plugin-opener, tauri-plugin-log, euv_app apk."
+description: 'Tauri 2.x Android packaging for the euv framework. Bundles the euv web frontend as a standalone Android APK (productName `Euv`, identifier `com.euv`). Uses tauri-plugin-log + tauri-plugin-opener + reqwest, exposes a Rust bridge (`src-tauri/src/bridge/`) for the web view, and ships a `bundled-cache` + `sdk` for offline use. Triggers: euv-app, euv APK, Euv Tauri Android, src-tauri, com.euv, tauri-plugin-opener, tauri-plugin-log, euv_app apk.'
 license: MIT
 ---
 
@@ -49,7 +49,6 @@ euv-app/
 ## 项目元信息
 
 - crate 名 (in `src-tauri/Cargo.toml`): `euv-app` (lib name `euv_lib`)
-- 版本: `0.1.0`
 - Rust edition: `2024`
 - License: (inherits parent — none declared explicitly; check upstream)
 - 类型: Tauri 2.x Android app (`cdylib + rlib`, no published crate)

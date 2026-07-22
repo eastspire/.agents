@@ -1,6 +1,6 @@
 ---
 name: euv
-description: "A declarative, cross-platform UI framework for Rust with virtual DOM, reactive signals, and HTML macros for WebAssembly. Use when building browser-based UIs in pure Rust, writing web frontends that compile to WebAssembly, or working with the `html!` / `class!` / `#[component]` / `Signal<T>` APIs. Triggers: euv, html! macro, Signal<T>, App::mount, euv-ui, euv_engine, euv_component, virtual DOM, reactive signal, WebAssembly UI."
+description: 'A declarative, cross-platform UI framework for Rust with virtual DOM, reactive signals, and HTML macros for WebAssembly. Use when building browser-based UIs in pure Rust, writing web frontends that compile to WebAssembly, or working with the `html!` / `class!` / `#[component]` / `Signal<T>` APIs. Triggers: euv, html! macro, Signal<T>, App::mount, euv-ui, euv_engine, euv_component, virtual DOM, reactive signal, WebAssembly UI.'
 license: MIT
 ---
 
@@ -14,15 +14,15 @@ license: MIT
 
 euv is a workspace of six crates under one umbrella:
 
-| Crate | Path | Purpose |
-|---|---|---|
-| `euv` | `.` | Public facade. Re-exports `euv-core` + `euv-macros` and the wasm-bindgen/js-sys/web-sys bindings. |
-| `euv-core` | `core/` | `App` / `Signal<T>` / `HookContext` / `VirtualNode` / `AttributeValue` / `Css` runtime. |
-| `euv-macros` | `macros/` | Proc-macros: `html!` / `class!` / `#[component]` / `watch!` / `computed!` / `vars!` / `var!`. |
-| `euv-ui` | `ui/` | Pre-built UI components (`euv_button`, `euv_card`, `euv_header`, `euv_nav_item`, `euv_modal`, …) + global stylesheet + helpers (`use_browser_state`, `use_camera_state`, `local_storage_*`, `use_resize`, `use_theme_state`, …). |
-| `euv-engine` | `engine/` | 2D/3D game engine (Canvas + WebGPU renderers, ECS, scene graph, physics, input, sprites, audio, asset cache, scheduler). Zero-size `Engine` façade. |
-| `euv-cli` | `cli/` | CLI tool that wraps `wasm-pack`. |
-| `euv-example` | `example/` | Live demo of every feature as `example/src/page/<name>/`. |
+| Crate         | Path       | Purpose                                                                                                                                                                                                                          |
+| ------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `euv`         | `.`        | Public facade. Re-exports `euv-core` + `euv-macros` and the wasm-bindgen/js-sys/web-sys bindings.                                                                                                                                |
+| `euv-core`    | `core/`    | `App` / `Signal<T>` / `HookContext` / `VirtualNode` / `AttributeValue` / `Css` runtime.                                                                                                                                          |
+| `euv-macros`  | `macros/`  | Proc-macros: `html!` / `class!` / `#[component]` / `watch!` / `computed!` / `vars!` / `var!`.                                                                                                                                    |
+| `euv-ui`      | `ui/`      | Pre-built UI components (`euv_button`, `euv_card`, `euv_header`, `euv_nav_item`, `euv_modal`, …) + global stylesheet + helpers (`use_browser_state`, `use_camera_state`, `local_storage_*`, `use_resize`, `use_theme_state`, …). |
+| `euv-engine`  | `engine/`  | 2D/3D game engine (Canvas + WebGPU renderers, ECS, scene graph, physics, input, sprites, audio, asset cache, scheduler). Zero-size `Engine` façade.                                                                              |
+| `euv-cli`     | `cli/`     | CLI tool that wraps `wasm-pack`.                                                                                                                                                                                                 |
+| `euv-example` | `example/` | Live demo of every feature as `example/src/page/<name>/`.                                                                                                                                                                        |
 
 Top-level entry point at `src/lib.rs`:
 
@@ -55,7 +55,7 @@ euv-ui = { path = "euv/ui" }
 euv-engine = { path = "euv/engine" }
 ```
 
-`euv` is a `cdylib`/`rlib` only (`crate-type = ["rlib"]`) — there is no `main.rs`; you `#[wasm_bindgen] pub fn main()` yourself.
+`euv` is **rlib-only** (`crate-type = ["rlib"]`); the inner `euv-core`/`euv-macros` are proc-macro + rlib. There is no `main.rs`; you `#[wasm_bindgen] pub fn main()` yourself, and the framework binds it to `window.start` via `wasm-bindgen`.
 
 ## Quick start
 
@@ -115,17 +115,23 @@ wasm-pack build --target web --dev
 
 ### `App`
 
-Zero-size façade struct (`core/src/app/struct.rs`). All App entry points live in `core/src/app/impl.rs`:
+Zero-size façade struct (`core/src/app/struct.rs`). All App entry points live in `core/src/app/impl.rs`. Every `use_*` hook and `mount` carries an explicit bound:
 
 ```rust
 impl App {
-    pub fn mount<S, F>(selector: S, render_fn: F)
-    pub fn use_signal<T, F: FnOnce() -> T>(init: F) -> Signal<T>
-    pub fn use_cleanup<F: FnOnce()>(cleanup: F)
+    pub fn mount<S, F>(selector: S, render_fn: F)            // CSS-selector mount
+        where S: AsRef<str>, F: FnOnce() -> VirtualNode;
+    pub fn use_signal<T, F>(init: F) -> Signal<T>           // must be inside render fn
+        where T: Clone + PartialEq + 'static, F: FnOnce() -> T;
+    pub fn use_cleanup<F>(cleanup: F)                        // called on context teardown
+        where F: FnOnce() + 'static;
     pub fn use_interval<F>(millis: i32, callback: F) -> IntervalHandle
+        where F: FnMut() + 'static;
     pub fn use_window_event<E, F>(event_name: E, callback: F)
-    pub fn batch<F, R>(callback: F) -> R
-    pub fn schedule_update(dependents: &[usize])
+        where E: AsRef<str>, F: FnMut() + 'static;
+    pub fn batch<F, R>(callback: F) -> R                      // precise-dirty batching
+        where F: FnOnce() -> R;
+    pub fn schedule_update(dependents: &[usize])             // precise-dirty mark + dispatch
 }
 ```
 
@@ -133,23 +139,41 @@ impl App {
 
 ### `Signal<T>` — reactive primitive
 
-`core/src/reactive/signal/struct.rs` + `impl.rs`:
+`core/src/reactive/signal/struct.rs` + `impl.rs`. Both `App::use_signal` and every `Signal<T>` impl are gated on the same `T` bound:
 
 ```rust
-impl<T> Signal<T> {
-    pub fn create(value: T) -> Self
-    pub const fn none() -> Self
-    pub fn get(&self) -> T
-    pub fn set(&self, value: T)
-    pub fn subscribe<F>(&self, callback: F)
+impl<T> Signal<T>
+where
+    T: Clone + PartialEq + 'static,
+{
+    pub fn create(value: T) -> Self                          // direct, no HookContext
+    pub const fn none() -> Self                              // empty placeholder
+    pub fn get(&self) -> T                                   // auto-tracks current DynamicNode id
+    pub fn set(&self, value: T)                              // no-op when value == current
+    pub fn subscribe<F>(&self, callback: F)                  // appends a listener
+        where F: FnMut() + 'static;
+    pub(crate) fn replace_listener<F>(&self, callback: F)    // clear-and-set
+    pub(crate) fn deactivate(&self)                          // mark alive=false (for stale closures)
 }
-impl<T> Signal<Signal<T>> {
+
+impl<T> Signal<Signal<T>>
+where
+    T: Clone + PartialEq + 'static,
+{
     pub fn get(&self) -> Signal<T>
     pub fn set(&self, signal: Signal<T>)
+}
+
+impl<T> Default for Signal<T>
+where
+    T: Clone + PartialEq + 'static + Default,
+{
+    fn default() -> Self { Self::create(T::default()) }
 }
 ```
 
 Rules:
+
 - Read a signal inside an `html!` template body to subscribe that DOM node.
 - `signal.get()` returns `T` by value — for non-`Copy` types, clone before capture.
 - `signal.set(new_value)` schedules a re-render of every subscriber.
@@ -204,6 +228,7 @@ html! {
 ```
 
 Critical restrictions (encoded in `html/fn.rs` and `euv-html-macro-traps` skill):
+
 - `if {} else {}` (block-level `else` after `if {}`) is NOT supported. Use `if {} {} else if {} {} else {} {}` or two stacked `if {}` blocks.
 - Closures captured inside `for` bodies cannot outlive the closure, so complex per-row event handlers (edit/delete/pagination) need a refactor pattern (see `euv-html-macro-traps`).
 - Non-`Copy` values captured by the render closure need `.clone()` because the html! body is a `FnMut`.
@@ -235,14 +260,14 @@ Generated: a `c_my_button()` function returning a `Css` value (`core/src/vdom/at
 
 All proc-macros from `macros/src/lib.rs`:
 
-| Macro | Syntax | Behavior |
-|---|---|---|
-| `#[component]` | on `fn name(node: VirtualNode<Props>) -> VirtualNode` | Generates props struct + render dispatch |
-| `html! { ... }` | inline template | VirtualNode DSL |
-| `class! { ... }` | inline CSS block | Generates `c_*()` helpers |
-| `#[vars!]` / `#[var!]` | on `use X;` or let-binding | Thread-local variable binding for the render scope |
-| `#[watch!]` | statement form: `watch!(s1, s2, |s1v, s2v| { ... })` | Reactive side-effect when any signal changes |
-| `#[computed!]` | on `fn name(...) -> T` | Cached derived signal |
+| Macro                  | Syntax                                                | Behavior                                           |
+| ---------------------- | ----------------------------------------------------- | -------------------------------------------------- | --------- | -------------------------------------------- |
+| `#[component]`         | on `fn name(node: VirtualNode<Props>) -> VirtualNode` | Generates props struct + render dispatch           |
+| `html! { ... }`        | inline template                                       | VirtualNode DSL                                    |
+| `class! { ... }`       | inline CSS block                                      | Generates `c_*()` helpers                          |
+| `#[vars!]` / `#[var!]` | on `use X;` or let-binding                            | Thread-local variable binding for the render scope |
+| `#[watch!]`            | statement form: `watch!(s1, s2,                       | s1v, s2v                                           | { ... })` | Reactive side-effect when any signal changes |
+| `#[computed!]`         | on `fn name(...) -> T`                                | Cached derived signal                              |
 
 `watch!` real example from `example/src/page/binding/hook/fn.rs`:
 
@@ -263,26 +288,33 @@ watch!(
 
 Each component takes `VirtualNode<EuvXxxProps>` and returns `VirtualNode`. Common props:
 
-| Component | Props struct | Required fields | Notable enum |
-|---|---|---|---|
-| `euv_button` | `EuvButtonProps` | `label`, `variant` | `EuvButtonVariant::{Primary,Secondary,Success,Danger,Warning,Info}` |
-| `euv_card` | `EuvCardProps` | `title` | — |
-| `euv_header` | `EuvHeaderProps` | `icon`, `title`, `subtitle?` | — |
-| `euv_input` | `EuvInputProps` | `value: Signal<String>` | — |
-| `euv_checkbox` | `EuvCheckboxProps` | `checked: Signal<bool>` | — |
-| `euv_field` | `EuvFieldProps` | `label`, `value: Signal<String>` | — |
-| `euv_modal` | `EuvModalProps` | `visible: Signal<bool>`, `closer` | — |
-| `euv_nav_item` / `euv_mobile_nav_item` | `EuvNavItemProps` | `label`, `route`, `on_click` | — |
-| `euv_nav_items` | `EuvNavItemsProps` | `items: Vec<EuvNavItemConfig>` | — |
-| `euv_tag` | `EuvTagProps` | `label` | `EuvTagVariant`, `EuvTagColor` |
-| `euv_badge` | `EuvBadgeProps` | `label` | — |
-| `euv_alert` | `EuvAlertProps` | `message` | `AlertVariant` |
-| `euv_loading` | `EuvLoadingProps` | — | — |
-| `euv_logo` | `EuvLogoProps` | — | `LogoButtonVariant` |
-| `euv_info` | `EuvInfoProps` | — | — |
-| `euv_virtual_list` | `EuvVirtualListProps` | `config: EuvVirtualListConfig` | — |
-| `euv_routes` / `euv_page_router` | `EuvRoutesProps` | `routes: Vec<EuvRouteConfig>` | — |
-| `euv_vconsole_panel/fab/drawer` | `EuvVconsole*Props` | — | `LogLevel`, `LogFilter` |
+| Component                              | Props struct                                               | Required fields                   | Notable enum                                                        |
+| -------------------------------------- | ---------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------- |
+| `euv_button`                           | `EuvButtonProps`                                           | `label`, `variant`                | `EuvButtonVariant::{Primary,Secondary,Success,Danger,Warning,Info}` |
+| `euv_card`                             | `EuvCardProps`                                             | `title`                           | —                                                                   |
+| `euv_header`                           | `EuvHeaderProps`                                           | `icon`, `title`, `subtitle?`      | —                                                                   |
+| `euv_input`                            | `EuvInputProps`                                            | `value: Signal<String>`           | —                                                                   |
+| `euv_checkbox`                         | `EuvCheckboxProps`                                         | `checked: Signal<bool>`           | —                                                                   |
+| `euv_field`                            | `EuvFieldProps`                                            | `label`, `value: Signal<String>`  | —                                                                   |
+| `euv_modal`                            | `EuvModalProps`                                            | `visible: Signal<bool>`, `closer` | —                                                                   |
+| `euv_nav_item` / `euv_mobile_nav_item` | `EuvNavItemProps`                                          | `label`, `route`, `on_click`      | —                                                                   |
+| `euv_nav_items`                        | `EuvNavItemsProps`                                         | `items: Vec<EuvNavItemConfig>`    | —                                                                   |
+| `euv_tag`                              | `EuvTagProps`                                              | `label`                           | `EuvTagVariant`, `EuvTagColor`                                      |
+| `euv_badge`                            | `EuvBadgeProps`                                            | `label`                           | —                                                                   |
+| `euv_alert`                            | `EuvAlertProps`                                            | `message`                         | `AlertVariant`                                                      |
+| `euv_loading`                          | `EuvLoadingProps`                                          | —                                 | —                                                                   |
+| `euv_logo`                             | `EuvLogoProps`                                             | —                                 | `LogoButtonVariant`                                                 |
+| `euv_info`                             | `EuvInfoProps`                                             | —                                 | —                                                                   |
+| `euv_browser`                          | (browser-view wrapper around `<iframe>` + sandbox helpers) | —                                 | —                                                                   |
+| `euv_camera`                           | (camera/microphone permission + preview hooks)             | —                                 | —                                                                   |
+| `euv_layout`                           | (`euv_layout_*` grid shell components)                     | —                                 | —                                                                   |
+| `euv_theme`                            | (theme toggle + system-theme tracking)                     | —                                 | —                                                                   |
+| `euv_touch`                            | (touch / swipe gesture helpers)                            | —                                 | —                                                                   |
+| `euv_virtual_list`                     | `EuvVirtualListProps`                                      | `config: EuvVirtualListConfig`    | —                                                                   |
+| `euv_routes` / `euv_page_router`       | `EuvRoutesProps`                                           | `routes: Vec<EuvRouteConfig>`     | —                                                                   |
+| `euv_vconsole_panel/fab/drawer`        | `EuvVconsole*Props`                                        | —                                 | `LogLevel`, `LogFilter`                                             |
+
+Component files live under `ui/src/component/<name>/` (`view/fn.rs` for the `#[component]` fn, `struct.rs` for the Props struct, `enum.rs` for any *Variant / *Color enums, plus `impl.rs`, `type.rs`, `const.rs` etc. as needed). `ui/src/component/mod.rs` lists the 22 directories: `alert`, `badge`, `browser`, `button`, `camera`, `card`, `checkbox`, `field`, `header`, `info`, `input`, `layout`, `loading`, `logo`, `modal`, `nav`, `router`, `tag`, `theme`, `touch`, `vconsole`, `virtual_list`.
 
 Router API (`ui/src/component/router/view/impl.rs`):
 
@@ -352,6 +384,7 @@ RenderConfig::webgpu("#canvas", 1280.0, 720.0);
 ```
 
 Namespaces (`engine/src/<area>/<file>.rs`):
+
 - `math` — `Vector2D/3D`, `Quaternion`, `Matrix4x4`, `Rect`, `Circle`, `Color`, `AABB3D`, `Sphere`, `Plane`, `Ray3D`, `Transform2D/3D`, constants (`PI`, `TWO_PI`, `DEG_TO_RAD`, `EPSILON`), free fns (`clamp`, `lerp`, `distance`, `smoothstep`, `approach`, `sign`, `wrap`, `lerp_angle`, `from_angle`)
 - `entity` — `Entity`, `EventBus`, `Component` trait, types `ComponentRc` / `EntityRc` / `EventHandler`
 - `scene` — `SceneManager`, `Scene` trait, `SceneRc`, transitions (`request_transition`, `process_pending_transition`)
