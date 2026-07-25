@@ -258,7 +258,7 @@ class! {
     pub c_primary_button(color: &str) {
         c_base_button();
         background: color;
-        &:hover {
+        :hover {
             opacity: "0.9";
         }
         @media (max-width: 767px) {
