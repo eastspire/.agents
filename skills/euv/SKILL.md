@@ -1,6 +1,6 @@
 ---
 name: euv
-description: 'A declarative, cross-platform UI framework for Rust with virtual DOM, reactive signals, and HTML macros for WebAssembly. Use when building browser-based UIs in pure Rust, writing web frontends that compile to WebAssembly, or working with the `html!` / `class!` / `#[component]` / `Signal<T>` APIs. Triggers: euv, html! macro, Signal<T>, App::mount, euv-ui, euv_engine, euv_component, virtual DOM, reactive signal, WebAssembly UI.'
+description: 'A declarative, cross-platform UI framework for Rust with virtual DOM, reactive signals, and HTML/CSS macros for WebAssembly. Use when building browser UIs in pure Rust, compiling web frontends to WebAssembly, or working with `html!`, `class!`, `vars!`, `var!`, `watch!`, `computed!`, `#[component]`, `Signal<T>`, `App::mount`, `euv-ui`, or `euv-engine`. Triggers: euv, html! macro, class! macro, vars!, var!, watch!, computed!, Signal<T>, App::mount, euv-ui, euv-engine, euv_component, virtual DOM, reactive signal, WebAssembly UI, WebGPU game engine.'
 license: MIT
 ---
 
@@ -12,14 +12,14 @@ license: MIT
 
 ## Overview
 
-euv is a workspace of six crates under one umbrella:
+euv is a workspace of six member crates under one umbrella. The root package is version `0.12.27`, edition 2024, and is `rlib`-only; `euv-macros` is the separate proc-macro crate.
 
 | Crate         | Path       | Purpose                                                                                                                                                                                                                          |
 | ------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `euv`         | `.`        | Public facade. Re-exports `euv-core` + `euv-macros` and the wasm-bindgen/js-sys/web-sys bindings.                                                                                                                                |
 | `euv-core`    | `core/`    | `App` / `Signal<T>` / `HookContext` / `VirtualNode` / `AttributeValue` / `Css` runtime.                                                                                                                                          |
 | `euv-macros`  | `macros/`  | Proc-macros: `html!` / `class!` / `#[component]` / `watch!` / `computed!` / `vars!` / `var!`.                                                                                                                                    |
-| `euv-ui`      | `ui/`      | Pre-built UI components (`euv_button`, `euv_card`, `euv_header`, `euv_nav_item`, `euv_modal`, …) + global stylesheet + helpers (`use_browser_state`, `use_camera_state`, `local_storage_*`, `use_resize`, `use_theme_state`, …). |
+| `euv-ui`      | `ui/`      | Pre-built UI components (`euv_button`, `euv_card`, `euv_header`, `euv_nav_item`, `euv_modal`, …) + global stylesheet and browser/layout/router/theme/touch/vconsole/virtual-list helpers. |
 | `euv-engine`  | `engine/`  | 2D/3D game engine (Canvas + WebGPU renderers, ECS, scene graph, physics, input, sprites, audio, asset cache, scheduler). Zero-size `Engine` façade.                                                                              |
 | `euv-cli`     | `cli/`     | CLI tool that wraps `wasm-pack`.                                                                                                                                                                                                 |
 | `euv-example` | `example/` | Live demo of every feature as `example/src/page/<name>/`.                                                                                                                                                                        |
@@ -55,7 +55,7 @@ euv-ui = { path = "euv/ui" }
 euv-engine = { path = "euv/engine" }
 ```
 
-`euv` is **rlib-only** (`crate-type = ["rlib"]`); the inner `euv-core`/`euv-macros` are proc-macro + rlib. There is no `main.rs`; you `#[wasm_bindgen] pub fn main()` yourself, and the framework binds it to `window.start` via `wasm-bindgen`.
+`euv` is **rlib-only** (`crate-type = ["rlib"]`), and `euv-macros` is `proc-macro = true`; `euv-core`, `euv-ui`, and `euv-engine` are rlib crates. There is no framework-provided `main.rs`: the example exposes its own `#[wasm_bindgen] pub fn main()`, calls `console_error_panic_hook::set_once()`, `inject_app_global_css()`, then `App::mount("#app", app)`.
 
 ## Quick start
 
@@ -139,7 +139,7 @@ impl App {
 
 ### `Signal<T>` — reactive primitive
 
-`core/src/reactive/signal/struct.rs` + `impl.rs`. Both `App::use_signal` and every `Signal<T>` impl are gated on the same `T` bound:
+`core/src/reactive/signal/{struct,impl}.rs`. Both `App::use_signal` and every `Signal<T>` impl are gated on the same `T` bound. `Signal<T>` is `Copy`/`Clone` and owns a `usize` handle to heap state; `SignalCell<T>` is the separate single-threaded initialization wrapper:
 
 ```rust
 impl<T> Signal<T>
@@ -147,7 +147,6 @@ where
     T: Clone + PartialEq + 'static,
 {
     pub fn create(value: T) -> Self                          // direct, no HookContext
-    pub const fn none() -> Self                              // empty placeholder
     pub fn get(&self) -> T                                   // auto-tracks current DynamicNode id
     pub fn set(&self, value: T)                              // no-op when value == current
     pub fn subscribe<F>(&self, callback: F)                  // appends a listener
@@ -156,12 +155,19 @@ where
     pub(crate) fn deactivate(&self)                          // mark alive=false (for stale closures)
 }
 
-impl<T> Signal<Signal<T>>
+impl<T> SignalCell<T>
 where
     T: Clone + PartialEq + 'static,
 {
-    pub fn get(&self) -> Signal<T>
-    pub fn set(&self, signal: Signal<T>)
+    pub const fn none() -> Self
+    pub fn set(&self, signal: Signal<T>)                     // panics if already initialized
+    pub fn get(&self) -> Signal<T>                           // panics if uninitialized
+}
+
+impl FireHandle {
+    pub fn new<F>(fire: F) -> Self where F: FnMut() + 'static
+    pub unsafe fn fire(self)
+    pub unsafe fn fire_at(addr: usize)
 }
 
 impl<T> Default for Signal<T>
@@ -184,20 +190,25 @@ Rules:
 `core/src/vdom/node/enum.rs`:
 
 ```rust
+pub enum Tag { Element(String), Component(String) }
 pub enum VirtualNode<T = ()> {
-    Element { tag: Tag, attrs: Vec<AttributeEntry>, children: Vec<VirtualNode> },
-    Text(String),
+    Element {
+        tag: Tag,
+        attributes: Vec<AttributeEntry>,
+        children: Vec<VirtualNode>,
+        key: Option<String>,
+        props: Option<Box<T>>,
+    },
+    Text(TextNode),
     Fragment(Vec<VirtualNode>),
-    Empty,
-    Component { name: String, props: T, children: Vec<VirtualNode> },
     Dynamic(DynamicNode),
+    Empty,
 }
-pub enum Tag { Div, Span, P, A, Button, Input, Custom(&'static str), … }
 ```
 
 ### CSS class helpers
 
-`ui/src/style/class/fn.rs` exposes class helpers like `c_page_container()`, `c_counter_value()`, `c_button_controls()` etc. Call them inside `class: c_xxx()` attributes. To register your own styles use `core::inject_css(text)` (`core/src/vdom/attribute/impl.rs`) or `ui::inject_app_global_css()`.
+`ui/src/style/class/fn.rs` exposes class helpers like `c_page_container()`, `c_counter_value()`, `c_button_controls()` etc. Call them inside `class: c_xxx()` attributes. To register your own styles use `Css::inject_css(text)` (`core/src/vdom/attribute/impl.rs`) or `ui::inject_app_global_css()`.
 
 ## `html!` macro
 
@@ -240,34 +251,38 @@ Critical restrictions (encoded in `html/fn.rs` and `euv-html-macro-traps` skill)
 
 ```rust
 class! {
-    pub struct c_my_button {
-        display: flex,
-        padding: 12px 16px,
-        background: #28a745,
-        color: #fff,
-        border-radius: 4px,
+    pub c_base_button {
+        display: "flex";
+        padding: "12px 16px";
     }
-    pub extends c_my_button, c_my_disabled {
-        opacity: 0.5,
-        cursor: not-allowed,
+    pub c_primary_button(color: &str) {
+        c_base_button();
+        background: color;
+        &:hover {
+            opacity: "0.9";
+        }
+        @media (max-width: 767px) {
+            padding: "8px 12px";
+        }
     }
 }
 ```
 
-Generated: a `c_my_button()` function returning a `Css` value (`core/src/vdom/attribute/struct.rs`). The `extends` semantics is string concatenation (`parent.get_style().to_string() + STR_SPACE + self.props` in `macros/src/class/impl.rs:284`) — same property names resolve via CSS cascade (later wins).
+`class!` supports plain declarations, parameterized classes, inheritance via call-like entries such as `c_base_button()` or `c_base_button(arg)`, dynamic property keys (`{key}: value`), CSS pseudo selectors (`:hover`, `::before`, nested selectors), and CSS at-rules including `@media`, `@keyframes`, `@supports`, `@layer`, `@container`, `@property`, `@scope`, `@font-face`, and other parsed at-rule forms. It generates a function returning `Css`; `vars!` generates a `Css` block containing custom-property declarations, while `var!(name)` expands to the string `var(--name)`.
 
 ## Other macros (`euv-macros`)
 
 All proc-macros from `macros/src/lib.rs`:
 
 | Macro                  | Syntax                                                | Behavior                                           |
-| ---------------------- | ----------------------------------------------------- | -------------------------------------------------- | --------- | -------------------------------------------- |
-| `#[component]`         | on `fn name(node: VirtualNode<Props>) -> VirtualNode` | Generates props struct + render dispatch           |
-| `html! { ... }`        | inline template                                       | VirtualNode DSL                                    |
-| `class! { ... }`       | inline CSS block                                      | Generates `c_*()` helpers                          |
-| `#[vars!]` / `#[var!]` | on `use X;` or let-binding                            | Thread-local variable binding for the render scope |
-| `#[watch!]`            | statement form: `watch!(s1, s2,                       | s1v, s2v                                           | { ... })` | Reactive side-effect when any signal changes |
-| `#[computed!]`         | on `fn name(...) -> T`                                | Cached derived signal                              |
+| ---------------------- | ----------------------------------------------------- | -------------------------------------------------- |
+| `#[component]`         | on `fn name(node: VirtualNode<Props>) -> VirtualNode` | Marker attribute; `html!` discovers annotated component functions by scanning source and uses the generated props metadata |
+| `html! { ... }`        | inline template                                       | VirtualNode DSL; supports dynamic expressions, reactive `if`/`match`/`for`, event attributes, keys, and multiple roots |
+| `class! { ... }`       | inline CSS block                                      | Generates `Css` helpers, including selectors, nested selectors, dynamic keys, parameters, inheritance, and at-rules |
+| `vars! { ... }`        | CSS custom-property block                             | Generates a `Css` helper whose declarations are emitted as `--name: value` |
+| `var!(name)`            | inside CSS expressions                                 | Expands to the CSS string `var(--name)` |
+| `watch!(signals..., closure)` | signals + closure | Runs once immediately and again when any input signal changes |
+| `computed!(signals..., closure) -> T` | signals + typed closure return | Creates a derived `Signal<T>` and updates it when an input changes |
 
 `watch!` real example from `example/src/page/binding/hook/fn.rs`:
 
@@ -361,16 +376,13 @@ on_blur_restore_height() -> Option<Rc<dyn Fn(Event)>>
 
 ## `euv-engine` (optional)
 
-Zero-size `Engine` façade (`engine/src/engine/struct.rs`) + `EngineHandle`:
+The engine is a separate rlib crate. It exposes a zero-sized `Engine` namespace and a stateful `EngineHandle`; `Engine::run` initializes the configured Canvas 2D or WebGPU backend, starts the scheduler, and returns the handle. `Engine::webgpu_renderer` and `EngineHandle::init_webgpu` return `Result<_, WebGpuInitError>`; `EngineHandle::init_canvas` returns `bool`.
 
 ```rust
-impl Engine {
-    pub fn default_config() -> EngineConfig
-    pub async fn run(config: EngineConfig, handler: TickHandlerRc) -> EngineHandle
-    pub fn new_handle(config: EngineConfig) -> EngineHandle
-}
-pub fn canvas_renderer(config: &RenderConfig) -> Option<CanvasRenderer>
-pub async fn webgpu_renderer(config: &RenderConfig) -> Result<WebGpuRenderer, WebGpuInitError>
+let render = RenderConfig::webgpu("#canvas", 1280.0, 720.0);
+let config = EngineConfig::create(render).with_scheduler(SchedulerConfig::default());
+let handle = Engine::run(config, tick_handler).await;
+handle.stop();
 ```
 
 Config builders (`engine/src/config/impl.rs`):
@@ -403,7 +415,7 @@ Namespaces (`engine/src/<area>/<file>.rs`):
 1. **`signal.get()` in `html!` body inside `{}`** — single-segment ident auto-unwraps, multi-segment does not. `state.value` inside `{}` stays a `Signal<T>`; use `state.value.get()` explicitly.
 2. **`if { cond } { ... } else { ... }`** — block-level `else` is rejected. Stack two `if {}` blocks or use `match`.
 3. **Closures over for-loop items** — complex CRUD with per-row click handlers inside `for` loops runs into `FnMut`-double-borrow issues. Restructure into a parent `Signal<Vec<T>>` and a single child component.
-4. **`App::use_signal`** — must be called inside the render fn body, NOT stored as `let x = Signal::new(v)` outside a render. `Signal::new` is a `SignalCell` (single-arg internal), not the public `Signal<T>`.
+4. **`Signal<T>` vs `SignalCell<T>`** — `Signal::create(value)` is the direct public constructor; `SignalCell::none()`/`set()`/`get()` is a separate single-threaded storage wrapper. There is no `Signal::none()` or `Signal::new(value)` public constructor.
 5. **Non-Copy values in `html!`** — render body is `FnMut`. `let count = App::use_signal(|| 0)` works because `i32` is `Copy`. For `String` etc., use signals only and clone on capture.
 6. **`#[component]` body must destructure props via `node.try_get_props().unwrap_or_default()`** — the macro generates the wrapper but the inner fn receives `VirtualNode<Props>` not `Props`.
 7. **`inject_app_global_css()` must be called before `App::mount`** — otherwise `euv_button` etc. render unstyled.

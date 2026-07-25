@@ -1,6 +1,6 @@
 ---
 name: hyperlane
-description: 'A lightweight, high-performance, cross-platform Rust HTTP server library built on Tokio. Use when building Rust web services with HTTP + WebSocket + SSE + raw TCP, defining route handlers via trait `ServerHook` with `new` + `async fn handle -> Status` + registered through `Server::default().route::<MyHandler>(path)` (turbofish type marker) or `task_panic::<T>()`, wiring request/response middleware via `request_middleware::<T>`/`response_middleware::<T>`, registering panic/error hooks via `task_panic::<T>`/`request_error::<T>`, using `Context` for per-request request/response/attributes/route_params/panic+error data, and exposing lifecycle via `ServerControlHook { wait, shutdown }` returned from `Server::run().await`. Triggers: hyperlane, Server::new, Server::default, ServerHook, ServerControlHook, HookType, RoutePattern, Context, ServerConfig, RequestConfig, Status, RequestError, ServerError, web framework, Tokio HTTP server.'
+description: 'A lightweight, high-performance, cross-platform Rust HTTP server library built on Tokio. Use when building Rust HTTP services with static/dynamic/regex routes, request/response middleware, task-panic and request-error hooks, raw TCP streams, and lifecycle control. Define `ServerHook::new` + `handle` handlers returning `Status`, register them with `Server::default().route::<T>(path)`, `task_panic::<T>()`, `request_error::<T>()`, `request_middleware::<T>()`, or `response_middleware::<T>()`, and use `Context` for request/response/route params/attributes/error data. Triggers: hyperlane, Server::default, ServerHook, ServerControlHook, HookType, RoutePattern, RouteSegment, RouteParams, Context, ServerConfig, RequestConfig, Status, RequestError, ServerError, Tokio HTTP server, middleware, HTTP routing.'
 license: MIT
 ---
 
@@ -12,7 +12,7 @@ license: MIT
 
 ## Overview
 
-Hyperlane is a Tokio-based HTTP server library (v21.x, edition 2024, `panic = "unwind"`) that exposes a fluent builder for assembling:
+Hyperlane is a Tokio-based HTTP server library at version `21.3.6` (edition 2024, `panic = "unwind"`) that exposes a fluent builder for assembling:
 
 - routes (static, dynamic `{name}`, regex `{name:pattern}`)
 - request middleware (chain executed before route handler)
@@ -20,7 +20,7 @@ Hyperlane is a Tokio-based HTTP server library (v21.x, edition 2024, `panic = "u
 - task-panic hooks (recovery / logging)
 - request-error hooks (404 / 405 / panics with response shaping)
 
-It re-exports `http_type::*` (request/response types) and the `inventory` plugin-registration crate. WebSocket and SSE are supported via the standalone companion crates `hyperlane-plugin-websocket` and `hyperlane-broadcast` (registered as separate plugins at server boot via `inventory::collect!(HookType)` — see Related Skills below).
+It re-exports `http_type::*` (request/response types) and the `inventory` plugin-registration crate. The published crate itself depends on `http-type = "20.1.9"`, `inventory = "0.3.24"`, `lombok-macros = "2.0.36"`, and `serde = "1.0.229"`. WebSocket and SSE support is provided by separate companion crates, not by dependencies declared in this `Cargo.toml`.
 
 Top-level module graph (`src/lib.rs`):
 
@@ -36,7 +36,7 @@ pub use {config::*, context::*, error::*, hook::*, route::*, server::*};
 pub use {http_type::*, inventory};
 ```
 
-Plugin self-registration: `collect!(HookType);` is invoked in `src/route/impl.rs` — every `#[proc_macro_attribute]` handler registered through `hyperlane-macros` (`#[route]`, `#[request_middleware]`, etc.) is collected by `inventory` and the framework can find them statically without explicit registration calls.
+Plugin self-registration: `inventory::collect!(HookType);` is invoked in `src/route/impl.rs`. This crate exposes the registry type, while any external macro/plugin crate must arrange its own `inventory::submit!` entries; `hyperlane` itself has no `hyperlane-macros` dependency.
 
 ## 项目元信息
 
@@ -60,18 +60,15 @@ cargo add hyperlane
 ```toml
 [dependencies]
 regex = "1.13.1"
-http-type = "20.1.7"
+http-type = "20.1.9"
 inventory = "0.3.24"
-lombok-macros = "2.0.33"
+lombok-macros = "2.0.36"
 serde = { version = "1.0.229", features = ["derive"] }
-
-# proc-macro sugar for declaring route handlers / middleware:
-hyperlane-macros = "23"
 ```
 
-## Quick start (HTTP-only, function-style)
+## Quick start (HTTP-only, trait-style)
 
-Minimal `main.rs` pattern (matches `hyperlane-quick-start` style). Hyperlane offers two registration styles: (1) **function-style** — register any `async fn(&mut Context)`-shaped closure via `ServerHookHandlerFactory`; (2) **trait-style** — implement the `ServerHook` trait (recommended, used by `hyperlane-macros`). This example uses the trait-style form to be macro-friendly:
+Minimal `main.rs` pattern. Implement `ServerHook` directly; the published `hyperlane` crate does not include attribute macros or a `hyperlane-macros` dependency.
 
 ```rust
 use hyperlane::*;
@@ -118,24 +115,6 @@ async fn main() {
         .response_middleware::<FrontHtml>();
     let control: ServerControlHook = server.run().await.unwrap();
     control.wait().await;
-}
-```
-
-With `hyperlane-macros`, the trait boilerplate collapses to a single attribute on an async fn:
-
-```rust
-use hyperlane::*;
-use hyperlane_macros::*;
-
-#[route]
-async fn root(_: &mut Stream, ctx: &mut Context) {
-    ctx.set_response_body("hello").await
-        .set_response_status_code(200).await;
-}
-
-#[request_middleware]
-async fn log_req(_: &mut Stream, ctx: &mut Context) {
-    eprintln!("{} {}", ctx.get_request_method().await, ctx.get_request_path().await);
 }
 ```
 
@@ -194,7 +173,7 @@ Implementation notes:
 
 ## `ServerConfig` and `RequestConfig`
 
-Both come from `src/config/struct.rs` + `src/config/impl.rs` and are `#[derive(Data, New, Deserialize, ...)]` — so they expose lombok-style `Default::set_*(&mut self) -> &mut Self` builders, JSON `from_json` constructors, and `Getter` methods.
+- `ServerConfig::from_json` returns `Result<Self, serde_json::Error>`; `Server::config_from_json` parses with `serde_json::from_str(...).unwrap()` and therefore panics on invalid JSON. Both config types derive the lombok-style getters/setters used by the examples.
 
 ### `ServerConfig`
 
@@ -375,7 +354,7 @@ pub type ServerHookMap              = HashMapXxHash3_64<String, ServerHookHandle
 pub type ServerHookPatternRoute     = HashMapXxHash3_64<usize, Vec<(RoutePattern, ServerHookHandler)>>;
 ```
 
-Note that `ServerHookHandler` takes **two arguments**: `&mut Stream` and `&mut Context` (not just `Context`). `Status` is the `http_type::status::Status` enum (`Continue` / `Reject`).
+`ServerHookHandler` is a two-argument `Arc` handler: `Arc<dyn Fn(&mut Stream, &mut Context) -> FutureBox<Status>>` (not just `Context`). `Status` is the `http_type::status::Status` enum (`Continue` / `Reject`).
 
 ### `DefaultServerHook` and `Hook`
 
@@ -397,7 +376,7 @@ impl Hook {
 }
 ```
 
-`Handle_router!` sugar from `hyperlane-macros` (`#[route(...)]`, `#[request_middleware(...)]`, etc.) all internally call `Hook::factory::<MyHandler>()`.
+`Handle_router!` sugar is not part of this crate; use `Hook::factory::<MyHandler>()` or the fluent `Server` methods directly. Attribute macros, if used, belong to an external companion crate.
 
 ## `ServerControlHook` (`src/hook/struct.rs`)
 
@@ -543,7 +522,7 @@ The plugins self-register via `inventory::submit!` macros on `static` items (or 
 5. **`Context::set/get_request_*` and `set_response_*` are async** — must be `.await`ed. Sync methods are: `get/set/remove/clear_attribute`, `try_get_route_param`, panic/error-data getters/setters.
 6. **`Server::run` is `&self`** — clones internally via `unsafe { self.leak() }`. After `run()` returns, the `Server` value can still be inspected for diagnostics.
 7. **`HookType` priority uniqueness** — `assert_unique_order` panics only on `(same HookType variant, same Some(isize))`. `None` orders are never checked. Default fluent helpers (`task_panic::<T>` etc.) never call `assert_unique_order` — only explicit `handle_hook(HookType::RequestMiddleware(Some(0), factory))` triggers it.
-8. **`inventory` is required for WebSocket / SSE plugins** — they self-register at static-init time. If you see "no websocket plugins found", check that the plugin crate is in `[dependencies]` (not just `dev-dependencies`).
+8. **`inventory` is only the registry mechanism** — `hyperlane` declares `inventory::collect!(HookType)`, but WebSocket/SSE plugins and any attribute macros are external crates. Add the companion crate itself to `[dependencies]` and follow that crate's registration contract.
 9. **`tokio::main` flavor** — hyperlane uses `#[tokio::main]` with default features; multi-threaded runtime is fine. Single-threaded runtime works but spawned `task_handler`s need `Send + 'static` futures which all the framework helpers satisfy.
 10. **Body buffering** — large request bodies are streamed via `http_type` buffer config; tune `RequestConfig` (`max_body_size`, `read_timeout_ms`) if you expect multi-MB uploads.
 11. **`Status::default() == Reject`** — middleware/macros that forget to return `Status::Continue` abort the pipeline silently. Always explicit `Status::Continue` at the end of `handle`.
@@ -574,7 +553,7 @@ The plugins self-register via `inventory::submit!` macros on `static` items (or 
 
 ## Related skills
 
-- `hyperlane-macros` — `#[route]`, `#[request_middleware]`, `#[response_middleware]`, `#[task_panic]`, `#[request_error]`, plus 73 other attribute macros that wrap `Hook::factory::<T>()` invocations
+- `hyperlane-macros` — optional external companion crate for route/middleware/error-hook attribute macros; not a dependency or module of this repository
 - `hyperlane-quick-start` — full-stack example app (HTTP + WebSocket + SSE + middleware + DB + JWT)
 - `hyperlane-broadcast` — SSE / event-stream broadcast helper
 - `hyperlane-plugin-websocket` — WebSocket plugin registration
