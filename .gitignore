@@ -5,6 +5,17 @@ node_modules/
 package-lock.json
 .npmrc
 
+# Python cache / build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
 # Editor / OS
 .DS_Store
 .idea/
