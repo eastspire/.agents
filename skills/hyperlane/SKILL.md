@@ -13,13 +13,46 @@ hyperlane 是 Tokio 异步 HTTP server 库,版本 21.3.6,edition 2024。完整 A
 - crates.io: <https://crates.io/crates/hyperlane>
 - docs.rs: <https://docs.rs/hyperlane>
 
-## 互锁 skill(本 skill 加载时必同时加载)
+---
+
+## Index
+
+| I want to... | Jump to |
+| --- | --- |
+| See which other skills must load with this one | [Mutual-Lock Skills](#mutual-lock-skills) |
+| Run the smallest possible `Server::default() + route` in 5 lines | [5-Line Minimum Call](#5-line-minimum-call) |
+| Find docs-pages source for tutorials | [Documentation sources (docs-pages)](#documentation-sources-docs-pages) |
+| Read the legacy full cheatsheet kept as fallback | [Legacy Full Cheatsheet (fallback)](#legacy-full-cheatsheet-fallback) |
+| Get a 1-paragraph summary of the crate | [Overview](#overview) |
+| See crate name / version / edition / license | [Project Metadata](#project-metadata) |
+| Add `hyperlane` to `Cargo.toml` | [Installation](#installation) |
+| Start a 2-route HTTP server in 10 lines | [Quick start (HTTP-only, trait-style)](#quick-start-http-only-trait-style) |
+| Browse the full `Server` builder API | [`Server` builder API](#server-builder-api) |
+| Configure server-level / request-level behavior | [`ServerConfig` and `RequestConfig`](#serverconfig-and-requestconfig) |
+| Read/write the per-request `Context` | [`Context`](#context) |
+| Define a route (static / dynamic / regex) | [Routes (`src/route/`)](#routes-srcroute) |
+| Implement a hook / pick a `HookType` | [Hooks (`src/hook/`)](#hooks-srchook) |
+| Run the server and get back `ServerControlHook` | [`ServerControlHook` (`src/hook/struct.rs`)](#servercontrolhook-srchookstructrs) |
+| Inspect `Status`, `Stream`, `RequestError` | [`Status`, `Stream`, `RequestError`](#status-stream-requesterror) |
+| Understand the error enums | [Errors (`src/error/enum.rs`)](#errors-srcerrorenumrs) |
+| Flush response / body / stream | [Flush helpers (`src/server/impl.rs`)](#flush-helpers-srcserverimplrs) |
+| Read / set request and response bodies, headers | [Request/Response body and headers](#requestresponse-body-and-headers) |
+| Add WebSocket / SSE / broadcast plugin | [Plugin / WebSocket / SSE](#plugin--websocket--sse) |
+| Recall async vs sync split at a glance | [Async/Sync split quick reference](#asyncsync-split-quick-reference) |
+| Avoid the most common gotchas | [Common pitfalls](#common-pitfalls) |
+| Self-verify before committing | [Verification checklist](#verification-checklist) |
+| Find the canonical source file for a symbol | [Source-of-truth files](#source-of-truth-files) |
+| Find related skills | [Related skills](#related-skills) |
+
+---
+
+## Mutual-Lock Skills
 
 - **`hyperlane-standards`** — 完整 API 速查 + 钩子 / 路由 / Context / 错误全部签名 + 19 个常见坑。**入口 skill 不重复内容,直接看那个。**
 - **`rust-standards`** — Rust 通用规范(模块划分、命名、错误处理)对 hyperlane 同样适用,且优先级最高。
 - **`http-type` / `lombok-macros` / `http-constant`** — 通过 `hyperlane::http_type::*` 重导出,在 hyperlane-standards 的 references 里查。
 
-## 5 行最小完整调用模式
+## 5-Line Minimum Call
 
 ```rust
 use hyperlane::*;
@@ -56,7 +89,7 @@ bash scripts/verify-references.sh                     # show what changed vs HEA
 
 The mapping of `references/<file>.md` → `docs-pages/src/...` lives in `scripts/sync-references.mapping`. To pin a customized version, add `# manual override:` to its line.
 
-## 原文(完整 cheatsheet,保留作为 fallback)
+## Legacy Full Cheatsheet (fallback)
 
 下面是从 `hyperlane-standards` 同步过来的完整内容,确保不依赖那个 skill 也能工作。但**优先看 hyperlane-standards**。
 
@@ -117,7 +150,7 @@ pub use {http_type::*, inventory};
 
 Plugin self-registration: `inventory::collect!(HookType);` is invoked in `src/route/impl.rs`. This crate exposes the registry type, while any external macro/plugin crate must arrange its own `inventory::submit!` entries; `hyperlane` itself has no `hyperlane-macros` dependency.
 
-## 项目元信息
+## Project Metadata
 
 - crate 名: `hyperlane`
 - Rust edition: `2024`

@@ -8,7 +8,26 @@ description: '**euv UI 设计规范 + 304 个 class! + design tokens — 用 euv
 
 你正在为 **euv framework** 的 example / app 项目编写 UI。example 项目的 UI 必须遵守本规范，否则与设计系统冲突。
 
-## 0. 规范来源（事实依据）
+---
+
+## Index
+
+| I want to... | Jump to |
+| --- | --- |
+| Find the source files that define all 304 classes | [Source of Truth](#0-source-of-truth) |
+| Use `var!(xxx)` to reference colors / spacing / fonts | [Design Tokens](#1-design-tokens) |
+| Build the app shell, page container, nav, main area | [Global Skeleton](#2-global-skeleton) |
+| Use a built-in component (button / card / badge / tag / alert / input / checkbox / nav) | [Core Component HTML Templates](#3-core-component-html-templates) |
+| Build the special Home / Hero page layout | [Home / Hero Page Spec](#4-home--hero-page-spec) |
+| Name a new class correctly (c_ prefix, page scope) | [Class Naming Conventions](#5-class-naming-conventions) |
+| Apply responsive rules and breakpoint behavior | [Responsive / Breakpoints](#6-responsive--breakpoints) |
+| Add a11y / touch optimization / safe-area | [Accessibility / Touch](#7-accessibility--touch) |
+| Scaffold a brand-new page | [New Page Standard Template](#8-new-page-standard-template) |
+| Recall forbidden patterns at a glance | [Quick Notes / Anti-Patterns](#9-quick-notes--anti-patterns) |
+
+---
+
+## 0. Source of Truth
 
 - 全局 class! 注册表：`ui/src/style/class/fn.rs`（304 个 class，单文件统一维护）
 - 全局 vars! token：`ui/src/style/var/fn.rs`（light + dark 主题）
@@ -23,7 +42,7 @@ description: '**euv UI 设计规范 + 304 个 class! + design tokens — 用 euv
 
 ---
 
-## 1. Design Tokens（必须通过 `var!(xxx)` 引用，禁止硬编码）
+## 1. Design Tokens
 
 ### 1.1 颜色（黑/白单色设计 — shadcn / monochrome）
 
@@ -179,7 +198,7 @@ code/pre/kbd/samp { font-family: ui-monospace, monospace }
 
 ---
 
-## 2. 全局骨架（必掌握）
+## 2. Global Skeleton
 
 ### 2.1 App 根
 
@@ -245,7 +264,7 @@ nav c_app_nav
 
 ---
 
-## 3. 核心组件 HTML 模板（直接复用 `ui/src/component/<name>`）
+## 3. Core Component HTML Templates
 
 ### 3.1 Button（`euv_button`，**唯一**主按钮/轮廓按钮）
 
@@ -454,7 +473,7 @@ div c_tab_bar (flex; border-bottom:1px dashed var!(border); gap:gap-element; mb:
 
 ---
 
-## 4. Home / Hero 页规范（特殊，仅首页用）
+## 4. Home / Hero Page Spec
 
 `page_about` 是唯一 hero 页面，所有样式已在 example 项目里：
 
@@ -482,7 +501,7 @@ div c_tab_bar (flex; border-bottom:1px dashed var!(border); gap:gap-element; mb:
 
 ---
 
-## 5. Class 命名约定（必读）
+## 5. Class Naming Conventions
 
 | 类别        | 命名                                                           | 示例                                   |
 | ----------- | -------------------------------------------------------------- | -------------------------------------- |
@@ -500,7 +519,7 @@ div c_tab_bar (flex; border-bottom:1px dashed var!(border); gap:gap-element; mb:
 
 ---
 
-## 6. 响应式 / 断点
+## 6. Responsive / Breakpoints
 
 **唯一**断点：`@media (max-width: 767px)`（移动端范围 0–767，桌面 ≥768）。
 
@@ -514,7 +533,7 @@ div c_tab_bar (flex; border-bottom:1px dashed var!(border); gap:gap-element; mb:
 
 ---
 
-## 7. a11y / 触摸优化（`c_app_root` 注入）
+## 7. Accessibility / Touch
 
 ```
 :focus-visible { outline: none }      // 所有自定义控件靠 border color 表达 focus
@@ -529,7 +548,7 @@ div c_tab_bar (flex; border-bottom:1px dashed var!(border); gap:gap-element; mb:
 
 ---
 
-## 8. 写新 page 的标准模板
+## 8. New Page Standard Template
 
 **步骤**：
 1. `example/src/page/<page_name>/` 建：`mod.rs`（导出 `pub mod view;`）、`view/{fn,struct,const,mod}.rs` 四件套。
@@ -574,7 +593,7 @@ pub(crate) struct PageDemoProps;
 
 ---
 
-## 9. 速记 / 反模式
+## 9. Quick Notes / Anti-Patterns
 
 ❌ 写 class! 时硬编码颜色/间距 — 一律 `var!(xxx)`。
 ❌ 添加阴影、彩色背景、圆角 — design system 是黑/白硬边。
