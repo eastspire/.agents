@@ -1,9 +1,64 @@
 ---
 name: hyperlane
-description: 'A lightweight, high-performance, cross-platform Rust HTTP server library built on Tokio. Use when building Rust HTTP services with static/dynamic/regex routes, request/response middleware, task-panic and request-error hooks, raw TCP streams, and lifecycle control. Define `ServerHook::new` + `handle` handlers returning `Status`, register them with `Server::default().route::<T>(path)`, `task_panic::<T>()`, `request_error::<T>()`, `request_middleware::<T>()`, or `response_middleware::<T>()`, and use `Context` for request/response/route params/attributes/error data. Triggers: hyperlane, Server::default, ServerHook, ServerControlHook, HookType, RoutePattern, RouteSegment, RouteParams, Context, ServerConfig, RequestConfig, Status, RequestError, ServerError, Tokio HTTP server, middleware, HTTP routing.'
+description: '**入口 skill — 使用 hyperlane 框架必须加载**。任何涉及 hyperlane 的任务(写 HTTP 服务、加路由、加中间件、处理请求/响应/panic/error、写 hook 链、调 Server::run/ServerControlHook)→ 先 `skill_view("hyperlane-standards")` 看完整 API + 坑表。hyperlane 是 Tokio 异步 HTTP 服务端库,版本 21.3.6,edition 2024,`Server::default()` + `server.route::<T>(path).await` + `server.task_panic::<T>().await` + `server.request_error::<T>().await` + `server.request_middleware::<T>().await` + `server.response_middleware::<T>().await`,handler 实现 `ServerHook::new/handle -> Status`,用 `Context::get_request/get_mut_response` 读写。关键触发词:hyperlane, Server::default, ServerHook, ServerControlHook, HookType, RoutePattern, RouteSegment, RouteParams, Context, ServerConfig, RequestConfig, Status, RequestError, ServerError, Tokio HTTP server, HTTP middleware, HTTP routing, hyperlane-macros, #[route], #[hyperlane], inventory。**当且仅当任务完全不使用 hyperlane**(纯 CLI、纯 std、不 import hyperlane crate)才不需要加载 hyperlane-standards。'
 license: MIT
 ---
-# hyperlane
+# hyperlane (入口)
+
+> **强制规则**:任何与 hyperlane 框架打交道的工作,**先 `skill_view("hyperlane-standards")`**,再开始写代码。
+
+hyperlane 是 Tokio 异步 HTTP server 库,版本 21.3.6,edition 2024。完整 API / 坑表 / 生态 crate 在 `hyperlane-standards` skill。
+
+- GitHub: <https://github.com/hyperlane-dev/hyperlane.git>
+- crates.io: <https://crates.io/crates/hyperlane>
+- docs.rs: <https://docs.rs/hyperlane>
+
+## 互锁 skill(本 skill 加载时必同时加载)
+
+- **`hyperlane-standards`** — 完整 API 速查 + 钩子 / 路由 / Context / 错误全部签名 + 19 个常见坑。**入口 skill 不重复内容,直接看那个。**
+- **`rust-standards`** — Rust 通用规范(模块划分、命名、错误处理)对 hyperlane 同样适用,且优先级最高。
+- **`http-type` / `lombok-macros` / `http-constant`** — 通过 `hyperlane::http_type::*` 重导出,在 hyperlane-standards 的 references 里查。
+
+## 5 行最小完整调用模式
+
+```rust
+use hyperlane::*;
+use hyperlane_macros::*;
+
+#[tokio::main]
+async fn main() {
+    let mut server: Server = Server::default();
+    server.route::<Index>("/").await;       // 路由注册是 async,不能链式
+    let control: ServerControlHook = server.run().await.unwrap_or_default();
+    control.wait().await;
+}
+```
+
+详见 `hyperlane-standards/SKILL.md`。
+
+## Documentation sources (docs-pages)
+
+The full reference for hyperlane + its companion crates lives in the [docs-pages](https://github.com/docs-pages/docs) repo (private). Local mirror in `hyperlane-standards/references/` (one file per topic). 关键主题:
+
+- `read_file('hyperlane-standards/references/websocket.md')` — WebSocket setup
+- `read_file('hyperlane-standards/references/auth.md')` — auth middleware
+- `read_file('hyperlane-standards/references/hyperlane-macros-request.md')` — request-extraction macros
+- `read_file('hyperlane-standards/references/route.md')` — routing patterns
+- `read_file('hyperlane-standards/references/server-config.md')` — ServerConfig / RequestConfig
+
+To refresh after docs-pages updates:
+
+```shell
+bash scripts/sync-references.sh                       # full sync (clones docs-pages)
+bash scripts/sync-references.sh --source-dir <path>   # reuse an existing clone
+bash scripts/verify-references.sh                     # show what changed vs HEAD
+```
+
+The mapping of `references/<file>.md` → `docs-pages/src/...` lives in `scripts/sync-references.mapping`. To pin a customized version, add `# manual override:` to its line.
+
+## 原文(完整 cheatsheet,保留作为 fallback)
+
+下面是从 `hyperlane-standards` 同步过来的完整内容,确保不依赖那个 skill 也能工作。但**优先看 hyperlane-standards**。
 
 - GitHub: <https://github.com/hyperlane-dev/hyperlane.git>
 - crates.io: <https://crates.io/crates/hyperlane>
