@@ -3,12 +3,36 @@ name: hyperlane
 description: 'A lightweight, high-performance, cross-platform Rust HTTP server library built on Tokio. Use when building Rust HTTP services with static/dynamic/regex routes, request/response middleware, task-panic and request-error hooks, raw TCP streams, and lifecycle control. Define `ServerHook::new` + `handle` handlers returning `Status`, register them with `Server::default().route::<T>(path)`, `task_panic::<T>()`, `request_error::<T>()`, `request_middleware::<T>()`, or `response_middleware::<T>()`, and use `Context` for request/response/route params/attributes/error data. Triggers: hyperlane, Server::default, ServerHook, ServerControlHook, HookType, RoutePattern, RouteSegment, RouteParams, Context, ServerConfig, RequestConfig, Status, RequestError, ServerError, Tokio HTTP server, middleware, HTTP routing.'
 license: MIT
 ---
-
 # hyperlane
 
 - GitHub: <https://github.com/hyperlane-dev/hyperlane.git>
 - crates.io: <https://crates.io/crates/hyperlane>
 - docs.rs: <https://docs.rs/hyperlane>
+
+## Documentation sources (docs-pages)
+
+The full Chinese reference for hyperlane + its companion crates lives in the [docs-pages](https://github.com/docs-pages/docs) repo (private). **This skill is the API/pitfall cheatsheet; docs-pages is the source of truth for tutorials, examples, and macro deep-dives.**
+
+To read a topic, use the local mirror — no network or PAT needed. Pages are vendored flat (one file per topic) under `references/`:
+
+- `read_file('references/websocket.md')` — WebSocket setup
+- `read_file('references/auth.md')` — auth middleware
+- `read_file('references/hyperlane-macros-request.md')` — request-extraction macros
+- `read_file('references/hyperlane-plugin-websocket.md')` — plugin-websocket overview
+- `read_file('references/hyperlane-broadcast.md')` — broadcast bus overview
+- `read_file('references/route.md')` — routing patterns + examples (manual override — has an extra dynamic-routing section on top of upstream)
+- …and any other `references/<topic>.md` in this skill
+
+To refresh `references/` after docs-pages updates, run the sync script from the repo root:
+
+```shell
+bash scripts/sync-references.sh                       # full sync (clones docs-pages)
+bash scripts/sync-references.sh --source-dir <path>   # reuse an existing clone
+bash scripts/verify-references.sh                     # show what changed vs HEAD
+```
+
+The mapping of `references/<file>.md` → `docs-pages/src/...` lives in `scripts/sync-references.mapping`. To add a new file, append a line; to pin a customized version, add `# manual override:` to its line and the script will leave that dest alone. See `scripts/README.md` for the full workflow.
+
 
 ## Overview
 
@@ -68,19 +92,24 @@ serde = { version = "1.0.229", features = ["derive"] }
 
 ## Quick start (HTTP-only, trait-style)
 
-Minimal `main.rs` pattern. Implement `ServerHook` directly; the published `hyperlane` crate does not include attribute macros or a `hyperlane-macros` dependency.
+Minimal `main.rs` pattern. The official companion crate `hyperlane-macros` provides process/attribute macros (`#[route]`, `#[hyperlane]`, `#[task_panic]`, `#[request_error]`, `#[request_middleware]`, `#[response_middleware]`, `#[prologue_macros]`, `#[epilogue_macros]`, `context!`, etc.) and is the recommended way to write routes/hooks. Examples below import both `use hyperlane::*;` and `use hyperlane_macros::*;`. The fluent `Server::route::<T>()` etc. registration methods are now `async` and each call must be `.await`ed individually (no chaining). Response setters are **sync** and live on `ctx.get_mut_response()`.
 
 ```rust
 use hyperlane::*;
+use hyperlane_macros::*;
 
 struct FrontHtml;
 
 impl ServerHook for FrontHtml {
     async fn new(_: &mut Stream, _: &mut Context) -> Self { Self }
     async fn handle(self, _: &mut Stream, ctx: &mut Context) -> Status {
-        ctx.set_response_body("hello world").await
-            .set_response_status_code(200).await
-            .set_response_header("Content-Type", "text/html; charset=utf-8").await;
+        let data: Vec<u8> = ctx
+            .get_mut_response()
+            .set_version(HttpVersion::Http1_1)
+            .set_status_code(200)
+            .set_header("Content-Type", "text/html; charset=utf-8")
+            .set_body("hello world")
+            .build();
         Status::Continue
     }
 }
@@ -90,8 +119,11 @@ struct NotFound;
 impl ServerHook for NotFound {
     async fn new(_: &mut Stream, _: &mut Context) -> Self { Self }
     async fn handle(self, _: &mut Stream, ctx: &mut Context) -> Status {
-        ctx.set_response_status_code(404).await
-            .set_response_body("404 not found").await;
+        let _: Vec<u8> = ctx
+            .get_mut_response()
+            .set_status_code(404)
+            .set_body("404 not found")
+            .build();
         Status::Continue
     }
 }
@@ -100,44 +132,50 @@ struct PanicHandler;
 
 impl ServerHook for PanicHandler {
     async fn new(_: &mut Stream, _: &mut Context) -> Self { Self }
-    async fn handle(self, _: &mut Stream, _: &mut Context) -> Status { Status::default() }
+    async fn handle(self, _: &mut Stream, _: &mut Context) -> Status { Status::Continue }
 }
 
 #[tokio::main]
 async fn main() {
-    let config: ServerConfig = ServerConfig::default().set_address("0.0.0.0:80".to_owned());
-    let server: Server = Server::default()
-        .server_config(config)
-        .route::<FrontHtml>("/")
-        .route::<NotFound>("/*")
-        .task_panic::<PanicHandler>()
-        .request_middleware::<FrontHtml>()
-        .response_middleware::<FrontHtml>();
-    let control: ServerControlHook = server.run().await.unwrap();
+    // ServerConfig setter is sync; assign separately (no chaining).
+    let mut config: ServerConfig = ServerConfig::default();
+    config.set_address("0.0.0.0:80".to_owned());
+
+    // Server builder registration: each method is async, no chaining.
+    let mut server: Server = Server::default();
+    server.server_config(config);            // sync config setter
+    server.route::<FrontHtml>("/").await;
+    server.route::<NotFound>("/*").await;
+    server.task_panic::<PanicHandler>().await;
+    server.request_middleware::<FrontHtml>().await;
+    server.response_middleware::<FrontHtml>().await;
+
+    // run() returns Result; ServerControlHook has Default, so unwrap_or_default is the recommended fallback.
+    let control: ServerControlHook = server.run().await.unwrap_or_default();
     control.wait().await;
 }
 ```
 
 ## `Server` builder API
 
-From `src/server/{struct,impl}.rs`. All `route::<T>`, `task_panic::<T>`, `request_error::<T>`, `request_middleware::<T>`, `response_middleware::<T>` methods take a **type marker** `S` (only used at compile time to monomorphize the `ServerHookHandlerFactory`) — they are turbofish-only, no runtime value comes from `S`. Chainable methods return `&mut Self`.
+From `src/server/{struct,impl}.rs`. All `route::<T>`, `task_panic::<T>`, `request_error::<T>`, `request_middleware::<T>`, `response_middleware::<T>` methods take a **type marker** `S` (only used at compile time to monomorphize the `ServerHookHandlerFactory`) — they are turbofish-only, no runtime value comes from `S`. Each registration method is `async` and must be `.await`ed individually; `Server` must be declared `let mut server: Server = Server::default();` and methods are called as separate statements (no fluent chaining). `server_config` / `request_config` / `config_from_json` are **sync** setters (no `.await`).
 
 ```rust
 impl Server {
     // Hook dispatcher (rarely called directly):
     pub fn handle_hook(&mut self, hook: HookType)            // dispatches by HookType variant
 
-    // Configuration:
+    // Configuration (all SYNC — no .await):
     pub fn config_from_json<C: AsRef<str>>(&mut self, json: C) -> &mut Self
     pub fn server_config(&mut self, config: ServerConfig) -> &mut Self
     pub fn request_config(&mut self, config: RequestConfig) -> &mut Self
 
-    // Registration (turbofish type marker only — no value):
-    pub fn route<S>(&mut self, path: impl AsRef<str>) -> &mut Self where S: ServerHook
-    pub fn task_panic<S>(&mut self) -> &mut Self             where S: ServerHook
-    pub fn request_error<S>(&mut self) -> &mut Self          where S: ServerHook
-    pub fn request_middleware<S>(&mut self) -> &mut Self     where S: ServerHook
-    pub fn response_middleware<S>(&mut self) -> &mut Self    where S: ServerHook
+    // Registration (all ASYNC, no chaining — call as separate statements on a `let mut server`):
+    pub async fn route<S>(&mut self, path: impl AsRef<str>) -> &mut Self where S: ServerHook
+    pub async fn task_panic<S>(&mut self) -> &mut Self             where S: ServerHook
+    pub async fn request_error<S>(&mut self) -> &mut Self          where S: ServerHook
+    pub async fn request_middleware<S>(&mut self) -> &mut Self     where S: ServerHook
+    pub async fn response_middleware<S>(&mut self) -> &mut Self    where S: ServerHook
 
     // Lifecycle:
     pub async fn run(&self) -> Result<ServerControlHook, ServerError>
@@ -166,9 +204,9 @@ impl From<RequestConfig> for Server     // uses request config, default the rest
 
 Implementation notes:
 
-- `Server::run` is `&self`, **not** `&mut self` — clones the relevant state internally so the same `Server` value can be inspected after launch. Internally it `unsafe { self.leak() }` the `&self` to obtain a `&'static Server` (used by the spawned accept loop), so each `run` call effectively consumes the `Server` for background tasks.
-- `route::<T>(path)` calls `RouteMatcher::add(...)` which `unwrap()`s — empty pattern panics with `RouteError::EmptyPattern`, duplicate pattern panics with `RouteError::DuplicatePattern(String)`, invalid regex pattern returns `RouteError::InvalidRegexPattern(String)` (also unwrapped → panic).
-- `task_panic::<T>` / `request_middleware::<T>` / `response_middleware::<T>` push into `Vec<ServerHookHandler>` which grows monotonically; `assert_unique_order` is **not** called by the fluent helpers — only when using `handle_hook(HookType::...)` with an explicit `order: Some(isize)` does priority-uniqueness get checked.
+- `Server::run` requires `let mut server` because registration methods above take `&mut self`. `run` itself returns `Result<ServerControlHook, ServerError>` — the recommended idiom is `server.run().await.unwrap_or_default()` (not `.unwrap()`) since `ServerControlHook: Default`. The `Server` instance is effectively consumed by the accept loop after `run` returns; use `server_control_hook.wait().await` to block or `shutdown().await` to abort.
+- `route::<T>(path).await` calls `RouteMatcher::add(...)` which `unwrap()`s — empty pattern panics with `RouteError::EmptyPattern`, duplicate pattern panics with `RouteError::DuplicatePattern(String)`, invalid regex pattern returns `RouteError::InvalidRegexPattern(String)` (also unwrapped → panic).
+- `task_panic::<T>` / `request_middleware::<T>` / `response_middleware::<T>` push into `Vec<ServerHookHandler>` which grows monotonically. With attribute macros (`#[route(...)]` + `#[hyperlane(server: Server)]`) the `#[hyperlane]` macro calls `HookType::assert_unique_order` automatically; the bare fluent `server.route::<T>(path).await` form does not invoke it. Same applies for `task_panic` / `request_error` / `request_middleware` / `response_middleware`.
 - Memory ownership: each accepted connection boxes a `Stream` and a `Context`, `Box::leak`s them to obtain `&'static mut`, then converts to a `usize` address that is passed through a spawn boundary; on completion the inner closures reclaim them with `Box::from_raw`. This is why `Stream` + `Context` implement `From<usize>`/`From<&mut Self> for usize` and the unsafe `Lifetime::leak/leak_mut`. **Do not allocate `Stream` / `Context` yourself and submit them via `From<usize>` from outside the accept loop** — the framework expects exclusive ownership per request.
 
 ## `ServerConfig` and `RequestConfig`
@@ -186,12 +224,15 @@ pub struct ServerConfig {
     pub(super) ttl: Option<u32>,                            // IP_TTL applied per accepted socket
 }
 
-let cfg: ServerConfig = ServerConfig::default()
-    .set_address("0.0.0.0:80".to_owned())
-    .set_nodelay(Some(true))
-    .set_ttl(Some(64));
+let mut cfg: ServerConfig = ServerConfig::default();
+cfg.set_address("0.0.0.0:80".to_owned());
+cfg.set_nodelay(Some(true));
+cfg.set_ttl(Some(64));
 let cfg: ServerConfig = ServerConfig::from_json(r#"{"address":"0.0.0.0:80","nodelay":true,"ttl":64}"#).unwrap();
 ```
+
+> [!note]
+> `ServerConfig` setters are generated by `lombok-macros` and are **sync** — call each as a separate statement on a `let mut cfg`. They return `&mut Self`, but the docs-pages examples all use the standalone-statement form, not fluent chaining.
 
 In the server's accept loop, `configure_stream(&TcpStream)` (from `src/server/impl.rs`) reads `nodelay` and `ttl` and applies them after `TcpListener::accept` — `None` means "leave default".
 
@@ -212,9 +253,19 @@ pub struct RequestConfig {
 
 This struct is `Copy` (everything is `usize` / `u64`), and lives inside each `Stream` so every connection enforces the same limits. Tune via `.request_config(cfg)` on `Server`.
 
+Two factory constructors are exposed:
+
+- `RequestConfig::default()` / `RequestConfig::new()` — balanced defaults.
+- `RequestConfig::high_security()` — stricter limits suitable for hostile environments (smaller `buffer_size`, shorter `read_timeout_ms`, lower header / path / body caps; see `config/config.md` for the per-field numbers). Use this for any production deployment that talks to untrusted clients.
+
 ## `Context`
 
-From `src/context/{struct,impl}.rs`. Every route/middleware/hook handler receives `&mut Context` after the framework boxed+leaked+address-roundtripped it. Conceptually:
+From `src/context/{struct,impl}.rs`. Every route/middleware/hook handler receives `&mut Context` after the framework boxed+leaked+address-roundtripped it.
+
+> [!important]
+> **All request / response access goes through three entry points on `Context`:** `ctx.get_request() -> &Request`, `ctx.get_response() -> &Response`, `ctx.get_mut_response() -> &mut Response`. There are **no** direct `ctx.get_request_body()` / `ctx.set_response_body(...)` / `ctx.set_response_status_code(...)` / `ctx.set_response_header(...)` methods — those have been moved onto `Request` / `Response` and are reached only via the entry points above.
+
+Conceptually:
 
 ```rust
 #[derive(Clone, CustomDebug, Data, DisplayDebug)]
@@ -228,21 +279,28 @@ pub struct Context {
 
 The `attributes` store is `HashMap<String, ArcAnySendSync>` keyed by stringified `Attribute` (internal vs external); the keys for externally-set attributes are `Attribute::External("your-key").to_string()` and internally reserved ones are `Attribute::Internal(key)` (`InternalAttribute` is `enum { TaskPanicData, RequestErrorData }`).
 
-The macro sugar `#[attribute(name = "...")]`, `#[attribute("...")]`, `#[try_get_attribute(name = "...")]` from `hyperlane-macros` translates these `set_attribute` / `try_get_attribute` calls. The async/sync split:
+The `hyperlane-macros` crate provides sugar like `#[request_body]` / `#[request_body_json]` / `#[response_header]` / `#[response_status_code]` / `#[prologue_macros(...)]` / `#[epilogue_macros(...)]` that translates the `set_attribute` / `try_get_attribute` calls into the response / request accessors shown below. The async/sync split after the entry-point migration:
 
-- **Async** — `set_response_body`, `set_response_status_code`, `set_response_header`, `set_response_version`, `get_request_body`, `get_request_header`, `get_request_method`, `get_request_path`, `get_request_query`, `get_request_version` (all delegate to `http_type` buffer completion which may be deferred to the connection phase).
-- **Sync** — `try_get_route_param` / `get_route_param`, all `get/set/remove/clear_attribute`, `try_get_task_panic_data` / `get_task_panic_data`, `try_get_request_error_data` / `get_request_error_data`, `set_task_panic`.
+- **Sync** (return `&T` / `&mut T` / `&mut Self` from getters; setters return `&mut Self` for fluent chaining) — all `Request` and `Response` accessors. `ctx.get_request().get_method() / get_path() / get_body() / get_body_string() / get_header(...) / get_querys() / get_version()` all return references and are sync. `ctx.get_mut_response().set_version(...) / set_status_code(...) / set_header(...) / set_body(...)` are sync and return `&mut Response`; call `.build()` on the final reference to materialise the `Vec<u8>` for `stream.try_send(...)`. Also sync: `try_get_route_param` / `get_route_param` / `get_route_params`, all `get/set/remove/clear_attribute`, `try_get_task_panic_data` / `get_task_panic_data`, `try_get_request_error_data` / `get_request_error_data`, `set_task_panic`.
+- **Async** — `stream.send / try_send / send_list / try_send_list / flush / try_flush` (network I/O), `Server::run` (consumes the `Server` value to start the accept loop), and the `#[try_get_http_request]` / `#[try_get_websocket_request]` / `#[try_send]` / `#[send]` / `#[try_flush]` / `#[flush]` macros that wrap those stream methods.
 
 ```rust
-async fn get_user(ctx: &mut Context) {
+async fn get_user(ctx: &mut Context) -> Status {
     let id: String = ctx.get_route_param("id");
-    let body: String = ctx.get_request_body().await;
-    ctx.set_response_body(format!("user id: {id}: {body}")).await
-        .set_response_status_code(200).await
-        .set_response_header("Content-Type", "text/plain").await;
+    // Read request via ctx.get_request() (all sync):
+    let body: String = ctx.get_request().get_body_string();
+    // Write response via ctx.get_mut_response() (all sync, fluent, .build() at the end):
+    let data: Vec<u8> = ctx
+        .get_mut_response()
+        .set_status_code(200)
+        .set_header("Content-Type", "text/plain")
+        .set_body(format!("user id: {id}: {body}"))
+        .build();
+    Status::Continue
 }
 
-// registered via: server.route::<get_user>("/users/{id}");
+// registered via: server.route::<get_user>("/users/{id}").await;
+// or:            #[route("/users/{id}")] struct GetUser;
 ```
 
 `set_task_panic` / `set_request_error_data` are normally only called by the framework; user code reads them with the `try_get_*_data` / `get_*_data` pair inside a panic or error handler.
@@ -271,16 +329,36 @@ pub type RouteSegmentList = Vec<RouteSegment>;
 pub(crate) type PathComponentList<'a> = Vec<&'a str>;
 ```
 
-Three route kinds co-exist on the same `Server`. The matcher indexes by segment count (the outer `HashMap` key) for O(1) candidate filtering, then walks matching routes in insertion order:
+Three route kinds co-exist on the same `Server`. The matcher indexes by segment count (the outer `HashMap` key) for O(1) candidate filtering, then walks matching routes in insertion order. Registration is **async + standalone** (no fluent chaining):
 
 ```rust
-server
-    .route::<Index>("/")                                  // static
-    .route::<About>("/about")                             // static
-    .route::<UserDetail>("/users/{id}")                   // dynamic single-param
-    .route::<FileDetail>("/files/{path:^.*$}")            // tail regex matches ≥ N−1 segments
-    .route::<Versioned>("/api/{version:\\d+}");           // positional regex matches one segment
+let mut server: Server = Server::default();
+server.route::<Index>("/").await;                        // static
+server.route::<About>("/about").await;                  // static
+server.route::<UserDetail>("/users/{id}").await;        // dynamic single-param
+server.route::<FileDetail>("/files/{path:^.*$}").await; // tail regex matches ≥ N−1 segments
+server.route::<Versioned>("/api/{version:\\d+}").await;  // positional regex matches one segment
 ```
+
+The official attribute-macro form is preferred (auto-collected via `inventory` and injected by `#[hyperlane(server: Server)]`):
+
+```rust
+use hyperlane::*;
+use hyperlane_macros::*;
+
+#[route("/")]                              struct Index;
+#[route("/about")]                         struct About;
+#[route("/users/{id}")]                    struct UserDetail;
+#[route("/files/{path:^.*$}")]             struct FileDetail;
+#[route("/api/{version:\\d+}")]            struct Versioned;
+
+#[hyperlane(server: Server)]
+async fn main() {
+    let _: ServerControlHook = server.run().await.unwrap_or_default();
+}
+```
+
+`Server::get_route_matcher()` (accessible after registration) returns `&RouteMatcher`, which exposes the three internal tables for diagnostics: `get_static_route()` (returns the `HashMap<String, ServerHookHandler>` keyed by literal path), `get_dynamic_route()` and `get_regex_route()` (both return the `HashMap<usize, Vec<(RoutePattern, ServerHookHandler)>>` indexed by segment count).
 
 Pattern parser (`src/route/impl.rs::RoutePattern::parse_route`):
 
@@ -317,7 +395,7 @@ impl HookType {
 }
 ```
 
-`Option<isize>` is the execution priority — higher runs first. `None` means "default order 0" and is **excluded from the uniqueness check**; only hooks with explicit `order = Some(isize)` are deduped. `HookType` has its own `Hash`/`Eq` that compares function pointers via `std::ptr::fn_addr_eq` (important for inventory-keyed hashtables).
+`Option<isize>` is the execution priority — but the direction is **counter-intuitive**: hooks with `order = None` (default; no priority specified) run **first**; hooks with `Some(isize)` run after, sorted by their integer. `HookType::assert_unique_order` is called by `#[hyperlane]` (the official init macro) automatically and panics on duplicate `(HookType variant, Some(isize))` pairs; `None` orders are still checked for duplicates when `#[hyperlane]` is the registration entry point. `HookType` has its own `Hash`/`Eq` that compares function pointers via `std::ptr::fn_addr_eq` (important for inventory-keyed hashtables).
 
 ### Trait hierarchy (`src/hook/trait.rs`)
 
@@ -376,7 +454,9 @@ impl Hook {
 }
 ```
 
-`Handle_router!` sugar is not part of this crate; use `Hook::factory::<MyHandler>()` or the fluent `Server` methods directly. Attribute macros, if used, belong to an external companion crate.
+`Handle_router!` sugar is not part of this crate. The recommended way for normal users to register routes/hooks is via the official `hyperlane-macros` attribute macros (`#[route(...)]`, `#[task_panic]`, `#[request_error]`, `#[request_middleware]`, `#[response_middleware]`) combined with `#[hyperlane(server: Server)]` in `main`; the macro then walks the `inventory` registry and injects the handlers into the `Server` instance, automatically calling `HookType::assert_unique_order`. The legacy fluent `Server::route::<T>(path).await` etc. also work but skip the priority-uniqueness check.
+
+`Hook::factory::<T>()` (defined in `src/hook/impl.rs`) builds a `ServerHookHandler` that internally awaits `T::new(stream, ctx)` then `handle(stream, ctx)`. It is a **low-level API** used when writing a custom registration crate (one that submits to `inventory` directly) — ordinary application code should not call it.
 
 ## `ServerControlHook` (`src/hook/struct.rs`)
 
@@ -402,7 +482,7 @@ impl ServerControlHook {
 Usage:
 
 ```rust
-let control: ServerControlHook = server.run().await.unwrap();
+let control: ServerControlHook = server.run().await.unwrap_or_default();
 tokio::spawn(async move { control.wait().await; /* server is now done */ });
 // on Ctrl-C:
 control.shutdown().await;     // aborts the spawned accept_connections JoinHandle
@@ -449,6 +529,24 @@ pub enum RouteError {
 
 `Server::run` returns `Result<ServerControlHook, ServerError>`. `RouteError` is what `RouteMatcher::add(...)` panics with via `.unwrap()`.
 
+### Reading `RequestError` from a `request_error::<T>` hook
+
+Inside an `impl ServerHook for RequestErrorHook` handler, the error data is read from the `Context` with the **sync** accessor `ctx.try_get_request_error_data() -> Option<RequestError>` (or `ctx.get_request_error_data() -> RequestError`, which panics on absence). `RequestError` exposes `get_http_status_code() -> ResponseStatusCode` and `to_string() -> String` for shaping the response:
+
+```rust
+async fn handle(self, _: &mut Stream, ctx: &mut Context) -> Status {
+    let error: RequestError = ctx.try_get_request_error_data().unwrap_or_default();
+    let _: Vec<u8> = ctx
+        .get_mut_response()
+        .set_status_code(error.get_http_status_code())
+        .set_body(error.to_string())
+        .build();
+    Status::Continue
+}
+```
+
+`hyperlane-macros` also exposes `#[try_get_request_error_data(error_data)]` and `#[request_error_data(error_data)]` parameter macros that auto-extract the data into a local binding.
+
 ## Flush helpers (`src/server/impl.rs`)
 
 `Server` also re-exports these as **associated functions** (no `&self`):
@@ -463,71 +561,121 @@ Server::try_flush_stdout_and_stderr() -> io::Result<()>
 Server::flush_stdout_and_stderr()
 ```
 
-`Server::handle_request_error(stream, ctx, error)` is the public method invoked by `handle_connection` when the request parse fails — it sets `RequestErrorData` on the context, marks the stream non-closed, and runs the `request_error::<T>` hook chain until one returns `Reject`.
+`Server::handle_request_error(stream, ctx, error)` is the **internal** entry point invoked by `handle_connection` when the request parse fails — it sets `RequestErrorData` on the context, marks the stream non-closed, and runs the `request_error::<T>` hook chain until one returns `Reject`. **Application code should not call it directly**; register a `request_error` hook with `server.request_error::<MyHook>().await` or the `#[request_error]` attribute macro instead.
+
+### Stream send / flush (the real network I/O surface)
+
+The `Stream` passed alongside `&mut Context` is also the place where bytes are actually written. These are **async** and live on `Stream`, not `Context`:
+
+```rust
+stream.try_send(data: impl AsRef<[u8]>) -> Result<(), ResponseError>   // async
+stream.send(data: impl AsRef<[u8]>) -> ()                              // async, panics on err
+stream.try_send_list(frames: &[impl AsRef<[u8]>]) -> Result<(), ...>  // async
+stream.send_list(frames) -> ()                                         // async, panics
+stream.try_flush() -> Result<(), ResponseError>                        // async
+stream.flush() -> ()                                                   // async, panics
+stream.set_closed(closed: bool)                                        // sync — see pitfall
+stream.is_keep_alive() -> bool                                         // sync
+```
+
+`hyperlane-macros` provides parameter-macro sugar that wraps these: `#[send]`, `#[try_send]`, `#[send_list]`, `#[try_send_list]`, `#[flush]`, `#[try_flush]`, `#[closed]`, `#[try_get_http_request]`, `#[try_get_websocket_request]`. See `references/hyperlane-macros/send-flush.md` for the full macro table.
 
 ## Request/Response body and headers
 
-`hyperlane` re-exports `http_type::*`, so `Request`, `Response`, `Method`, `HttpVersion`, `Cookie`, `HttpUrl`, etc. all come via that glob (see `http-type` skill for full listings). The concrete `set_response_body`, `set_response_header`, `get_request_*` calls on `Context` are **async** because the underlying buffers may not be fully read until the connection phase completes — always `.await` them:
+`hyperlane` re-exports `http_type::*`, so `Request`, `Response`, `Method`, `HttpVersion`, `Cookie`, `HttpUrl`, etc. all come via that glob (see `http-type` skill for full listings). All request access is via `ctx.get_request() -> &Request` (read-only); all response mutation is via `ctx.get_mut_response() -> &mut Response` which returns a fluent `&mut Response` for `set_*` chaining and ends with `.build() -> Vec<u8>`. **All of these are sync** — the `.await`/`async` semantics belong to `stream.try_send / try_flush` and `Server::run`, not to the request/response setters.
 
 ```rust
-async fn json_echo(_: &mut Stream, ctx: &mut Context) {
-    let body: String = ctx.get_request_body().await;
-    ctx.set_response_body(body).await;
-    ctx.set_response_status_code(200).await;
-    ctx.set_response_header("Content-Type", "application/json").await;
+async fn json_echo(_: &mut Stream, ctx: &mut Context) -> Status {
+    // Read body — three options depending on shape:
+    let body_str: String = ctx.get_request().get_body_string();
+    // or: let body_bytes: &RequestBody = ctx.get_request().get_body();
+    // or: let body_json: T = ctx.get_request().get_body_json::<T>();   // panics on parse err
+    //     let body_json: Result<T, _> = ctx.get_request().try_get_body_json::<T>();
+
+    // Write response — all sync, fluent on the &mut Response, .build() materialises Vec<u8>:
+    let body_json: &str = r#"{"echo":"ok"}"#;
+    let _data: Vec<u8> = ctx
+        .get_mut_response()
+        .set_status_code(200)
+        .set_header("Content-Type", "application/json")
+        .set_body(body_json)
+        .build();
     Status::Continue
 }
 ```
 
+The `hyperlane-macros` crate offers `#[request_body]`, `#[request_body_json]`, `#[response_header]`, `#[response_status_code]`, `#[response_body]`, `#[response_version]` and the `#[prologue_macros(...)]` / `#[epilogue_macros(...)]` composite macros as sugar over the same accessors — see `references/hyperlane-macros/response.md` and `request.md`.
+
 ## Plugin / WebSocket / SSE
 
-Hyperlane itself is HTTP + middleware + hooks. WebSocket and SSE come from sibling crates registered through `inventory`:
+WebSocket and SSE are **first-class citizens of the `hyperlane` main crate** — no separate plugin crate is required to host them:
+
+- WebSocket: detect via `ctx.get_request().is_ws_upgrade_type()` (or the `#[is_ws_upgrade_type]` parameter macro), frame and send via `stream.try_send_list(...)` / `stream.send_list(...)` plus `WebSocketFrame::create_frame_list(...)`. `Stream::try_get_websocket_request()` is the async handshake extractor; the `#[try_get_websocket_request(frame_data)]` parameter macro wraps it.
+- SSE: just `stream.try_send(&frame)` on a keep-alive stream. No special protocol helper is needed.
+
+The two optional companion crates are **purely additive**:
 
 ```toml
-# Cargo.toml
-hyperlane                 = "21"
-hyperlane-plugin-websocket = "..."
-hyperlane-broadcast        = "..."   # SSE helper
+# Cargo.toml (all optional — main crate works without them)
+hyperlane                 = "..."
+hyperlane-broadcast        = "..."   # SSE / event-stream broadcast bus (websocket docs reference it)
+hyperlane-plugin-websocket = "..."   # pre-built WebSocket route glue (use only if you want the default frames helper)
+hyperlane-utils            = "..."   # frequently-included utilities (cookie, broadcast, etc.)
+hyperlane-time             = "..."   # time helpers
+hyperlane-log              = "..."   # async logging
 ```
 
-The plugins self-register via `inventory::submit!` macros on `static` items (or use `#[plugin_websocket]` style helpers), so once linked into the binary, the framework finds them statically. See `hyperlane-plugin-websocket/SKILL.md` and `hyperlane-broadcast/SKILL.md` for the registration payloads.
+Anything you can do with the optional crates you can also do directly with `Stream` + `ctx.get_request()` + `WebSocketFrame`. Add them only if their concrete helpers save you real code.
 
 ## Async/Sync split quick reference
 
-| Method                                                                                                    | Sync/Async                                               | Notes                                   |
-| --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------- |
-| `Context::set_response_body`                                                                              | **async**                                                | buffer may not be flushed yet           |
-| `Context::set_response_status_code`                                                                       | **async**                                                |                                         |
-| `Context::set_response_header`                                                                            | **async**                                                |                                         |
-| `Context::set_response_version`                                                                           | **async**                                                |                                         |
-| `Context::get_request_body`                                                                               | **async**                                                | requires connection buffer completion   |
-| `Context::get_request_method/path/version`                                                                | **async**                                                |                                         |
-| `Context::get_request_header`                                                                             | **async**                                                |                                         |
-| `Context::get_request_query`                                                                              | **async**                                                |                                         |
-| `Context::try_get_route_param` / `get_route_param`                                                        | sync                                                     |                                         |
-| `Context::set_attribute` / `get_attribute` / `try_get_attribute` / `remove_attribute` / `clear_attribute` | sync                                                     |                                         |
-| `Context::try_get_task_panic_data` / `get_task_panic_data`                                                | sync                                                     |                                         |
-| `Context::try_get_request_error_data` / `get_request_error_data`                                          | sync                                                     |                                         |
-| `Context::set_task_panic`                                                                                 | sync                                                     |                                         |
-| `Server::run`                                                                                             | async (consumes internally via `unsafe { self.leak() }`) | spawns a tokio task for the accept loop |
-| `ServerHook::new` / `handle`                                                                              | async                                                    | `impl Future + Send`                    |
-| `ServerControlHook::wait` / `shutdown`                                                                    | async                                                    |                                         |
+> **Last verified against docs-pages main branch.** After the `Context` / `Request` / `Response` split, the old `ctx.set_response_*` / `ctx.get_request_*` direct methods are gone — response / request accessors all live on `Request` / `Response` reached via `ctx.get_request() / get_response() / get_mut_response()`. Network I/O on `Stream` is the main async surface.
+
+| Method / family | Sync/Async | Notes |
+| --- | --- | --- |
+| `ctx.get_request() -> &Request` | sync | the only entry to read-side data |
+| `ctx.get_response() -> &Response` | sync | read-only view of the response |
+| `ctx.get_mut_response() -> &mut Response` | sync | the only entry to write-side data; ends with `.build() -> Vec<u8>` |
+| `Request::get_method / get_path / get_host / get_version / get_querys / get_body / get_body_string / get_body_json / get_header / get_headers / get_query / has_header / is_ws_upgrade_type` | sync | all return references / values, no `.await` |
+| `Response::set_version / set_status_code / set_reason_phrase / set_header / add_header / set_body / remove_header / remove_header_value / clear_headers` | sync | fluent on `&mut Response`; `set_response(Response::default())` replaces wholesale |
+| `Response::build() -> Vec<u8>` | sync | materialise the wire bytes; pass to `stream.try_send(data).await` |
+| `Response::get_body / get_body_string / try_get_body_json / get_body_json` | sync | reading back a response body |
+| `ctx.try_get_route_param / get_route_param / get_route_params` | sync | `HashMap` lookup against pattern captures |
+| `ctx.{get, set, try_get, remove, clear}_attribute` | sync | generic key/value bag on `Context` |
+| `ctx.try_get_task_panic_data / get_task_panic_data` | sync | read by the `task_panic::<T>` hook |
+| `ctx.try_get_request_error_data / get_request_error_data` | sync | read by the `request_error::<T>` hook |
+| `ctx.set_task_panic` | sync | framework-only; users don't call this |
+| `Stream::set_closed / is_keep_alive / try_get_http_request / try_get_websocket_request` (return `Result`) | async (the `try_get_*` pair) / sync (the flag ones) | network I/O on the accept side |
+| `Stream::send / try_send / send_list / try_send_list / flush / try_flush` | **async** | main network write surface; `try_*` returns `Result<(), ResponseError>`, plain version panics |
+| `Server::route / task_panic / request_error / request_middleware / response_middleware` | **async** | each is a separate `.await`ed statement on `let mut server` |
+| `Server::server_config / request_config / config_from_json / format_bind_address` | sync | no `.await` |
+| `Server::run` | **async** | returns `Result<ServerControlHook, ServerError>`; use `.unwrap_or_default()` |
+| `ServerHook::new / handle` | async | `impl Future + Send` |
+| `ServerControlHook::wait / shutdown` | **async** | wait blocks; shutdown triggers a `tokio::sync::watch` abort signal |
+| `Server::{try_,}flush_stdout / flush_stderr / flush_stdout_and_stderr` | sync (associated fns) | for the parent process stdout, not the wire stream |
+| `#[try_get_*]`, `#[try_send]`, `#[try_flush]`, `#[send]`, `#[flush]`, `#[closed]`, `#[is_get_method]`, `#[methods(get, post)]`, `#[is_http1_1_version]`, `#[is_ws_upgrade_type]` (proc-macro sugar) | async / sync depending on what they wrap | `hyperlane-macros` parameter / attribute macros; see `references/hyperlane-macros/` for the per-macro sync/async classification |
 
 ## Common pitfalls
 
-1. **`Server::route<S>` is turbofish-only** — `S` is a type marker for `ServerHook`, not the path. `route("/")` is shorthand but reads as `route::<()>(...)` if you don't turbofish. Always write `route::<Index>("/")` for `impl ServerHook for Index`.
+1. **`Server::route<S>` is turbofish-only** — `S` is a type marker for `ServerHook`, not the path. Always write `route::<Index>("/")` for `impl ServerHook for Index`. The `route` method is `async` and must be `.await`ed as a standalone statement on a `let mut server`.
 2. **Route pattern `{name}` vs `{name:regex}`** — bare `{name}` matches one segment, `{name:.*}` matches multi-segment tail. The regex must compile; invalid regex yields `InvalidRegexPattern` and a panic.
 3. **Duplicate route registration panics** with `DuplicatePattern`; empty pattern panics with `EmptyPattern`; invalid regex panics with `InvalidRegexPattern`. All three are runtime panics — there is no compile-time check.
 4. **`get_route_param` panics if absent** — use `try_get_route_param` for optional params.
-5. **`Context::set/get_request_*` and `set_response_*` are async** — must be `.await`ed. Sync methods are: `get/set/remove/clear_attribute`, `try_get_route_param`, panic/error-data getters/setters.
-6. **`Server::run` is `&self`** — clones internally via `unsafe { self.leak() }`. After `run()` returns, the `Server` value can still be inspected for diagnostics.
-7. **`HookType` priority uniqueness** — `assert_unique_order` panics only on `(same HookType variant, same Some(isize))`. `None` orders are never checked. Default fluent helpers (`task_panic::<T>` etc.) never call `assert_unique_order` — only explicit `handle_hook(HookType::RequestMiddleware(Some(0), factory))` triggers it.
-8. **`inventory` is only the registry mechanism** — `hyperlane` declares `inventory::collect!(HookType)`, but WebSocket/SSE plugins and any attribute macros are external crates. Add the companion crate itself to `[dependencies]` and follow that crate's registration contract.
+5. **`Context` has no direct `set_response_*` / `get_request_*` methods** — request access is `ctx.get_request().get_*()` and response mutation is `ctx.get_mut_response().set_*(...).build() -> Vec<u8>`. All of these are **sync**. The genuinely **async** surface is `stream.send / try_send / send_list / try_send_list / flush / try_flush` (network I/O), `Server::run` / `server.route::<T>(path).await` / etc. (registration), `ServerControlHook::wait / shutdown` (control), and the `#[try_send]` / `#[try_flush]` / `#[try_get_*]` proc-macro wrappers.
+6. **`Server::run` returns `Result<ServerControlHook, ServerError>`** — use `server.run().await.unwrap_or_default()` (not `.unwrap()`); `ServerControlHook: Default`, so the no-op fallback is well-defined. After `run`, drive the accept loop with `control.wait().await` or terminate it with `control.shutdown().await`.
+7. **`HookType` priority order is counter-intuitive** — hooks with `order = None` (no priority specified) run **first**; hooks with `Some(isize)` run after, sorted by their integer. `#[hyperlane(server: Server)]` calls `HookType::assert_unique_order` automatically and panics on duplicate `(HookType variant, Some(isize))` pairs. The bare fluent `server.route::<T>(path).await` form does **not** invoke the uniqueness check.
+8. **`inventory` is the registry mechanism for the `#[route]` / `#[task_panic]` / `#[request_error]` / `#[request_middleware]` / `#[response_middleware]` attribute macros** — the `hyperlane` crate declares `inventory::collect!(HookType)`; the `hyperlane-macros` crate emits the `inventory::submit!` payloads that the `#[hyperlane]` macro then walks. You only need to know `inventory` exists if you write a custom registration crate.
 9. **`tokio::main` flavor** — hyperlane uses `#[tokio::main]` with default features; multi-threaded runtime is fine. Single-threaded runtime works but spawned `task_handler`s need `Send + 'static` futures which all the framework helpers satisfy.
-10. **Body buffering** — large request bodies are streamed via `http_type` buffer config; tune `RequestConfig` (`max_body_size`, `read_timeout_ms`) if you expect multi-MB uploads.
+10. **Body buffering** — large request bodies are streamed via `http_type` buffer config; tune `RequestConfig` (`max_body_size`, `read_timeout_ms`) if you expect multi-MB uploads, or start from `RequestConfig::high_security()` for hostile environments.
 11. **`Status::default() == Reject`** — middleware/macros that forget to return `Status::Continue` abort the pipeline silently. Always explicit `Status::Continue` at the end of `handle`.
-12. **Don't reuse `Context`/`Stream` across requests** — they're owned per request via the `Box::leak → usize address → Box::from_raw` cycle. Cloning a `Context` (`#[derive(Clone)]`) is OK but doesn't share state across requests.
-13. **`ServerHookHandler` is two-arg** — `Arc<dyn Fn(&mut Stream, &mut Context) -> FutureBox<Status>>`. If you write your own factory, both `&mut Stream` and `&mut Context` matter.
+12. **Don't reuse `Context`/`Stream` across requests** — they're owned per request via the `Box::leak → usize address → Box::from_raw` cycle. `Context: Clone` exists but cloning does not share state across requests. If you must hand a `Context` reference to another task/thread, use `Context::clone` (the explicit `async.md` API) — passing the leaked address across an arbitrary thread boundary is unsafe.
+13. **`ServerHookHandler` is two-arg** — `Arc<dyn Fn(&mut Stream, &mut Context) -> FutureBox<Status>>`. If you write your own factory (`Hook::factory::<T>()`), both `&mut Stream` and `&mut Context` matter.
+14. **`Server::format_bind_address(host, port)`** returns a `String` suitable for `ServerConfig::set_address(...)`; use it instead of hand-formatting `"{host}:{port}"` so the formatting stays consistent across `multi-server.md` examples.
+15. **`request_body` / `request_body_json` / `response_header` macro syntax** has two forms — `KEY => VALUE` and `KEY, VALUE` are both accepted; `response_header` uses `KEY => VALUE` (see `references/hyperlane-macros/response.md`).
+16. **`#[methods(get, post)]`** is the correct multi-method filter syntax (a comma-separated list inside the macro, **not** `methods = "get,post"`). Same family: `#[is_get_method]`, `#[is_post_method]`, `#[is_http1_1_version]`, `#[is_ws_upgrade_type]`, `#[host("example.com")]`, `#[referer("...")]`, `#[reject_host(...)]`, `#[reject_referer(...)]`, `#[filter(...)]`, `#[reject(...)]`.
+17. **`#[prologue_macros(...)]` and `#[epilogue_macros(...)]` order matters** — the **first** macro inside `prologue_macros` is the **outermost** wrapper; the **last** macro inside `epilogue_macros` is the **outermost** wrapper. Reversing the order changes the order in which the response / request are processed.
+18. **`Stream::set_closed(true)` does not terminate the current request lifetime** — it just stops the framework from sending further responses on that stream. Returning `Status::Reject` from your handler is what actually short-circuits the pipeline.
+19. **`Server` registration methods are now standalone, not chainable** — every `server.route::<T>(path).await` / `server.task_panic::<T>().await` / `server.request_middleware::<T>().await` / `server.response_middleware::<T>().await` / `server.request_error::<T>().await` is a separate statement; mixing the old `server.route::<A>("/a").route::<B>("/b")` form will not compile. `server_config` / `request_config` / `config_from_json` remain **sync** (no `.await`) and may be called either standalone or chained (they return `&mut Self`).
 
 ## Verification checklist
 
@@ -553,12 +701,16 @@ The plugins self-register via `inventory::submit!` macros on `static` items (or 
 
 ## Related skills
 
-- `hyperlane-macros` — optional external companion crate for route/middleware/error-hook attribute macros; not a dependency or module of this repository
+- `hyperlane-macros` — **official companion crate** that ships the process/attribute/composite macros used in modern hyperlane code: `#[route]`, `#[task_panic]`, `#[request_error]`, `#[request_middleware]`, `#[response_middleware]`, `#[hyperlane]`, `#[hyperlane_init]`, `#[methods]`, `#[host]` / `#[referer]` / `#[reject_host]` / `#[reject_referer]`, `#[filter]` / `#[reject]`, `#[is_get_method]` / `#[is_post_method]` / `#[is_http_version]` / `#[is_ws_upgrade_type]`, plus the `prologue_macros` / `epilogue_macros` / `prologue_hooks` / `epilogue_hooks` / `context!` composite / function macros. **Not optional for attribute-macro code**; this is what `use hyperlane_macros::*;` imports.
 - `hyperlane-quick-start` — full-stack example app (HTTP + WebSocket + SSE + middleware + DB + JWT)
-- `hyperlane-broadcast` — SSE / event-stream broadcast helper
-- `hyperlane-plugin-websocket` — WebSocket plugin registration
+- `hyperlane-broadcast` — SSE / event-stream broadcast helper (SSE pub/sub bus)
+- `hyperlane-plugin-websocket` — pre-built WebSocket route glue (optional convenience wrapper; main crate can host WebSocket directly)
 - `hyperlane-log` — async logging helpers
 - `hyperlane-cli` — `hyperlane-cli` companion CLI
+- `hyperlane-utils` — frequently-included utility crate (cookies, broadcast, etc.) used by `hyperlane-broadcast` and `hyperlane-plugin-websocket`
+- `hyperlane-time` — time helpers (used by `hyperlane-plugin-websocket` and several examples)
+- `hyperlane-ai` — AI integration helpers (LLM client + streaming adapters)
 - `lombok-macros` — `Data`/`New`/`Getter`/`GetterMut`/`Setter`/`CustomDebug`/`DisplayDebug` derives used throughout `hyperlane` + `http_type` structs
 - `http-constant` — HTTP method / status / header constants (re-exported by `http_type::*` and thus visible via `hyperlane::*`)
 - `http-compress`, `http-request`, `http-type` — sibling crates in the hyperlane ecosystem
+- `tcp-request`, `udp-request` — raw TCP / UDP request adapters in the same ecosystem

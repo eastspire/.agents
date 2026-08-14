@@ -3,16 +3,35 @@ name: euv
 description: 'A declarative, cross-platform UI framework for Rust with virtual DOM, reactive signals, and HTML/CSS macros for WebAssembly. Use when building browser UIs in pure Rust, compiling web frontends to WebAssembly, or working with `html!`, `class!`, `vars!`, `var!`, `watch!`, `computed!`, `#[component]`, `Signal<T>`, `App::mount`, `euv-ui`, or `euv-engine`. Triggers: euv, html! macro, class! macro, vars!, var!, watch!, computed!, Signal<T>, App::mount, euv-ui, euv-engine, euv_component, virtual DOM, reactive signal, WebAssembly UI, WebGPU game engine.'
 license: MIT
 ---
-
 # euv
 
 - GitHub: <https://github.com/euv-dev/euv.git>
 - crates.io: <https://crates.io/crates/euv>
 - docs.rs: <https://docs.rs/euv>
 
+## Documentation sources (docs-pages)
+
+The full Chinese reference for euv lives in the [docs-pages](https://github.com/docs-pages/docs) repo (private). **This skill is the API/pitfall cheatsheet; docs-pages is the source of truth for tutorials, full macro specs, and feature guides.**
+
+Selected pages from docs-pages are vendored flat under `references/` (no symlinks — plain copies of the specific files this skill needs). To find a topic:
+
+- **Macros** — `references/html.md`, `class.md`, `component.md`, `watch.md`, `computed.md`, `var.md`, `css-vars.md` (full syntax, props, all examples)
+- **Feature guides** — `references/reactive.md`, `vdom.md`, `event.md`, `engine.md` (2D/3D engine API), `lifecycle.md`, `component.md`, `mount.md`, `binding.md`, `list.md`, `conditional.md`, `async.md`, `form.md`, `keep-alive.md`, `canvas.md`, `websocket.md`, `sse.md`, `observer.md`, `platform.md`, `animation.md`, `timer.md`, `select.md`, `file.md`, `renderer.md`
+
+To refresh `references/` after docs-pages updates, run the sync script from the repo root:
+
+```shell
+bash scripts/sync-references.sh                       # full sync (clones docs-pages)
+bash scripts/sync-references.sh --source-dir <path>   # reuse an existing clone
+bash scripts/verify-references.sh                     # show what changed vs HEAD
+```
+
+The mapping of `references/<file>.md` → `docs-pages/src/...` lives in `scripts/sync-references.mapping`. To add a new file, append a line; to pin a customized version, add `# manual override:` to its line and the script will leave that dest alone. See `scripts/README.md` for the full workflow.
+
+
 ## Overview
 
-euv is a workspace of six member crates under one umbrella. The root package is version `0.12.27`, edition 2024, and is `rlib`-only; `euv-macros` is the separate proc-macro crate.
+euv is a workspace of six member crates under one umbrella. The root package is version `0.13.3`, edition 2024, and is `rlib`-only; `euv-macros` is the separate proc-macro crate.
 
 | Crate         | Path       | Purpose                                                                                                                                                                                                                          |
 | ------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -36,14 +55,21 @@ pub use {console_error_panic_hook, js_sys, wasm_bindgen, wasm_bindgen_futures, w
 - crate 名: `euv` (workspace root)
 - Rust edition: `2024`
 - License: `MIT`
-- 类型: `[workspace]` with 6 members: `cli`, `core`, `engine`, `example`, `macros`, `ui`
-- 关键字: `cross-platform` (root); members add: `http`, `request`, `response`, `tcp`, `cross-platform`, `web-programming`, `network-programming`
+- 类型: `[workspace]` with 6 members: `cli`, `core`, `engine`, `example`, `macros`, `ui`(注:`core` 不在 `cargo add` 列表,其能力已合入 `euv` facade)
+- 关键字: docs-pages 未给出权威 Cargo keywords 列表;以 `Cargo.toml` 为准。
 
 ## Installation
 
 ```shell
 cargo add euv
 cargo add euv-ui euv-engine
+```
+
+Dev server / build tool — install the `euv-cli` subcommand (`cargo install euv-cli` installs a binary named `euv`):
+
+```shell
+cargo install euv-cli
+euv run --crate-path . --www-dir ./www --port 80 -- --target web
 ```
 
 In `Cargo.toml` the workspace declaration is:
@@ -55,11 +81,24 @@ euv-ui = { path = "euv/ui" }
 euv-engine = { path = "euv/engine" }
 ```
 
-`euv` is **rlib-only** (`crate-type = ["rlib"]`), and `euv-macros` is `proc-macro = true`; `euv-core`, `euv-ui`, and `euv-engine` are rlib crates. There is no framework-provided `main.rs`: the example exposes its own `#[wasm_bindgen] pub fn main()`, calls `console_error_panic_hook::set_once()`, `inject_app_global_css()`, then `App::mount("#app", app)`.
+`euv` 库本身 **rlib-only** (`crate-type = ["rlib"]`),而用户项目 `lib.rs` 必须 `crate-type = ["cdylib", "rlib"]`(`cdylib` 让 `wasm-pack` 输出 `*.wasm`;与 `quick-start/README.md:49` 一致)。`euv-macros` 是 `proc-macro = true`;`euv-core`、`euv-ui`、`euv-engine` 是 rlib crates。没有框架自带的 `main.rs`:`example` 暴露 `#[wasm_bindgen] pub fn main()`,内部 `console_error_panic_hook::set_once()` → `euv_ui::inject_app_global_css()` → `App::mount("#app", app)`。
+
+## `euv-cli`
+
+`euv-cli` 是独立的 CLI 工具,二进制名 `euv`,提供 3 个 mode:**`run`**(构建 + dev server + 热重载)、**`build`**(仅构建,等同 `wasm-pack build`)、**`fmt`**(格式化 euv macro)。`--` 之后的 `wasm-pack build` 参数会原样透传(`cli/README.md:27-31`)。安装 + dev 启动一行搞定:
+
+```shell
+cargo install euv-cli
+
+euv run --dev --crate-path ./example --port 80 --www-dir www --index-html ./template.html -- \
+  --target web --out-dir www/pkg --out-name euv --no-typescript --no-pack --no-gitignore
+# 或仅构建:euv build
+# 或发布构建:euv run --release ...
+```
 
 ## Quick start
 
-Minimal counter (matches `example/src/page/counter/view/fn.rs`):
+Minimal counter (matches `example/src/page/counter/view/fn.rs` — full version with `euv-ui` wrappers; `quick-start/README.md:62-96` shows the bare `div`/`h1`/`button` form without `euv-ui`):
 
 ```rust
 use euv::*;
@@ -68,7 +107,7 @@ use euv_ui::*;
 #[wasm_bindgen]
 pub fn main() {
     console_error_panic_hook::set_once();
-    inject_app_global_css();
+    euv_ui::inject_app_global_css();
     App::mount("#app", app);
 }
 
@@ -121,7 +160,7 @@ Zero-size façade struct (`core/src/app/struct.rs`). All App entry points live i
 impl App {
     pub fn mount<S, F>(selector: S, render_fn: F)            // CSS-selector mount
         where S: AsRef<str>, F: FnOnce() -> VirtualNode;
-    pub fn use_signal<T, F>(init: F) -> Signal<T>           // must be inside render fn
+    pub fn use_signal<T, F>(init: F) -> Signal<T>           // use inside render fn; outside, use Signal::create
         where T: Clone + PartialEq + 'static, F: FnOnce() -> T;
     pub fn use_cleanup<F>(cleanup: F)                        // called on context teardown
         where F: FnOnce() + 'static;
@@ -190,25 +229,56 @@ Rules:
 `core/src/vdom/node/enum.rs`:
 
 ```rust
-pub enum Tag { Element(String), Component(String) }
-pub enum VirtualNode<T = ()> {
+pub enum Tag { Element(String), Component(String) }   // Tag::Component marks custom #[component] functions
+pub enum VirtualNode<Props = ()> {
     Element {
         tag: Tag,
         attributes: Vec<AttributeEntry>,
         children: Vec<VirtualNode>,
         key: Option<String>,
-        props: Option<Box<T>>,
+        props: Option<Box<Props>>,
     },
     Text(TextNode),
     Fragment(Vec<VirtualNode>),
     Dynamic(DynamicNode),
     Empty,
 }
+
+impl VirtualNode<Props> {
+    // children 折叠为单个 VirtualNode
+    //   - 无 children → Empty
+    //   - 1 个 child  → 直接返回该 child
+    //   - ≥2 个       → Fragment(Vec<VirtualNode>)
+    // 错误形式(无 child)内部走 try_get_child_node().unwrap_or_default()。
+    pub fn get_child_node(&self) -> VirtualNode;
+    // 取 Element 变体的 props 克隆。`Text` / `Fragment` / `Dynamic` / `Empty` 全部返回 None。
+    // 要求 Props: Clone(签名 where bound 强制)。
+    pub fn try_get_props(&self) -> Option<Props> where Props: Clone;
+    // 返回 Option<VirtualNode>(无 child 时 None,1 个 child 时 Some(child),多个时 Some(Fragment))
+    pub fn try_get_child_node(&self) -> Option<VirtualNode>;
+    // Vec<VirtualNode> 形式:Element 的 children 字段;非 Element 返回 None
+    pub fn try_get_children(&self) -> Option<&Vec<VirtualNode>>;
+    pub fn has_children(&self) -> bool;
+}
+```
+
+```rust
+use euv::VirtualNode;
+
+fn first_child(node: &VirtualNode) -> VirtualNode {
+    node.get_child_node()      // 自动 Empty / single / Fragment 三态
+}
+
+fn dump_props<P: Clone + std::fmt::Debug>(node: &VirtualNode<P>) {
+    if let Some(p) = node.try_get_props() {        // 非 Element 变体返回 None
+        println!("props = {p:?}");
+    }
+}
 ```
 
 ### CSS class helpers
 
-`ui/src/style/class/fn.rs` exposes class helpers like `c_page_container()`, `c_counter_value()`, `c_button_controls()` etc. Call them inside `class: c_xxx()` attributes. To register your own styles use `Css::inject_css(text)` (`core/src/vdom/attribute/impl.rs`) or `ui::inject_app_global_css()`.
+`ui/src/style/class/fn.rs` exposes class helpers like `c_page_container()`, `c_counter_value()`, `c_button_controls()` etc. Call them inside `class: c_xxx()` attributes. To register your own styles use `Css::inject_css(text)` (公开 API 形式;`core/src/vdom/attribute/impl.rs` 是源码内部路径) 或 `euv_ui::inject_app_global_css()`。
 
 ## `html!` macro
 
@@ -240,7 +310,9 @@ html! {
 
 Critical restrictions (encoded in `html/fn.rs` and `euv-html-macro-traps` skill):
 
-- `if {} else {}` (block-level `else` after `if {}`) is NOT supported. Use `if {} {} else if {} {} else {} {}` or two stacked `if {}` blocks.
+- `if / if-else / if-else if / if-else if-else` 块级链 **全部支持**。`macros/src/html/impl.rs:165-170` 是块级 `else` 的解析路径(`else` 后非 `if` 直接 push `(None, body, false)` 终止循环)。reactive / inline 形态和混合链(`if a {} else if {b} {}`)也均 OK。`form.md:151-165` 级联下拉框示例演示了 `if { } { } else if { } { } else { "" }` 链。
+- `if { cond } { body }` 的 body **必须**用 `{ ... }` 花括号块包裹(不接裸表达式或裸子元素列表)。`macros/src/html/impl.rs:144-146` 强制 `braced!` 解析 body。同样的限制也适用于 `else` / `else if` 的 body,以及 `for ... in ... { body }` / `match ... { ... }` 的所有 arm body。
+- 在 attribute 位置使用 `if ...`(例如 `class: if { cond } { c_a() } else { c_b() }`)时,body 必须是单值或 `{ ... }` 块,**不能**是裸 children 块(`macros/src/html/impl.rs` 的 attribute-value 解析路径约 L312-318)。
 - Closures captured inside `for` bodies cannot outlive the closure, so complex per-row event handlers (edit/delete/pagination) need a refactor pattern (see `euv-html-macro-traps`).
 - Non-`Copy` values captured by the render closure need `.clone()` because the html! body is a `FnMut`.
 - `key:` attribute on each `for`-iteration child is recommended for stable diffing.
@@ -268,7 +340,18 @@ class! {
 }
 ```
 
-`class!` supports plain declarations, parameterized classes, inheritance via call-like entries such as `c_base_button()` or `c_base_button(arg)`, dynamic property keys (`{key}: value`), CSS pseudo selectors (`:hover`, `::before`, nested selectors), and CSS at-rules including `@media`, `@keyframes`, `@supports`, `@layer`, `@container`, `@property`, `@scope`, `@font-face`, and other parsed at-rule forms. It generates a function returning `Css`; `vars!` generates a `Css` block containing custom-property declarations, while `var!(name)` expands to the string `var(--name)`.
+`class!` supports plain declarations, parameterized classes, inheritance via call-like entries such as `c_base_button()` or `c_base_button(arg)`, dynamic property keys (`{key}: value`), CSS pseudo selectors (`:hover`, `::before`, nested selectors), and CSS at-rules including `@media`, `@keyframes`, `@supports`, `@layer`, `@container`, `@property`, `@scope`, `@font-face`, and other parsed at-rule forms. It generates a function returning `Css`; `vars!` 也生成函数,非参数化返回 `&'static Css`,参数化返回 owned `Css`(`css-vars.md:99`);`vars!` 支持参数化:
+
+```rust
+vars! {
+    pub c_theme_dynamic(bg: &str, text: &str) {
+        bg-primary: {bg};
+        text-primary: {text};
+    }
+}
+```
+
+`var!(name)` expands to the string `var(--name)`.
 
 ## Other macros (`euv-macros`)
 
@@ -281,7 +364,7 @@ All proc-macros from `macros/src/lib.rs`:
 | `class! { ... }`       | inline CSS block                                      | Generates `Css` helpers, including selectors, nested selectors, dynamic keys, parameters, inheritance, and at-rules |
 | `vars! { ... }`        | CSS custom-property block                             | Generates a `Css` helper whose declarations are emitted as `--name: value` |
 | `var!(name)`            | inside CSS expressions                                 | Expands to the CSS string `var(--name)` |
-| `watch!(signals..., closure)` | signals + closure | Runs once immediately and again when any input signal changes |
+| `watch!(signals..., closure)` | signals + closure | Runs once immediately and again when any input signal changes; init + on-change runs in `App::batch`, so cascading `set` calls within the same frame are merged into a single DOM update (`binding.md:213-214, 232-233`) |
 | `computed!(signals..., closure) -> T` | signals + typed closure return | Creates a derived `Signal<T>` and updates it when an input changes |
 
 `watch!` real example from `example/src/page/binding/hook/fn.rs`:
@@ -298,6 +381,19 @@ watch!(
     }
 );
 ```
+
+## Event factory
+
+`NativeEventHandler` 是 euv 公开 API 的事件工厂(非 macro,但与 `html!` 事件属性同级别;`event.md:39-79`):
+
+```rust
+impl NativeEventHandler {
+    pub fn create(event_name: &'static str, callback: impl FnMut(Event) + 'static) -> Self;
+    pub fn handle(self, event: &Event);   // manual dispatch
+}
+```
+
+使用:在组件 Props 间传递或复用。`handler.handle(event)` 手动调用。`NativeEventHandler: Clone`,克隆共享同一闭包。
 
 ## `euv-ui` components (`ui/src/component/<name>/view/fn.rs`)
 
@@ -374,54 +470,111 @@ on_focus_scroll_into_view() -> Option<Rc<dyn Fn(Event)>>
 on_blur_restore_height() -> Option<Rc<dyn Fn(Event)>>
 ```
 
+> **注意(docs-pages `event.md:194-245`)**: `use_toggle` / `on_input_value` / `on_change_value` / `on_change_checked` / `on_focus_scroll_into_view` / `on_blur_restore_height` 在 `euv-ui` 中是 `UseEuvInput` 零大小结构体的**关联函数**,而非自由函数;正确调用形式是 `UseEuvInput::on_input_value(text)` 等。`on_input_value` / `on_change_value` 同时支持 `HtmlInputElement` / `HtmlTextAreaElement` / `HtmlSelectElement` 三种表单元素(`event.md:245`);原生 `select` 元素可用 `onchange: UseEuvInput::on_change_value(signal)` 直接绑定(见 `form.md:103-167`)。
+
 ## `euv-engine` (optional)
 
-The engine is a separate rlib crate. It exposes a zero-sized `Engine` namespace and a stateful `EngineHandle`; `Engine::run` initializes the configured Canvas 2D or WebGPU backend, starts the scheduler, and returns the handle. `Engine::webgpu_renderer` and `EngineHandle::init_webgpu` return `Result<_, WebGpuInitError>`; `EngineHandle::init_canvas` returns `bool`.
+`engine/src/lib.rs` 暴露 18 个子模块(全部 `pub use *`):`asset` / `audio` / `cell` / `collider` / `config` / `easing` / `engine` / `entity` / `input` / `math` / `particle` / `physics` / `renderer` / `scene` / `scheduler` / `spatial` / `sprite` / `timer` / `tween`(L8-26)。架构与 `euv::App` 同型:`Engine` 是**零大小**命名空间(所有方法都是 `impl Engine` 上的关联函数,不持有状态),真正干活的是 `EngineHandle`(stateful,持 `EngineConfig` + `CanvasRenderer` / `WebGpuRenderer` / `WebGlRenderer` + `SchedulerHandle`)。`NativeEventHandler`(`euv-core` 公开)与 engine 内部 namespace 的 `EventHandler`(实际是 `Rc<dyn Fn(&EntityEvent)>` 给 `Entity::subscribe` 用)是完全不同的概念,不要混用。
+
+### 完整 Engine 启动示例(Canvas 2D + TickHandler)
 
 ```rust
-let render = RenderConfig::webgpu("#canvas", 1280.0, 720.0);
-let config = EngineConfig::create(render).with_scheduler(SchedulerConfig::default());
-let handle = Engine::run(config, tick_handler).await;
-handle.stop();
+use euv::*;
+use euv_engine::*;
+
+// 1. RenderConfig:canvas2d / webgpu / webgl 都是 (selector, width, height) 3 参(selector 是 S: AsRef<str>)
+let render: RenderConfig = RenderConfig::canvas2d("#game", 1280.0, 720.0);
+// let render = RenderConfig::webgpu("#game", 1280.0, 720.0);   // 3D 用,需要浏览器支持 WebGPU
+// let render = RenderConfig::webgl("#game", 1280.0, 720.0);     // WebGL 2 后备方案
+
+// 2. EngineConfig:create 接受 RenderConfig,默认 SchedulerConfig(60Hz fixed timestep)
+//    builder 链:目前只有 with_scheduler(没有 with_input / with_scene / with_ecs)
+let config: EngineConfig = EngineConfig::create(render);
+
+// 3. TickHandler 必须实现两方法(签名见 engine/src/scheduler/trait.rs)
+struct Game { x: f64 }
+impl TickHandler for Game {
+    fn on_update(&mut self, delta_time: f64) {          // 固定步长,所有游戏逻辑在这
+        self.x += 100.0 * delta_time;
+    }
+    fn on_render(&mut self, interpolation: f64) {      // 每动画帧一次,interpolation ∈ [0,1)
+        // 用 interpolation 在两个 on_update 之间插值,得到平滑渲染
+        let _ = (self.x, interpolation);
+    }
+}
+
+#[wasm_bindgen]
+pub async fn start_game() {
+    // 主路径:new_handle + init_canvas + start
+    let mut handle: EngineHandle = Engine::new_handle(config);
+    if handle.init_canvas() {            // bool — 成功 true,失败 false
+        handle.start(Rc::new(Game { x: 0.0 }) as TickHandlerRc);
+    }
+
+    // 快速路径:Engine::run 一次完成 new_handle + init + start(返回句柄,可用 handle.stop() 停止)
+    let handle: EngineHandle = Engine::run(EngineConfig::create(render), Rc::new(Game { x: 0.0 })).await;
+    // let _ = handle;   // 用 handle.stop() 关闭
+}
 ```
 
-Config builders (`engine/src/config/impl.rs`):
+### Scheduler 独立使用(不用 `Engine`)
+
+`SchedulerHandle::start(config, handler)` 是 `requestAnimationFrame` 驱动的 fixed-timestep loop,`SchedulerConfig` **没有** `default()` 之外的 public 构造;用 `SchedulerConfig::new(fixed_timestep, max_frame_time)`(或 `..Default::default()` 拿到 60Hz 默认值)。`engine.md:153` 和 `engine/src/scheduler/impl.rs:4-8` 都确认 `Default` 是 `new(DEFAULT_FIXED_TIMESTEP, DEFAULT_MAX_FRAME_TIME)`。
 
 ```rust
-EngineConfig::create(render_config)
-    .with_scheduler(scheduler_config);
+use euv_engine::*;
+use std::rc::Rc;
 
-RenderConfig::canvas2d("#canvas", 1280.0, 720.0);
-RenderConfig::webgpu("#canvas", 1280.0, 720.0);
+let cfg: SchedulerConfig = SchedulerConfig::new(1.0 / 60.0, 0.25);   // 60Hz, frame_time 上限 0.25s
+let handler: TickHandlerRc = Rc::new(MyGame::default());
+let sched: SchedulerHandle = SchedulerHandle::start(cfg, handler);
+// ... 之后用 sched.stop() / sched.is_running() / sched.update_count() / sched.frame_count()
 ```
 
-Namespaces (`engine/src/<area>/<file>.rs`):
+### Canvas 2D vs WebGPU vs WebGL
 
-- `math` — `Vector2D/3D`, `Quaternion`, `Matrix4x4`, `Rect`, `Circle`, `Color`, `AABB3D`, `Sphere`, `Plane`, `Ray3D`, `Transform2D/3D`, constants (`PI`, `TWO_PI`, `DEG_TO_RAD`, `EPSILON`), free fns (`clamp`, `lerp`, `distance`, `smoothstep`, `approach`, `sign`, `wrap`, `lerp_angle`, `from_angle`)
-- `entity` — `Entity`, `EventBus`, `Component` trait, types `ComponentRc` / `EntityRc` / `EventHandler`
-- `scene` — `SceneManager`, `Scene` trait, `SceneRc`, transitions (`request_transition`, `process_pending_transition`)
-- `input` — `Input`, `InputState`, `MouseButton`, `InputAction`, touch/key state
-- `physics` — `RigidBody2D/3D`, `PhysicsWorld2D/3D`, `BodyType`, `BodyCollider` / `BodyCollider3D`
-- `collider` — `Collider` trait, `Collider3D` trait, `AabbCollider`, `CircleCollider`, `AabbCollider3D`, `SphereCollider3D`
-- `renderer` — `CanvasRenderer`, `WebGpuRenderer`, `Camera2D/3D`, `SsaaCanvas`, `LinearGradient`, `RadialGradient`, `ShadowConfig`, `RenderLayer`, `BlendMode`, `RenderQuality`, `WebGpuInitError`
-- `sprite` — `SpriteSheet`, `SpriteFrame`, `SpriteAnimation`, `Animator`, `AnimationMode`, `AnimationState`
-- `asset` — `AssetCache`, `AssetLoader`, `AssetType`, `AssetState`, `AssetEntry`
-- `audio` — `GameAudioContext`, `AudioClip`, `AudioPlayState`
-- `scheduler` — `Scheduler`, `SchedulerConfig`, `SchedulerHandle`, `TickHandler` trait, `TickHandlerRc`
-- `spatial` — `SpatialHashGrid2D/3D`
+- `init_canvas(&mut self) -> bool` — 同步,无错误细节,失败仅返回 `false`(用于 fast-path `Engine::run` 也只能靠此判断)。
+- `init_webgpu(&mut self) -> Result<WebGpuRenderer, WebGpuInitError>` — `async`,返回 typed error(`WebGpuInitError`);要在 UI 上报告 WebGPU 失败原因时**直接调** `init_webgpu`,不要走 `Engine::run`。
+- `init_webgl(&mut self) -> Result<WebGlRenderer, WebGpuInitError>`(同形态,`engine.md:53-54`)。
+- 三者**互斥**:init 任意一个会清空另外两个的 renderer 字段(`engine/src/engine/impl.rs:155-168`)。`Engine::run` 内部按 `RenderConfig.get_backend()` 自动选 init 函数。
+- `WebGpuInitError` 是 `renderer` 子模块导出,要在 match arm 里用就 `use euv_engine::WebGpuInitError;`。
+
+### Input / Scene / Entity / Physics 模块速查
+
+- `input` — `Input`(零大小 namespace)、`InputState`、`MouseButton`、`InputAction`(枚举)。底层容器是 `HashSet<Input>` / `HashSet<InputAction>`,**不是** `Set`(`engine/src/lib.rs:38` 已 `use std::collections::{HashMap, HashSet}`)。
+- `scene` — `SceneManager`,`Scene` trait,`SceneRc`;转场 `request_transition` / `process_pending_transition`。
+- `entity` — `Entity`、`EventBus`、`Component` trait;类型别名 `ComponentRc` / `EntityRc` / `EventHandler = Rc<dyn Fn(&EntityEvent)>` / `EventHandlers = HashMap<String, Vec<EventHandler>>`(`engine/src/entity/type.rs:18-21`)。`Entity::subscribe(name, handler)` 绑事件。
+- `physics` — `RigidBody2D::new(id, position, velocity, force_accumulator, rotation, angular_velocity, mass, inverse_mass, restitution, friction, body_type, collider)` 12 参;`RigidBody2D::new_dynamic(id, position)` 简写;`RigidBody3D` 同形;`PhysicsWorld2D/3D`,`BodyType`,`BodyCollider` / `BodyCollider3D`。
+- `collider` — `Collider` / `Collider3D` trait,`AabbCollider`,`CircleCollider`,`AabbCollider3D`,`SphereCollider3D`。
+- `renderer` — `CanvasRenderer`,`WebGpuRenderer`,`Camera2D/3D`,`SsaaCanvas`,`LinearGradient`,`RadialGradient`,`ShadowConfig`,`RenderLayer`,`BlendMode`,`RenderQuality`,`WebGpuInitError`。
+- `sprite` — `SpriteSheet`,`SpriteFrame`,`SpriteAnimation`,`Animator`,`AnimationMode`,`AnimationState`。
+- `asset` — `AssetCache`,`AssetLoader`,`AssetType`,`AssetState`,`AssetEntry`。
+- `audio` — `GameAudioContext`,`AudioClip`,`AudioPlayState`(Web Audio 封装)。
+- `cell` / `tween` / `easing` / `timer` / `particle` / `math` — 内部 cell 容器、tween 系统、缓动函数、计时器、粒子系统、数学(`Vector2D/3D`,`Quaternion`,`Matrix4x4`,`Rect`,`Circle`,`Color`,`AABB3D`,`Sphere`,`Plane`,`Ray3D`,`Transform2D/3D`,常量 `PI` / `TWO_PI` / `DEG_TO_RAD` / `EPSILON`,free fns `clamp` / `lerp` / `distance` / `smoothstep` / `approach` / `sign` / `wrap` / `lerp_angle` / `from_angle`)。
+- `spatial` — `SpatialHashGrid2D::with_default_size()`,`SpatialHashGrid2D::query(&self, center: Vector2D, half_extent: Vector2D) -> Vec<usize>`(`engine.md:101`);3D 同形。
+
+### TickHandler 注意事项
+
+- `TickHandler` trait 在 `engine/src/scheduler/trait.rs:3-22`;**必须**实现 `on_update(&mut self, delta_time: f64)` 和 `on_render(&mut self, interpolation: f64)` 两方法,缺一编译失败。
+- 传给 `EngineHandle::start` / `SchedulerHandle::start` 的形参是 `TickHandlerRc`(=`Rc<dyn TickHandler>`),所以要么 `Rc::new(MyGame::default()) as TickHandlerRc`,要么直接传 `Rc<MyGame>` 靠 coercion。
+- `interpolation` ∈ [0, 1):当前帧在两个固定步长 `on_update` 之间的相对位置;用 `(prev_state * (1 - interp) + curr_state * interp)` 做插值,渲染才不掉帧。
+- `delta_time` 来自 `SchedulerConfig::fixed_timestep`,**永远等于** `fixed_timestep`;不是真实 wall-clock 间隔。
+- `frame_time` 走 `min(real_frame_time, max_frame_time)`,防止 tab 切回后巨量补帧。
 
 ## Common pitfalls
 
 1. **`signal.get()` in `html!` body inside `{}`** — single-segment ident auto-unwraps, multi-segment does not. `state.value` inside `{}` stays a `Signal<T>`; use `state.value.get()` explicitly.
-2. **`if { cond } { ... } else { ... }`** — block-level `else` is rejected. Stack two `if {}` blocks or use `match`.
+2. **`if { cond } { body }` body 必须是 `{ ... }` 块** — 不能写裸表达式或裸子元素列表(`macros/src/html/impl.rs:144-146` 强制 `braced!` 解析)。纯 `if { } { } else { }`(不带 `else if` 中间分支)的块级 `else` **完全支持**(解析路径 `macros/src/html/impl.rs:165-170`);reactive / inline 形态、混合链(`if a {} else if {b} {}`)也都 OK。
 3. **Closures over for-loop items** — complex CRUD with per-row click handlers inside `for` loops runs into `FnMut`-double-borrow issues. Restructure into a parent `Signal<Vec<T>>` and a single child component.
-4. **`Signal<T>` vs `SignalCell<T>`** — `Signal::create(value)` is the direct public constructor; `SignalCell::none()`/`set()`/`get()` is a separate single-threaded storage wrapper. There is no `Signal::none()` or `Signal::new(value)` public constructor.
+4. **`Signal<T>` vs `SignalCell<T>`** — `Signal::create(value)` is the direct public constructor; `SignalCell::none()`/`set()`/`get()` is a separate single-threaded storage wrapper. There is no `Signal::none()` or `Signal::new(value)` public constructor. (基于 `core/src/reactive/signal/struct.rs` 源码,docs-pages 未演示。)
 5. **Non-Copy values in `html!`** — render body is `FnMut`. `let count = App::use_signal(|| 0)` works because `i32` is `Copy`. For `String` etc., use signals only and clone on capture.
 6. **`#[component]` body must destructure props via `node.try_get_props().unwrap_or_default()`** — the macro generates the wrapper but the inner fn receives `VirtualNode<Props>` not `Props`.
 7. **`inject_app_global_css()` must be called before `App::mount`** — otherwise `euv_button` etc. render unstyled.
 8. **`console_error_panic_hook::set_once()` is required** in `main()` or Rust panics in the browser are silent.
-9. **`extends` in `class!` is concat, not override** — same-named property uses CSS cascade (later wins). Don't try to "remove" parent styles by re-declaring them.
-10. **`c_euv_button_*` classes force `flex: 1 1 120px`** — any `display:flex` parent will stretch them to ≥120px. Wrap in a non-flex container or add `flex: none` override.
+9. **`class!` "继承"通过调用父函数(不是 `extends` 关键字)** — 例如 `c_base_button();` 嵌入父类块;同名属性按 CSS cascade 后定义者获胜。不要通过重新声明同名属性来"移除"父类样式(`class!` 没有 `extends` 关键字,这个名字可能是误用)。
+10. **`c_euv_button_*` classes force `flex: 1 1 120px`** — any `display:flex` parent will stretch them to ≥120px. Wrap in a non-flex container or add `flex: none` override. (基于 `ui/src/style/class/fn.rs` 源码,docs-pages 未覆盖。)
+11. **`<form onsubmit=...>` 必须 `event.prevent_default()`** — 否则页面会刷新 (`form.md:99-101`)。
+12. **`ondragover` 必须 `event.prevent_default()`** — 否则 `ondrop` 不会触发 (`form.md:241-243, 261`)。
 
 ## Verification checklist
 

@@ -10,7 +10,5 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "dependencies": {
-    "puppeteer": "^25.1.0"
-  }
+  "dependencies": {}
 }

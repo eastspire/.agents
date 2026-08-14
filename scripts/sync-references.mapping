@@ -1,0 +1,82 @@
+# Mapping for scripts/sync-references.sh
+#
+# Format: <tab>-separated, 3 columns:
+#   1. destination path under skills/<skill>/references/
+#   2. source path under docs-pages clone (relative to repo root)
+#   3. note (optional, # comment if you want to skip a line)
+#
+# Lines starting with `#` are comments. Empty lines are ignored.
+#
+# To add a new file: append a line, then re-run the script.
+# To override a file: set dest path to a file the script won't touch and
+#   commit it manually (the script warns if it would overwrite an existing
+#   file unless --force is passed).
+#
+# Last verified against docs-pages @ master (commit 325e362).
+
+# --- euv ---
+skills/euv/references/animation.md		src/euv/usage-introduction/animation.md
+skills/euv/references/async.md			src/hyperlane/usage-introduction/async.md	# manual override: rebranded for euv
+skills/euv/references/binding.md		src/euv/usage-introduction/binding.md
+skills/euv/references/canvas.md			src/euv/usage-introduction/canvas.md
+skills/euv/references/class.md			src/euv/macros/class.md
+skills/euv/references/component.md		src/euv/example/component.md	# manual override: condensed, retitled
+skills/euv/references/computed.md		src/euv/macros/computed.md
+skills/euv/references/conditional.md	src/euv/usage-introduction/conditional.md
+skills/euv/references/css-vars.md		src/euv/macros/css-vars.md
+skills/euv/references/engine.md			src/euv/usage-introduction/engine.md
+skills/euv/references/event.md			src/euv/usage-introduction/event.md
+skills/euv/references/file.md			src/euv/usage-introduction/file.md
+skills/euv/references/form.md			src/euv/usage-introduction/form.md
+skills/euv/references/html.md			src/euv/macros/html.md
+skills/euv/references/keep-alive.md		src/euv/usage-introduction/keep-alive.md
+skills/euv/references/lifecycle.md		src/euv/usage-introduction/lifecycle.md
+skills/euv/references/list.md			src/euv/usage-introduction/list.md
+skills/euv/references/mount.md			src/euv/usage-introduction/mount.md
+skills/euv/references/observer.md		src/euv/usage-introduction/observer.md
+skills/euv/references/platform.md		src/euv/usage-introduction/platform.md
+skills/euv/references/reactive.md		src/euv/usage-introduction/reactive.md
+skills/euv/references/renderer.md		src/euv/usage-introduction/renderer.md
+skills/euv/references/select.md			src/euv/usage-introduction/select.md
+skills/euv/references/sse.md			src/hyperlane/usage-introduction/sse.md	# manual override: euv-flavored SSE hook
+skills/euv/references/timer.md			src/euv/usage-introduction/timer.md
+skills/euv/references/var.md			src/euv/macros/var.md
+skills/euv/references/vdom.md			src/euv/usage-introduction/vdom.md
+skills/euv/references/watch.md			src/euv/macros/watch.md
+skills/euv/references/websocket.md		src/hyperlane/usage-introduction/websocket.md	# manual override: euv-flavored WS hook
+
+# --- hyperlane ---
+skills/hyperlane/references/async.md				src/hyperlane/usage-introduction/async.md
+skills/hyperlane/references/attribute.md			src/hyperlane/usage-introduction/attribute.md
+skills/hyperlane/references/auth.md				src/hyperlane/middleware/auth.md
+skills/hyperlane/references/connection.md		src/hyperlane/usage-introduction/connection.md
+skills/hyperlane/references/cookie.md			src/hyperlane/usage-introduction/cookie.md
+skills/hyperlane/references/cross.md				src/hyperlane/middleware/cross.md
+skills/hyperlane/references/hook-composition.md	src/hyperlane/usage-introduction/hook-composition.md
+skills/hyperlane/references/hyperlane-broadcast.md			src/hyperlane-broadcast/README.md
+skills/hyperlane/references/hyperlane-macros-attributes.md	src/hyperlane-macros/attributes.md
+skills/hyperlane/references/hyperlane-macros-composition.md	src/hyperlane-macros/composition.md
+skills/hyperlane/references/hyperlane-macros-filter.md		src/hyperlane-macros/filter.md
+skills/hyperlane/references/hyperlane-macros-hyperlane-init.md	src/hyperlane-macros/hyperlane-init.md
+skills/hyperlane/references/hyperlane-macros-method-filter.md	src/hyperlane-macros/method-filter.md
+skills/hyperlane/references/hyperlane-macros-request.md		src/hyperlane-macros/request.md
+skills/hyperlane/references/hyperlane-macros-response.md		src/hyperlane-macros/response.md
+skills/hyperlane/references/hyperlane-macros-route-params.md	src/hyperlane-macros/route-params.md
+skills/hyperlane/references/hyperlane-macros-send-flush.md	src/hyperlane-macros/send-flush.md
+skills/hyperlane/references/hyperlane-macros-upgrade-filter.md	src/hyperlane-macros/upgrade-filter.md
+skills/hyperlane/references/hyperlane-macros-version-filter.md	src/hyperlane-macros/version-filter.md
+skills/hyperlane/references/hyperlane-plugin-websocket.md		src/hyperlane-plugin-websocket/README.md
+skills/hyperlane/references/multi-server.md		src/hyperlane/usage-introduction/multi-server.md
+skills/hyperlane/references/process.md			src/hyperlane/usage-introduction/process.md
+skills/hyperlane/references/request.md			src/hyperlane/usage-introduction/request.md
+skills/hyperlane/references/response.md			src/hyperlane/usage-introduction/response.md
+skills/hyperlane/references/route.md				src/hyperlane/config/route.md	# manual override: added dynamic-routing section
+skills/hyperlane/references/run.md				src/hyperlane/usage-introduction/run.md
+skills/hyperlane/references/send.md				src/hyperlane/usage-introduction/send.md
+skills/hyperlane/references/shutdown.md			src/hyperlane/usage-introduction/shutdown.md
+skills/hyperlane/references/sse.md				src/hyperlane/usage-introduction/sse.md
+skills/hyperlane/references/static-file.md		src/hyperlane/middleware/static-file.md
+skills/hyperlane/references/stream.md			src/hyperlane/usage-introduction/stream.md
+skills/hyperlane/references/timeout.md			src/hyperlane/middleware/timeout.md
+skills/hyperlane/references/wait.md				src/hyperlane/usage-introduction/wait.md
+skills/hyperlane/references/websocket.md			src/hyperlane/usage-introduction/websocket.md
