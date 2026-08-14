@@ -28,6 +28,31 @@ bash scripts/verify-references.sh                     # show what changed vs HEA
 
 The mapping of `references/<file>.md` → `docs-pages/src/...` lives in `scripts/sync-references.mapping`. To add a new file, append a line; to pin a customized version, add `# manual override:` to its line and the script will leave that dest alone. See `scripts/README.md` for the full workflow.
 
+---
+
+## Index
+
+| I want to... | Jump to |
+| --- | --- |
+| Find docs-pages source for tutorials and full macro specs | [Documentation sources (docs-pages)](#documentation-sources-docs-pages) |
+| Get a 1-paragraph summary of the 6-crate monorepo | [Overview](#overview) |
+| See crate name / edition / license | [Project Metadata](#project-metadata) |
+| Add `euv` to `Cargo.toml` | [Installation](#installation) |
+| Build / run the dev server with `euv-cli` | [`euv-cli`](#euv-cli) |
+| See the 5-line minimum call to mount an app | [Quick start](#quick-start) |
+| Browse the full core API (`App`, `Signal<T>`, `HookContext`, `VirtualNode`, `AttributeValue`, `Css`) | [Core API (`euv-core`)](#core-api-euv-core) |
+| Write JSX-like HTML in Rust | [`html!` macro](#html-macro) |
+| Build dynamic class strings | [`class!` macro](#class-macro) |
+| Use `#[component]`, `watch!`, `computed!`, `vars!`, `var!` | [Other macros (`euv-macros`)](#other-macros-euv-macros) |
+| Construct typed event handlers | [Event factory](#event-factory) |
+| Use a pre-built component (`euv_button`, `euv_card`, …) | [`euv-ui` components](#euv-ui-components-uisrccomponentnameviewfnrs) |
+| Render 2D / 3D games with `euv-engine` | [`euv-engine` (optional)](#euv-engine-optional) |
+| Avoid the common gotchas | [Common pitfalls](#common-pitfalls) |
+| Self-verify before committing | [Verification checklist](#verification-checklist) |
+| Find the canonical source file for a symbol | [Source-of-truth files](#source-of-truth-files) |
+| Find related skills | [Related skills](#related-skills) |
+
+---
 
 ## Overview
 
@@ -50,7 +75,7 @@ pub use {euv_core::*, euv_macros::*};
 pub use {console_error_panic_hook, js_sys, wasm_bindgen, wasm_bindgen_futures, web_sys};
 ```
 
-## 项目元信息
+## Project Metadata
 
 - crate 名: `euv` (workspace root)
 - Rust edition: `2024`

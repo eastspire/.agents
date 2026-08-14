@@ -13,7 +13,32 @@ license: MIT
 
 ---
 
-## 1. 快速开始
+## Index
+
+| I want to... | Jump to |
+| --- | --- |
+| Scaffold a new euv project, see the 6-workspace layout | [Project Directory Layout](#2-project-directory-layout) |
+| Write JSX-like HTML in Rust | [`html!` macro](#3-html-macro) |
+| Build dynamic class strings with `class!` (extends, auto-get) | [`class!` macro](#4-class-macro) |
+| Reference design tokens via `var!` / `vars!` | [`vars!` / `var!` macros](#5-vars--var-macros) |
+| Derive reactive values | [`computed!` macro](#6-computed-macro) |
+| Run side effects on signal change | [`watch!` macro](#7-watch-macro) |
+| Define a component (props, children, hook lifecycle) | [`#[component]` attribute macro](#8-component-attribute-macro) |
+| Use `Signal<T>` / `SignalCell<T>` / `use_signal` / `batch` | [Reactive Signal System](#9-reactive-signal-system) |
+| Render diff/patch lifecycle | [Virtual DOM](#10-virtual-dom) |
+| Bind DOM events (`on:click`, modifiers) | [Event System](#11-event-system) |
+| Use `#[component]` to compose children | [Component System](#12-component-system) |
+| Wire up inputs, two-way binding, validation | [Form Handling](#13-form-handling) |
+| Spawn tasks / async I/O | [Async Operations](#14-async-operations) |
+| Animate values over time | [Animation](#15-animation) |
+| Cache mounted components | [Keep-Alive](#16-keep-alive) |
+| Run `euv build / fmt / server / mode` | [CLI Tool](#17-cli-tool) |
+| Find which source file defines a symbol | [Source-of-truth files](#source-of-truth-files) |
+| Find related skills | [Related skills](#related-skills) |
+
+---
+
+## 1. Quick Start
 
 ### 1.1 项目初始化
 
@@ -85,7 +110,7 @@ Cargo 端关键依赖：`hyperlane = "21.3.4"`（CLI 用作 server），`wasm-bi
 
 ---
 
-## 2. 项目目录结构
+## 2. Project Directory Layout
 
 ```
 euv/                            # workspace root
@@ -107,7 +132,7 @@ euv/                            # workspace root
 
 ---
 
-## 3. html! 宏
+## 3. `html!` macro
 
 > **底层**：`#[proc_macro] pub fn html(input) -> TokenStream` (macros/src/lib.rs:59)。
 > 所有 html! 调用是**编译期宏展开**，生成构造 `VirtualNode` 的 Rust 代码。
@@ -240,7 +265,7 @@ html! { {tag_kind} { "Content" } }
 
 ---
 
-## 4. class! 宏
+## 4. `class!` macro
 
 > **底层**：`#[proc_macro] pub fn class(input) -> TokenStream` (macros/src/lib.rs:84)。
 > 一次展开生成：函数 `pub fn c_xxx() -> Css`、`pub fn c_xxx(...) -> Css`、`pub fn c_xxx(...)` 的伪类/媒体查询辅助函数等。
@@ -340,7 +365,7 @@ class! {
 
 ---
 
-## 5. vars!/var! 宏
+## 5. `vars!` / `var!` macros
 
 > **底层**：`#[proc_macro] pub fn vars(input)` (macros/src/lib.rs:158) + `#[proc_macro] pub fn var(input)` (macros/src/lib.rs:181)。
 > 共同职责：在编译期把 tokens 拼成 `"var(--xxx)"`。
@@ -373,7 +398,7 @@ class! {
 
 ---
 
-## 6. computed! 宏
+## 6. `computed!` macro
 
 > **底层**：`#[proc_macro] pub fn computed(input) -> TokenStream` (macros/src/lib.rs:136)。
 
@@ -393,7 +418,7 @@ computed!(
 
 ---
 
-## 7. watch! 宏
+## 7. `watch!` macro
 
 > **底层**：`#[proc_macro] pub fn watch(input) -> TokenStream` (macros/src/lib.rs:109)。
 
@@ -418,7 +443,7 @@ watch!(
 
 ---
 
-## 8. component 属性宏
+## 8. `#[component]` attribute macro
 
 > **底层**：`#[proc_macro_attribute] pub fn component(_attr, item) -> TokenStream { item }` (macros/src/lib.rs:204)
 > **关键事实**：`#[component]` 是 **pass-through marker**，**不生成 wrapper code**！
@@ -449,7 +474,7 @@ html! { my_card { title: "Hello" p { "Content" } } }
 
 ---
 
-## 9. 响应式信号系统
+## 9. Reactive Signal System
 
 ### 9.1 use_signal
 
@@ -526,7 +551,7 @@ App::batch(|| {
 
 ---
 
-## 10. 虚拟 DOM
+## 10. Virtual DOM
 
 ### VirtualNode 变体
 
@@ -555,7 +580,7 @@ App::mount("#app", app);
 
 ---
 
-## 11. 事件系统
+## 11. Event System
 
 ```rust
 // 内联闭包
@@ -583,7 +608,7 @@ move |event: Event| {
 
 ---
 
-## 12. 组件系统
+## 12. Component System
 
 ### Props Down / Callback Up
 
@@ -623,7 +648,7 @@ pub fn child_input(text: Signal<String>) -> VirtualNode {
 
 ---
 
-## 13. 表单处理
+## 13. Form Handling
 
 ```rust
 // 文本输入
@@ -658,7 +683,7 @@ html! { textarea { value: content
 
 ---
 
-## 14. 异步操作
+## 14. Async Operations
 
 ```rust
 use euv::{js_sys::*, wasm_bindgen_futures::*, web_sys::*, *};
@@ -675,7 +700,7 @@ App::spawn(async {
 
 ---
 
-## 15. 动画
+## 15. Animation
 
 通过响应式信号切换 CSS 属性值 + `transition` 实现平滑过渡：
 
@@ -707,7 +732,7 @@ html! {
 
 ---
 
-## 17. CLI 工具
+## 17. CLI Tool
 
 `cli/` 子 crate 是一个 `euv` 命名的 CLI，封装 `wasm-pack + hot reload + 端口转发`。命令（来自 `cli/src/lib.rs::pub use {build::*, error::*, fmt::*, logger::*, mode::*, server::*, ...}`）：
 

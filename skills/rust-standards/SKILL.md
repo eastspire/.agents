@@ -21,6 +21,21 @@ description: 'Rust 开发规范(最高优先级,与其他 skill 冲突时以此�
 
 你所有的回复必须使用 **中文**,但代码中的标识符、注释内容(文档注释)必须使用 **英文**,以确保跨团队协作的一致性与专业性。
 
+## Mutual-Lock Routing(把 description 的互锁写明)
+
+description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards,hyperlane 任务必同时加载 hyperlane-standards",但**只说"必加载"不说"加载后跳到哪"**。下表把 description 里的互锁关系展开成显式跳转目标(章节名为该 skill SKILL.md 中的 `##` 标题,不是 anchor —— 跨文件 anchor 在大多数 Markdown 渲染器里不可靠),确保 agent 拿到 task 后能 1 步命中正确的子章节。
+
+| 任务类型 | 互锁 skill | 命中后跳到该 skill 的章节(按顺序) |
+| --- | --- | --- |
+| 写 / 改 euv 项目任意文件 | `euv-standards` | `## Index` → `## 1. Quick Start` → `## 3. html! macro` → `## 4. class! macro` → `## 5. vars!/var! macros` → `## 6. computed! macro` → `## 7. watch! macro` → `## 8. #[component] attribute macro` → `## 9. Reactive Signal System` → `## 10. Virtual DOM` → `## 11. Event System` → `## 12. Component System` → `## 13. Form Handling` → `## 14. Async Operations` → `## 15. Animation` → `## 16. Keep-Alive` → `## 17. CLI Tool` |
+| 写 / 改 euv UI 页面 / 组件 / 样式 | `euv-ui-standards` | `## Index` → `## 0. Source of Truth` → `## 1. Design Tokens` → `## 2. Global Skeleton` → `## 3. Core Component HTML Templates` → `## 4. Home / Hero Page Spec` → `## 5. Class Naming Conventions` → `## 6. Responsive / Breakpoints` → `## 7. Accessibility / Touch` → `## 8. New Page Standard Template` → `## 9. Quick Notes / Anti-Patterns` |
+| 写 / 改 hyperlane 路由 / handler / middleware / hook | `hyperlane-standards` | `## Index` → `## 0. Mutual-Lock Skills` → `## 1. Project Metadata` → `## 2. Installation` → `## 3. 5-Line Minimum Call` → `## 4. Full Server Builder API` → `## 5. ServerHook trait + HookType enum` → `## 6. Context Reference` → `## 7. RoutePattern / RouteSegment / RouteParams` → `## 8. ServerConfig / RequestConfig` → `## 9. hyperlane-macros Procedural Macros` → `## 10. 22 Common Pitfalls` → `## 11. 7 Interlocking Ecosystem Crates` |
+| 写 euv-engine 2D / 3D 游戏 | `euv-standards` + `euv` | `euv-standards` 的 9-17 章 + `euv` 的 `## euv-engine (optional)` 章节 |
+| 写 hyperlane WebSocket / SSE / broadcast | `hyperlane-standards` | `## Index` → `## 11. 7 Interlocking Ecosystem Crates` → 选 `hyperlane-plugin-websocket` / `hyperlane-broadcast` 行 |
+| 写 Rust 通用代码(模块划分、命名、错误处理) | 本 skill 即可 | `## 检索方式` + `## 关键硬性规则` |
+
+**加载顺序**:`rust-standards`(本 skill,**总是第一**)→ 入口 skill(`euv` 或 `hyperlane`) → standards skill → UI skill(仅 euv UI 任务)。**回退**:任何找不到的细节,先查 `euv-standards`/`hyperlane-standards` 的 `## Index` 表 → 再查 `references/`(euv / hyperlane 的 references/ 通过 `scripts/sync-references.sh` 同步 docs-pages 内容)。
+
 ## 检索方式(优先用这个)
 
 按 "我现在在做什么" 查表,直接跳到对应章节:

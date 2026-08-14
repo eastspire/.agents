@@ -7,13 +7,35 @@ license: MIT
 
 > **本 skill 是 hyperlane 框架的 source of truth**。hyperlane 入口 skill 只是个跳转 + 5 行示例,所有 API/坑细节都在这里。
 
-## 0. 互锁 skill(本 skill 加载时必同时加载)
+---
+
+## Index
+
+| I want to... | Jump to |
+| --- | --- |
+| See which other skills must load with this one | [Mutual-Lock Skills](#0-mutual-lock-skills) |
+| Check crate name / version / edition / license | [Project Metadata](#1-project-metadata) |
+| Add `hyperlane` to `Cargo.toml` | [Installation](#2-installation) |
+| See the 5-line minimum call to start a server | [5-Line Minimum Call](#3-5-line-minimum-call) |
+| Browse the full `Server` builder API (route, middleware, hook) | [Full `Server` Builder API](#4-full-server-builder-api) |
+| Implement a `ServerHook` / pick a `HookType` | [`ServerHook` trait + `HookType` enum](#5-serverhook-trait--hooktype-enum) |
+| Read/write the per-request `Context` | [`Context` Reference](#6-context-reference) |
+| Define a route (static / dynamic / regex) | [`RoutePattern` / `RouteSegment` / `RouteParams`](#7-routepattern--routesegment--routeparams) |
+| Configure server-level or request-level behavior | [`ServerConfig` / `RequestConfig`](#8-serverconfig--requestconfig) |
+| Use `#[route]`, `#[hyperlane]`, `context!`, etc. | [`hyperlane-macros` Procedural Macros](#9-hyperlane-macros-procedural-macros) |
+| Avoid the 22 most common gotchas | [22 Common Pitfalls](#10-22-common-pitfalls) |
+| Pick an ecosystem crate to extend hyperlane | [7 Interlocking Ecosystem Crates](#11-7-interlocking-ecosystem-crates) |
+| Find docs-pages source for tutorials | [Documentation sources (docs-pages)](#12-documentation-sources-docs-pages) |
+
+---
+
+## 0. Mutual-Lock Skills
 
 - **`hyperlane`**(入口) — 互锁指针,任何 hyperlane 任务先命中入口再跳到这里
 - **`rust-standards`** — Rust 通用规范,对 hyperlane 同样适用,优先级最高
 - 生态 crate 各有独立 skill(http-type / http-constant / lombo-macros 暂无独立 skill,内容内联在本文件)
 
-## 1. 项目元信息
+## 1. Project Metadata
 
 - crate 名: `hyperlane`
 - 当前版本: `21.3.6`
@@ -25,7 +47,7 @@ license: MIT
 - 关键宏支持: 派生自 `lombok-macros` (`Data`, `New`, `Getter`, `GetterMut`, `Setter`, `CustomDebug`, `DisplayDebug`, `Eq`, `PartialEq`, `Hash`, `Clone`, `Default`)
 - profile: `[profile.dev]` + `[profile.release]` 都用 `opt-level = 3`, `lto = true`, `incremental = false`, `panic = "unwind"`, `debug = false`, `codegen-units = 1`, `strip = "debuginfo"`
 
-## 2. 安装
+## 2. Installation
 
 ```shell
 cargo add hyperlane
@@ -42,7 +64,7 @@ lombok-macros = "2.0.36"
 serde = { version = "1.0.229", features = ["derive"] }
 ```
 
-## 3. 5 行最小完整调用模式
+## 3. 5-Line Minimum Call
 
 ```rust
 use hyperlane::*;
@@ -57,7 +79,7 @@ async fn main() {
 }
 ```
 
-## 4. 完整 `Server` builder API
+## 4. Full `Server` Builder API
 
 所有 `route::<T>`, `task_panic::<T>`, `request_error::<T>`, `request_middleware::<T>`, `response_middleware::<T>` 方法拿 **type marker** `S`(仅编译期用于 monomorphize `ServerHookHandlerFactory`)— 它们只接受 turbofish,不接受运行时值。每个注册方法都是 `async` 必须独立 `.await`,**不能链式**。`Server` 必须 `let mut server: Server = Server::default();`,方法作为独立语句调用。`server_config` / `request_config` / `config_from_json` 是 **sync** setter(不 `.await`)。
 
@@ -101,7 +123,7 @@ impl From<&Server> / From<&mut Server> for usize
 impl AsRef<Server> / AsMut<Server>
 ```
 
-## 5. `ServerHook` trait + `HookType` 枚举
+## 5. `ServerHook` trait + `HookType` enum
 
 `ServerHook` 是所有路由/middleware/panic/error handler 实现的统一 trait。它有 **2 个 async fn**:
 
@@ -127,7 +149,7 @@ pub trait ServerHook: Sized + Send + Sync + 'static {
 
 `inventory::collect!(HookType);` 在 `src/route/impl.rs` 调用,框架自动注册 hook 类型。
 
-## 6. `Context` 详解
+## 6. `Context` Reference
 
 `Context` 是请求-响应绑定的可变状态容器。**重点:response setter 是 sync**(直接 `.set_xxx().build()`),**不需要 `.await`**。
 
@@ -208,7 +230,7 @@ server.server_config(config);                      // sync
 server.route::<Index>("/").await;                 // async
 ```
 
-## 9. `hyperlane-macros` 过程宏
+## 9. `hyperlane-macros` Procedural Macros
 
 `hyperlane-macros` 是**独立的 companion crate**,**不在** `hyperlane` 的 `Cargo.toml` 依赖中。需要单独 `cargo add hyperlane-macros` 后 `use hyperlane_macros::*;`。
 
@@ -228,7 +250,7 @@ server.route::<Index>("/").await;                 // async
 
 宏版本: `hyperlane-macros` 当前 `0.x` 系列(查 `Cargo.toml` 实时确认)。
 
-## 10. 22 个常见坑(必读)
+## 10. 22 Common Pitfalls
 
 1. **路由注册是 async**:`server.route::<T>(path).await` — 不能 `.route().route()` 链式。
 2. **response setter 是 sync**:`ctx.get_mut_response().set_xxx()` — 不需要 `.await`。
@@ -253,7 +275,7 @@ server.route::<Index>("/").await;                 // async
 21. **404 / 405 默认走 `RequestError` hook**:如果你没注册 `RequestError` hook,框架会用内置 default(返回空 404 body)。
 22. **profile `panic = "unwind"`**:`TaskPanic` hook 才能拿到 panic;`panic = "abort"` 直接 abort 不触发。
 
-## 11. 7 个互锁生态 crate
+## 11. 7 Interlocking Ecosystem Crates
 
 | crate | 用途 | 关系 |
 |---|---|---|
