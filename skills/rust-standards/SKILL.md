@@ -1,6 +1,6 @@
 ---
 name: rust-standards
-description: Rust 开发规范(最高优先级,与其他 skill 冲突时以此为准)。**任何涉及 Rust、Rust 代码、cargo、crate、impl、trait、derive、Result、所有权、借用、生命周期、mod.rs、lib.rs、关键字文件、raw identifier、lombok、过程宏、proc-macro 的任务,必须先调用 skill_view('rust-standards'),不靠 description 软触发**。适用于:新项目脚手架、现有 Rust 代码维护、PR 审查、重构、模块划分、命名、错误处理、性能优化、依赖管理、测试策略。
+description: 'Rust 开发规范(最高优先级,与其他 skill 冲突时以此为准)。**任何涉及 Rust、Rust 代码、cargo、crate、impl、trait、derive、Result、所有权、借用、生命周期、mod.rs、lib.rs、关键字文件、raw identifier、lombok、过程宏、proc-macro、euv、hyperlane、html!、class!、ServerHook、Signal<T>、tokio、http server、wasm-pack、WebAssembly、UI framework 的任务,必须先调用 skill_view("rust-standards"),不靠 description 软触发**。互锁 skill:euv 任务必同时加载 euv-standards + euv-ui-standards;hyperlane 任务必同时加载 hyperlane-standards。适用于:新项目脚手架、现有 Rust 代码维护、PR 审查、重构、模块划分、命名、错误处理、性能优化、依赖管理、测试策略。'
 ---
 
 # Rust 开发规范
