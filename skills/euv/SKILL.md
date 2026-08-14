@@ -12,7 +12,7 @@ license: MIT
 
 ## Overview
 
-euv is a workspace of six member crates under one umbrella. The root package is version `0.12.27`, edition 2024, and is `rlib`-only; `euv-macros` is the separate proc-macro crate.
+euv is a workspace of six member crates under one umbrella. The root package is version `0.13.3`, edition 2024, and is `rlib`-only; `euv-macros` is the separate proc-macro crate.
 
 | Crate         | Path       | Purpose                                                                                                                                                                                                                          |
 | ------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
