@@ -6,7 +6,7 @@ license: MIT
 
 # EUV 框架开发指南
 
-`euv-standards` skill 覆盖 **euv** WebAssembly UI 框架的全部编码规范。本文档对应源版本为 `/d/code/euv/Cargo.toml` (`euv = "0.12.23"`, edition 2024)；monorepo 6 个子 crate：`core` / `engine` / `macros` / `ui` / `cli` / `example`（根 `euv` crate 只是个 2 行 `pub use` 壳）。
+`euv-standards` skill 覆盖 **euv** WebAssembly UI 框架的全部编码规范。本文档对应源版本为 `/d/code/euv/Cargo.toml` (`euv = "0.13.3"`, edition 2024)；monorepo 6 个工作区子 crate：`core` / `engine` / `macros` / `ui` / `cli` / `example`（根 `euv` crate 只是个 2 行 `pub use` 壳）。
 
 事实依据由源码直接验证（详见"Source-of-truth files"段）。
 完整类目见 `euv-ui-standards` skill（304 个 class! + design tokens）。
