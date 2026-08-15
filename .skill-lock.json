@@ -1,526 +1,395 @@
 {
-  "version": 3,
+  "version": 4,
   "skills": {
-    "agent-file-standards": {
+    "agent-skills-source-sync": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/agent-file-standards/SKILL.md",
-      "installedAt": "2026-07-05T00:00:00.000Z",
-      "updatedAt": "2026-07-05T00:00:00.000Z"
+      "skillPath": "skills/agent-skills-source-sync/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "f7b43b7e3a8059c57dc4f8f3be6ac8a84cb3114b"
     },
-    "euv-standards": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/euv-standards/SKILL.md",
-      "installedAt": "2026-07-05T00:00:00.000Z",
-      "updatedAt": "2026-07-19T15:22:17.186603Z"
-    },
-    "find-skills": {
-      "source": "vercel-labs/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/vercel-labs/skills.git",
-      "skillPath": "skills/find-skills/SKILL.md",
-      "skillFolderHash": "3013fdeb8a11b10b1eb795ec3ae8bfca38f7c26d",
-      "installedAt": "2026-04-21T23:51:38.184Z",
-      "updatedAt": "2026-04-21T23:51:38.184Z"
-    },
-    "mmx-cli": {
+    "android-native-dev": {
       "source": "MiniMax-AI/skills",
       "sourceType": "github",
+      "skillPath": "skills/android-native-dev/SKILL.md",
+      "installedAt": "2026-07-16T04:07:49.142Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "bf56d3bbce81307ef4040e38efc5ba9bc28dd31c",
       "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/minimax-multimodal-toolkit/SKILL.md",
-      "skillFolderHash": "9f62508c08bf4042b95b1b7df444ed5d3080be5e",
-      "installedAt": "2026-07-07T23:38:09.226Z",
-      "updatedAt": "2026-07-16T04:09:21.778Z"
+      "ref": "main"
     },
-    "next-best-practices": {
-      "source": "vercel-labs/next-skills",
+    "buddy-sings": {
+      "source": "MiniMax-AI/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/vercel-labs/next-skills.git",
-      "skillPath": "skills/next-best-practices/SKILL.md",
-      "skillFolderHash": "ad17eb27952b39a6ab0061bd50e8a2213b63a3ec",
-      "installedAt": "2026-03-28T00:46:19.666Z",
-      "updatedAt": "2026-03-28T00:46:19.666Z"
-    },
-    "remotion-best-practices": {
-      "source": "remotion-dev/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/remotion-dev/skills.git",
-      "skillPath": "skills/remotion-best-practices/SKILL.md",
-      "skillFolderHash": "d0bc7b74666ce228ba1e37156520d5ada5bbc889",
-      "installedAt": "2026-03-28T00:45:46.050Z",
-      "updatedAt": "2026-07-13T00:25:01.446723Z"
-    },
-    "web-access": {
-      "source": "eze-is/web-access",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/eze-is/web-access.git",
-      "skillPath": "skills/web-access/SKILL.md",
-      "skillFolderHash": "6532d4da491fc6af2a7f3a161d7d7c69d67bca80",
-      "installedAt": "2026-04-21T23:51:31.827Z",
-      "updatedAt": "2026-07-13T00:25:01.446723Z"
-    },
-    "bin-encode-decode": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/bin-encode-decode/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "certbot-letencrypt-txy-ssl": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/certbot-letencrypt-txy-ssl/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "china-identification-card": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/china-identification-card/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "chunkify": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/chunkify/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "clonelicious": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/clonelicious/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "color-output": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/color-output/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "compare-version": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/compare-version/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "skillPath": "skills/buddy-sings/SKILL.md",
+      "installedAt": "2026-07-16T04:07:58.236Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "06405bedb6671b1ff9f212f21d5cf30d13e5cb85",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
     },
     "computer-use": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/computer-use/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "9faa836a404e63b94bddf803eae153f57f2c9b78"
+    },
+    "docs-pages-pr-workflow": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/docs-pages-pr-workflow/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "b22f8aa13bf00904a2bb39bb374e9eacba3a2dde"
+    },
+    "docs-rs-api-fetcher": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/docs-rs-api-fetcher/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "2820cde1839aefd3dca5cd9fabf32faa17494f39"
     },
     "dogfood": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/dogfood/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "a7fdbfc118f8beab0bfa38de1fea5b80f5f29b46"
     },
     "euv": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/euv/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-19T15:05:29.182243Z"
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "cda84b1e04dd1c968900b26cb53ae75e7563219c"
     },
     "euv-app": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/euv-app/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-19T15:22:17.186603Z"
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "a2e85a194a9628e18b5d469bedffbc4c47bf7881"
+    },
+    "euv-game-real-api-notes": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/euv-game-real-api-notes/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "f6db16b1d83215aadc6b3bea32f753f536f6de68"
+    },
+    "euv-standards": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/euv-standards/SKILL.md",
+      "installedAt": "2026-07-05T00:00:00.000Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "def75c3aae4b958ca70ebdbac78c08d640afd377"
     },
     "euv-ui-standards": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/euv-ui-standards/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-19T15:22:17.186603Z"
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "64254cbc78cdbfd68380642076109f9d0c56952e"
     },
-    "file-operation": {
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "installedAt": "2026-04-21T23:51:38.184Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "50592fdc9ceb7db078ddf2dbb57f93565abbea50",
+      "sourceUrl": "https://github.com/vercel-labs/skills.git"
+    },
+    "flutter-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/flutter-dev/SKILL.md",
+      "installedAt": "2026-07-16T04:08:08.431Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "660a98c83d78ccb39f84eec97027a53656b58e19",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "frontend-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-dev/SKILL.md",
+      "installedAt": "2026-07-16T04:08:22.666Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "0d57330865afc1d8b46fd12242599e482a96cd18",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "fullstack-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/fullstack-dev/SKILL.md",
+      "installedAt": "2026-07-16T04:08:35.844Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "4db63aaa4c2f3625d22332e42cc534bdf022cf4a",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "gh-pr-creation-workflow": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/file-operation/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "skillPath": "skills/gh-pr-creation-workflow/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "b25ed9e3a6386bf9234f30d37802975367bc6fdf"
     },
-    "future-fn": {
+    "gif-sticker-maker": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/gif-sticker-maker/SKILL.md",
+      "installedAt": "2026-07-16T04:08:46.732Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "6e541fe75ca988c0bcf7d6b1c4a7274553a482bd",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "git-standards": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/future-fn/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "skillPath": "skills/git-standards/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "7fa987ef784b3fb3967c4ba5560daa226662ad19"
     },
-    "gtl": {
+    "github-org-bulk-clone": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/gtl/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "skillPath": "skills/github-org-bulk-clone/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "c9e1d88a97cc044f2917d45a497fc81236ec43f0"
     },
-    "hot-restart": {
+    "github-pat-scope-check": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/hot-restart/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "http-compress": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/http-compress/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "http-constant": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/http-constant/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "http-request": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/http-request/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "http-type": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/http-type/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "skillPath": "skills/github-pat-scope-check/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "e0c43f1c5abc7f88c3ff53ae668758b16f9a5056"
     },
     "hyperlane": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/hyperlane/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-19T15:05:29.182243Z"
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "68291d55cdbb3413113cce29c6d54999156477e7"
     },
-    "hyperlane-ai": {
+    "hyperlane-standards": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/hyperlane-ai/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "hyperlane-broadcast": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/hyperlane-broadcast/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-19T15:22:17.186603Z"
-    },
-    "hyperlane-cli": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/hyperlane-cli/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "hyperlane-log": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/hyperlane-log/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "hyperlane-macros": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/hyperlane-macros/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "hyperlane-plugin-websocket": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/hyperlane-plugin-websocket/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-19T15:22:17.186603Z"
-    },
-    "hyperlane-quick-start": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/hyperlane-quick-start/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-19T15:22:17.186603Z"
-    },
-    "hyperlane-time": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/hyperlane-time/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "skillPath": "skills/hyperlane-standards/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "4680ea3eb5eda2e8c35840140c39cee49765f4a9"
     },
     "hyperlane-upload": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/hyperlane-upload/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "92d8c7595959c52293b3412fbbaf2fd8d417d22a"
     },
-    "hyperlane-utils": {
+    "im-setup": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/hyperlane-utils/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "skillPath": "skills/im-setup/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "9f966a94a787e28f61d8288978c20d335e52467b"
     },
-    "instrument-level": {
+    "ios-application-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/ios-application-dev/SKILL.md",
+      "installedAt": "2026-07-16T04:08:58.298Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "3349f9a9ca139e6ce2eb28c9e10fdcfd6697a835",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "minimax-docx": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/minimax-docx/SKILL.md",
+      "installedAt": "2026-07-16T04:09:09.743Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "5c189e1938577907d87ec7e9f96f00e0f4b9acce",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "minimax-music-gen": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/minimax-music-gen/SKILL.md",
+      "installedAt": "2026-07-16T04:09:34.147Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "221c2fbb6d0569f09cfcb2f709fe641d7bd44971",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "minimax-music-playlist": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/minimax-music-playlist/SKILL.md",
+      "installedAt": "2026-07-16T04:09:45.747Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "06afe49e742b21ab6ca9b8ec7c442f8542cad63d",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "minimax-pdf": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/minimax-pdf/SKILL.md",
+      "installedAt": "2026-07-16T04:09:56.639Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "3d28640a1d35bf3b75c5cb4dab6dde084e3c8cf4",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "minimax-xlsx": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/minimax-xlsx/SKILL.md",
+      "installedAt": "2026-07-16T04:10:08.091Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "def88f061d053dae9e8f76da6345773e9db5698a",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "mmx-cli": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mmx-cli/SKILL.md",
+      "installedAt": "2026-07-07T23:38:09.226Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "68b8e2b48b288fb9e8b2e0f4b0de021fe785d9f4",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "next-best-practices": {
+      "source": "vercel-labs/next-skills",
+      "sourceType": "github",
+      "skillPath": "skills/next-best-practices/SKILL.md",
+      "installedAt": "2026-03-28T00:46:19.666Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "46d75334f8c510a02c036f0bca4e8206f20c9574",
+      "sourceUrl": "https://github.com/vercel-labs/next-skills.git"
+    },
+    "pptx-generator": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/pptx-generator/SKILL.md",
+      "installedAt": "2026-07-16T04:10:23.268Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "57921b6d56f8e14cd49fb9790b6eae6627a97d5b",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "react-native-dev": {
+      "source": "MiniMax-AI/skills",
+      "sourceType": "github",
+      "skillPath": "skills/react-native-dev/SKILL.md",
+      "installedAt": "2026-07-16T04:10:43.858Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "2fdfb2d25df372106c94cb0fd09b19c81aa6dabb",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "remotion-best-practices": {
+      "source": "remotion-dev/skills",
+      "sourceType": "github",
+      "skillPath": "skills/remotion-best-practices/SKILL.md",
+      "installedAt": "2026-03-28T00:45:46.050Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "0ea37127f196df595ec56dd474da9b70337cf773",
+      "sourceUrl": "https://github.com/remotion-dev/skills.git"
+    },
+    "rust-cargo-mirror-setup": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/instrument-level/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "skillPath": "skills/rust-cargo-mirror-setup/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "233aedcaca7558f39b720a51ebc0842524378375"
     },
-    "jwt-service": {
+    "rust-crate-use": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/jwt-service/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "lombok-macros": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/lombok-macros/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "recoverable-spawn": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/recoverable-spawn/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "recoverable-thread-pool": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/recoverable-thread-pool/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "skillPath": "skills/rust-crate-use/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "2ce3e032611a24c01287b277c5e3ed97818b9c10"
     },
     "rust-standards": {
       "source": "local",
       "sourceType": "local",
       "skillPath": "skills/rust-standards/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "6f23ff52028d1e47e856f8c1713127fa17bfe587"
     },
-    "server-manager": {
+    "rust-wasm-gh-pages-deploy-pitfalls": {
       "source": "local",
       "sourceType": "local",
-      "skillPath": "skills/server-manager/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "std-macro-extensions": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/std-macro-extensions/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "tcp-request": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/tcp-request/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "tcplane": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/tcplane/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "udp": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/udp/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "udp-request": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/udp-request/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-07-10T13:50:00.000Z"
-    },
-    "android-native-dev": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/android-native-dev/SKILL.md",
-      "skillFolderHash": "cdaadb554c6d5e7d65f35f5052e81c3d839ebdd2",
-      "installedAt": "2026-07-16T04:07:49.142Z",
-      "updatedAt": "2026-07-16T04:07:49.142Z"
-    },
-    "buddy-sings": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/buddy-sings/SKILL.md",
-      "skillFolderHash": "55105bec2e93efb912d3c49e22e75c5132a76495",
-      "installedAt": "2026-07-16T04:07:58.236Z",
-      "updatedAt": "2026-07-16T04:07:58.236Z"
-    },
-    "flutter-dev": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/flutter-dev/SKILL.md",
-      "skillFolderHash": "9cc8974128a133883a8c8623dcecdb5948f7c3fe",
-      "installedAt": "2026-07-16T04:08:08.431Z",
-      "updatedAt": "2026-07-16T04:08:08.431Z"
-    },
-    "frontend-dev": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/frontend-dev/SKILL.md",
-      "skillFolderHash": "1e9470090ef6dabe6cbf664c5760317c33e8f7d4",
-      "installedAt": "2026-07-16T04:08:22.666Z",
-      "updatedAt": "2026-07-16T04:08:22.666Z"
-    },
-    "fullstack-dev": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/fullstack-dev/SKILL.md",
-      "skillFolderHash": "3e9efa276da42981df8fe3128ed04919ae7f0929",
-      "installedAt": "2026-07-16T04:08:35.844Z",
-      "updatedAt": "2026-07-16T04:08:35.844Z"
-    },
-    "gif-sticker-maker": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/gif-sticker-maker/SKILL.md",
-      "skillFolderHash": "652eb1b7c1144006bc9d61df005ebe85134255d4",
-      "installedAt": "2026-07-16T04:08:46.732Z",
-      "updatedAt": "2026-07-16T04:08:46.732Z"
-    },
-    "ios-application-dev": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/ios-application-dev/SKILL.md",
-      "skillFolderHash": "65b3d8ef19960ab7555f19401a3bf6ce6b5ba6a2",
-      "installedAt": "2026-07-16T04:08:58.298Z",
-      "updatedAt": "2026-07-16T04:08:58.298Z"
-    },
-    "minimax-docx": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/minimax-docx/SKILL.md",
-      "skillFolderHash": "e55cc73859c0fd9bcd6507f062eedca0f470a7ed",
-      "installedAt": "2026-07-16T04:09:09.743Z",
-      "updatedAt": "2026-07-16T04:09:09.743Z"
-    },
-    "minimax-music-gen": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/minimax-music-gen/SKILL.md",
-      "skillFolderHash": "b82ce1f1a3fd1f4357a44d0c9e9e96ab3eaf6c89",
-      "installedAt": "2026-07-16T04:09:34.147Z",
-      "updatedAt": "2026-07-16T04:09:34.147Z"
-    },
-    "minimax-music-playlist": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/minimax-music-playlist/SKILL.md",
-      "skillFolderHash": "7f522159d8b56724891618e2b65da8c59ecb2153",
-      "installedAt": "2026-07-16T04:09:45.747Z",
-      "updatedAt": "2026-07-16T04:09:45.747Z"
-    },
-    "minimax-pdf": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/minimax-pdf/SKILL.md",
-      "skillFolderHash": "ce691d0e4e34b7f1d73bd3c3560b658df0dbdb3a",
-      "installedAt": "2026-07-16T04:09:56.639Z",
-      "updatedAt": "2026-07-16T04:09:56.639Z"
-    },
-    "minimax-xlsx": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/minimax-xlsx/SKILL.md",
-      "skillFolderHash": "5df30fd8f8669f34850767e1d99ba93c97d6ffc7",
-      "installedAt": "2026-07-16T04:10:08.091Z",
-      "updatedAt": "2026-07-16T04:10:08.091Z"
-    },
-    "pptx-generator": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/pptx-generator/SKILL.md",
-      "skillFolderHash": "871f9dcc96fb46f1ee7883b8fed87140b430a2ae",
-      "installedAt": "2026-07-16T04:10:23.268Z",
-      "updatedAt": "2026-07-16T04:10:23.268Z"
-    },
-    "react-native-dev": {
-      "source": "MiniMax-AI/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
-      "skillPath": "skills/react-native-dev/SKILL.md",
-      "skillFolderHash": "6e850847f1fe5beff15b9e37322af6d2e1b49fb0",
-      "installedAt": "2026-07-16T04:10:43.858Z",
-      "updatedAt": "2026-07-16T04:10:43.858Z"
+      "skillPath": "skills/rust-wasm-gh-pages-deploy-pitfalls/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "5b7e92008b6ba9e0084e46e8b27425745b10a8a1"
     },
     "shader-dev": {
       "source": "MiniMax-AI/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
       "skillPath": "skills/shader-dev/SKILL.md",
-      "skillFolderHash": "593609dbd12329296dc29e825db767709f3cdd61",
       "installedAt": "2026-07-16T04:11:05.878Z",
-      "updatedAt": "2026-07-16T04:11:05.878Z"
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "19ecd11c86b7b4b8cd0a5e0d0124330429cd28f0",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "skill-index-and-english-titles": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/skill-index-and-english-titles/SKILL.md",
+      "installedAt": "2026-08-15T01:08:07.343Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "a2ba1363b1b0cd75ca01f3760231f42beb53be40"
     },
     "vision-analysis": {
       "source": "MiniMax-AI/skills",
       "sourceType": "github",
-      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
-      "ref": "main",
       "skillPath": "skills/vision-analysis/SKILL.md",
-      "skillFolderHash": "a10bbd273581314befacb7c2ce95b8bc904074d9",
       "installedAt": "2026-07-16T04:11:21.274Z",
-      "updatedAt": "2026-07-16T04:11:21.274Z"
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "3009f54339ecbdfc9ec7cbf0e5f640a4210a8d3e",
+      "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
+      "ref": "main"
+    },
+    "web-access": {
+      "source": "eze-is/web-access",
+      "sourceType": "github",
+      "skillPath": "skills/web-access/SKILL.md",
+      "installedAt": "2026-04-21T23:51:31.827Z",
+      "updatedAt": "2026-08-15T01:09:15.607Z",
+      "skillFolderHash": "4346f37ed6640c9d0eb70e240e48a42b04c9052d",
+      "sourceUrl": "https://github.com/eze-is/web-access.git"
     }
   },
   "dismissed": {
