@@ -1,7 +1,7 @@
 ---
-synced_from: docs-pages/src/euv/usage-introduction/engine.md@f972247
+synced_from: docs-pages/src/euv/usage-introduction/engine.md@0c74235
 sync_method: scripts/sync-references.sh
-sync_date: 2026-08-14
+sync_date: 2026-08-16
 ---
 
 <!--
@@ -32,7 +32,7 @@ if initialized {
 }
 ```
 
-`RenderConfig::webgpu` 和 `EngineHandle::init_webgpu` 用于 WebGPU；初始化失败时处理 `WebGpuInitError`。只需要标准游戏循环时，也可以直接使用 `Engine::run(config, handler).await`。
+`RenderConfig::webgl` 和 `EngineHandle::init_webgl` 用于 WebGL 2.0（基于 GLSL `#version 300 es` 着色器），失败时处理 `WebGlInitError`；`RenderConfig::webgpu` 和 `EngineHandle::init_webgpu` 用于 WebGPU（WGSL 着色器），失败时处理 `WebGpuInitError`。生产环境应实现 WebGPU → WebGL 降级路径。只需要标准游戏循环时，也可以直接使用 `Engine::run(config, handler).await`。
 
 ## 调度器
 
@@ -70,6 +70,119 @@ renderer.replay(&list);
 ```
 
 常用绘制方法包括 `fill_rect`、`stroke_rect`、`fill_circle`、`stroke_circle`、`draw_line`、`fill_text`、`draw_sprite` 和 `draw_image_rect`。使用 `Camera2D::create` 后，可通过 `world_to_screen` 与 `screen_to_world` 转换坐标。
+
+## WebGL
+
+`euv-engine` 0.1.0 提供 `WebGlRenderer` 后端，基于 WebGL 2.0 (`#version 300 es`) 编写 GLSL 着色器，适合需要自定义 shader 的中等复杂度 2D/3D 场景（粒子系统、后处理、几何变换等）。
+
+```rust
+use euv_engine::*;
+
+let render: RenderConfig = RenderConfig::webgl("#game-canvas", 800.0, 600.0);
+let config: EngineConfig = EngineConfig::create(render);
+let mut handle: EngineHandle = Engine::new_handle(config);
+
+match handle.init_webgl() {
+    Ok(renderer) => {
+        // renderer: WebGlRenderer — 拥有 WebGL2 上下文，可直接编译 shader、绘制几何
+        handle.start(handler);
+    }
+    Err(err) => {
+        // WebGlInitError — 浏览器不支持或上下文创建失败
+        web_sys::console::error_1(&format!("WebGL init failed: {:?}", err).into());
+    }
+}
+```
+
+### 编译与链接着色器
+
+`WebGlRenderer::create_program(vertex_source, fragment_source)` 一次性完成编译与链接，返回 `Result<WebGlProgram, WebGlProgramError>`，失败时携带 GLSL info log：
+
+```rust
+const VERTEX_SRC: &str = r#"#version 300 es
+in vec2 a_position;
+uniform vec2 u_offset;
+void main() {
+    gl_Position = vec4(a_position + u_offset, 0.0, 1.0);
+}
+"#;
+
+const FRAGMENT_SRC: &str = r#"#version 300 es
+precision mediump float;
+uniform vec4 u_color;
+out vec4 outColor;
+void main() {
+    outColor = u_color;
+}
+"#;
+
+let program: WebGlProgram = renderer
+    .create_program(VERTEX_SRC, FRAGMENT_SRC)
+    .expect("shader link");
+```
+
+### 设置 uniform
+
+`WebGlRenderer` 提供 uniform 设置便捷方法（vec2 / vec4 / int / float），底层调用 `getUniformLocation` + `uniformXxx`，缺失的 uniform 会被静默忽略（与原生 WebGL 行为一致）：
+
+```rust
+renderer.set_uniform_2f(&program, "u_offset", 0.5, 0.0);
+renderer.set_uniform_4f(&program, "u_color", 1.0, 0.4, 0.7, 1.0);
+renderer.set_uniform_1i(&program, "u_mode", 1);
+renderer.set_uniform_1f(&program, "u_time", elapsed);
+```
+
+### 常用操作
+
+| 方法                                                     | 说明                                              |
+| -------------------------------------------------------- | ------------------------------------------------- |
+| `RenderConfig::webgl(selector, width, height)`           | 创建 WebGL 渲染配置                                |
+| `EngineHandle::init_webgl()`                             | 初始化 WebGL 后端，返回 `WebGlRenderer`           |
+| `handle.init_webgl()?`                                   | `Result<WebGlRenderer, WebGlInitError>`          |
+| `WebGlRenderer::create_program(vs, fs)`                  | 编译并链接着色器程序                               |
+| `renderer.set_uniform_2f(&prog, name, x, y)`            | 设置 `vec2` uniform                              |
+| `renderer.set_uniform_4f(&prog, name, x, y, z, w)`      | 设置 `vec4` uniform                              |
+| `renderer.set_uniform_1i(&prog, name, value)`           | 设置 `int` uniform                               |
+| `renderer.set_uniform_1f(&prog, name, value)`           | 设置 `float` uniform                             |
+
+> [!tip]
+>
+> 当浏览器不支持 WebGPU，但 WebGL 2.0 可用时（如 iOS Safari、旧版浏览器），推荐使用 `init_webgl` 作为回退路径。也可以在初始化时同时尝试 `init_webgpu`，失败时回退 `init_webgl`。
+
+## WebGPU
+
+`euv-engine` 0.1.0 还提供 `WebGpuRenderer` 后端，基于 WGSL 编写着色器，适合现代浏览器上的高性能 GPU 渲染场景。
+
+```rust
+use euv_engine::*;
+
+let render: RenderConfig = RenderConfig::webgpu("#game-canvas", 800.0, 600.0);
+let config: EngineConfig = EngineConfig::create(render);
+let mut handle: EngineHandle = Engine::new_handle(config);
+
+match handle.init_webgpu() {
+    Ok(renderer) => {
+        // renderer: WebGpuRenderer — 提供 WGSL 着色器编译、渲染管线、绑定组等
+        handle.start(handler);
+    }
+    Err(err) => {
+        // WebGpuInitError — 浏览器无 WebGPU 支持时降级
+        web_sys::console::error_1(&format!("WebGPU init failed: {:?}", err).into());
+    }
+}
+```
+
+### 常用操作
+
+| 方法                                                  | 说明                                              |
+| ----------------------------------------------------- | ------------------------------------------------- |
+| `RenderConfig::webgpu(selector, width, height)`       | 创建 WebGPU 渲染配置                               |
+| `EngineHandle::init_webgpu()`                         | 初始化 WebGPU 后端，返回 `WebGpuRenderer`         |
+| `handle.init_webgpu()?`                               | `Result<WebGpuRenderer, WebGpuInitError>`        |
+
+> [!warning]
+>
+> WebGPU 在 Safari / iOS 上截至 2026 年 8 月仍处于技术预览状态。生产环境应同时实现 `init_webgl` 降级路径。
 
 ## 精灵动画
 

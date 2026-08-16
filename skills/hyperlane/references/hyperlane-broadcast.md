@@ -1,7 +1,7 @@
 ---
-synced_from: docs-pages/src/hyperlane-broadcast/README.md@f972247
+synced_from: docs-pages/src/hyperlane-broadcast/README.md@0c74235
 sync_method: scripts/sync-references.sh
-sync_date: 2026-08-14
+sync_date: 2026-08-16
 ---
 
 <!--
