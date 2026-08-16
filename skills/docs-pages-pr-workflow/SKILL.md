@@ -6,7 +6,7 @@ description: 在 docs-pages/docs 仓库上做内容/导航修改并开 PR 的端
 # docs-pages/docs 仓库 PR 流程
 
 ## 仓库结构
-- 源仓库：`https://github.com/docs-pages/docs`，本地路径 `/workspace/orgs/docs-pages/`
+- 源仓库：`https://github.com/docs-pages/docs`，本地路径 `/root/eastspire/work/docs-pages-docs`
 - 文档源：`src/`（不是 `docs/src/`，也别被 `pages/` 混淆——`pages/` 是 huge 的 build output，已被 `.gitignore`）
 - 导航配置：`src/.vuepress/navbar.ts`（TypeScript）
 - 配置文件：`src/.vuepress/config.ts`
@@ -14,7 +14,8 @@ description: 在 docs-pages/docs 仓库上做内容/导航修改并开 PR 的端
 
 ## 环境
 - GitHub PAT 存于 `~/.bashrc` 和 `~/.profile` 的 `GH_TOKEN` / `GITHUB_TOKEN`，文件权限 600
-- `gh` CLI 不一定可用，但 `curl + GH_TOKEN` 调 GitHub REST API 稳定
+- **`gh` CLI 2.97.0 已装且可用**，PR 流程首选 `gh pr create`（`docs-pages` 仓库在用户 4 个 org 之一，token scope 够）
+- `curl + GH_TOKEN` 作为 fallback（无 gh 环境时使用）
 - 提交身份：`user.name=eastspire, user.email=root@ltpp.vip`
 - `execute_code` 子进程的 bash env 不会自动 source `~/.bashrc`，用 `curl` 时必须显式 `source ~/.bashrc` 或直接读 token
 
@@ -134,20 +135,41 @@ git checkout HEAD -- package.json
 git add <specific files>   # 不要 git add .
 ```
 
-`src/.vuepress/sidebar.js` 在 build 时会被 `creat-sidebar.js` 插件**自动清理**（删除 src 下不存在的目录条目），这属于正常 build 副作用，**可以提交**，但要知道来源。
+`src/.vuepress/sidebar.js` 在 build 时会被 `creat-sidebar.js` 插件**自动清理**（删除 src 下不存在的目录条目），这是**正常 build 副作用**。判断要不要 commit:
+- **如果本次 PR 范围就是想删除/添加目录**(如 navbar 里删了 LTPP,src 里也删了对应目录):sidebar.js 跟着清掉是预期的,正常 `git add` 即可
+- **如果本次 PR 只想修 navbar,没动 src/ 目录结构**:sidebar.js 被 build 改了一堆条目但与本次 PR 无关,应该 `git checkout HEAD -- src/.vuepress/sidebar.js` revert 掉,保持 commit 干净(只含 navbar.ts 改动)
+- 原则: PR diff 里出现的每个文件,都该是本次意图改的。build 副作用不属于"意图改"
+
+## Force-push 时 HTTPS push 超时 → SSH fallback
+
+GitHub 远端在中国网络下 HTTPS push 有时会卡在 1KB/s 以下,大 commit 必超时。fallback:
+```bash
+# 1. 切 SSH
+git remote set-url origin git@github.com:docs-pages/docs.git
+
+# 2. 验通
+ssh -T git@github.com  # 应输出 "Hi eastspire! You've successfully authenticated..."
+
+# 3. 重新 push
+git push --force-with-lease origin <branch>
+```
+SSH 通道通常稳定。push 完用 `gh pr view <n> --json headRefOid` 核对 head SHA 与本地 `git rev-parse HEAD` 一致。
 
 ## 完整修改→验证→PR 流程
-1. `cd /workspace/orgs/docs-pages && git status` 确认干净
-2. `git checkout -b chore/<descriptive-name>`
+1. `cd /root/eastspire/work/docs-pages-docs && git status` 确认干净
+2. `git checkout -b fix/<descriptive-name>` (从 master HEAD)
 3. 改 `src/.vuepress/navbar.ts`（注意 fontawesome icon 类名）
 4. `yarn install`（首次或 package.json 改过才需要）
 5. `yarn build` 验证（不要 `| tail -60` 截断，看到 `✔ Compiling with vite` 后还可能继续跑 vite 编译 ~2 min）
 6. grep 验证产物：
    - 旧跳链完全清掉（例：`grep -r "ltppx.cn" pages/`）
    - 新 fontawesome icon 已写入（`grep -r "fa-brands fa-github" pages/`）
-7. **commit 前清理**：`git checkout HEAD -- package.json`（如果改了）
-8. `git add <specific> && git commit && git push -u origin chore/<name>`
-9. 用 `gh pr create` 或 curl GitHub API 开 PR
+7. **commit 前清理**：
+   - `git checkout HEAD -- package.json`（如果 yarn install 重排了字段顺序）
+   - `git checkout HEAD -- src/.vuepress/sidebar.js`（如果本次 PR 范围不包括 src/ 目录结构变更）
+8. `git add <specific> && git commit && git push -u origin fix/<name>`
+   - HTTPS 超时切 SSH（见上节）
+9. 用 `gh pr create --base master --head fix/<name>` 开 PR（HTTPS push 超时也要用 SSH 的 git remote，但 gh CLI 调 GitHub API 不受 git remote 影响）
 
 ## 修改完后要核对的点
 1. `src/**/*.md` 全量 grep 失效引用（`./LICENSE`、`/LTPP-.../` 等大小写敏感）
