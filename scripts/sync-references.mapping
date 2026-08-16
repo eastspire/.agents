@@ -12,7 +12,7 @@
 #   commit it manually (the script warns if it would overwrite an existing
 #   file unless --force is passed).
 #
-# Last verified against docs-pages @ master (commit 325e362).
+# Last verified against docs-pages @ master (commit 3b8669b, 2026-08-16).
 
 # --- euv ---
 skills/euv/references/animation.md		src/euv/usage-introduction/animation.md
