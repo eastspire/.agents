@@ -330,3 +330,125 @@ ls /tmp/euv/example/src/page/ | grep -v mod.rs | wc -l
 - **rust-crate-use**:euv 用的第三方 crate(`lombok-macros` / `wasm_bindgen` / `web-sys` / `js-sys`)由它管。
 - **euv-ui-standards**:UI 设计规范 + 304 个 class 的具体样式含义(虽然数字 304→306,以本文 306 为准)。
 - **euv-pixel-game-scaffold**:用 euv 搭游戏的脚手架(euv 实际能力不止 web,也能做 2D/3D 游戏 —— example 里有 `game_2d` / `game_3d` page)。
+
+## 16. euv-engine WebGPU renderer 真实 API(2026-08 实地补完)
+
+euv-engine 的 `WebGpuRenderer`(在 `engine/src/renderer/impl.rs` 中)是 WebGPU 的 1:1 Rust 包装层,**所有 WebGPU const 名都集中在 `const.rs`,所有方法签名都在 `impl.rs`**。
+
+### 16.1 真实 const 总数与命名约定
+
+`engine/src/renderer/const.rs` 实地有 **300+ `pub(crate) const WEBGPU_*`**,命名规则:
+
+| 前缀 | 含义 | 例 |
+|---|---|---|
+| `WEBGPU_METHOD_*` | JS 方法名 | `WEBGPU_METHOD_MAP_ASYNC = "mapAsync"` |
+| `WEBGPU_PROPERTY_*` | 描述符字典 key | `WEBGPU_PROPERTY_BYTES_PER_ROW = "bytesPerRow"` |
+| `WEBGPU_MAP_MODE_READ` | u32 数值常量 | `WEBGPU_MAP_MODE_READ: u32 = 1` |
+
+**黄金纪律**:**先 `grep` 再加 const** — 99% 你想加的都已经存在,加重复会触发 `E0428 defined multiple times` 雪崩。
+
+```bash
+grep -oE "WEBGPU_(PROPERTY|METHOD|MAP_MODE)_[A-Z_]+" \
+  /root/projects/euv/engine/src/renderer/const.rs | sort -u
+```
+
+### 16.2 WebGpuRenderer 真实方法表(impl.rs)
+
+| 方法 | 签名 | 用途 |
+|---|---|---|
+| `get_device()` | `&JsValue` | 拿 `GpuDevice` |
+| `get_queue()` | `&JsValue` | 拿 `GpuQueue` |
+| `get_context()` | `&JsValue` | 拿 `<canvas>` 上下文 |
+| `create_command_encoder(&self)` | `&self -> JsValue` | 命令编码器 |
+| `create_buffer(&self, size, usage)` | `(u64, u32) -> JsValue` | GPU buffer |
+| `create_sampler(&self, mag_filter, ...)` | `(u32, ...) -> JsValue` | 采样器 |
+| `create_view(&self, texture, Option<&TextureViewDescriptor>)` | `&JsValue -> JsValue` | 纹理视图(本轮补完 descriptor 完整字段) |
+| `create_bind_group(&self, layout, &BindGroupDescriptor)` | `&JsValue` | 绑定组 |
+| `create_shader_module<S: AsRef<str>>(&self, code: S)` | `JsValue` (预存在,本轮**未**重定义) |
+| `create_shader_module_with_label(&self, wgsl, label)` | `&str, &str -> JsValue` (本轮新增,带 devtools label) |
+| `create_render_pipeline(&self, wgsl, vs_entry, fs_entry, config)` | `&str, &str, &str, &RenderConfig -> JsValue` |
+| `create_render_pipeline_full(&self, descriptor)` | `&RenderPipelineFullDescriptor -> JsValue` (本轮补完) |
+| `create_compute_pipeline(&self, wgsl, entry)` | `&str, &str -> JsValue` |
+| `begin_render_pass_full(&self, descriptor)` | `&RenderPassDescriptor -> JsValue` (本轮补完) |
+| `begin_render_pass_to_texture(&self, texture, color, depth)` | `&JsValue, &Color, Option<&DepthAttachment> -> JsValue` |
+| `begin_compute_pass(&self, descriptor)` | `Option<&ComputePassDescriptor> -> JsValue` |
+| `set_pipeline(&self, pass, pipeline)` | `&JsValue, &JsValue` |
+| `set_bind_group(&self, pass, index, group)` | `&JsValue, u32, &JsValue` (3 参,预存在) |
+| `set_bind_group_with_dynamic_offsets(&self, pass, index, group, &[u32])` | (本轮新增,4 参,渲染通道) |
+| `set_bind_group_compute_with_dynamic_offsets(&self, pass, index, group, &[u32])` | (本轮新增,4 参,计算通道) |
+| `set_vertex_buffer(&self, pass, slot, buffer)` | `&JsValue, u32, &JsValue` |
+| `set_index_buffer(&self, pass, buffer, format)` | `&JsValue, &JsValue, &str` |
+| `set_viewport(&self, pass, x, y, w, h, min_z, max_z)` | (本轮新增) |
+| `set_scissor_rect(&self, pass, x, y, w, h)` | (本轮新增) |
+| `set_stencil_reference(&self, pass, reference: u32)` | (本轮新增) |
+| `set_blend_constant(&self, pass, r, g, b, a)` | (本轮新增) |
+| `draw(&self, pass, vertex_count, instance_count, first_vertex, first_instance)` | (本轮补完参数) |
+| `draw_indexed(&self, pass, index_count, instance_count, first_index, base_vertex, first_instance)` | (本轮补完参数) |
+| `draw_indirect(&self, pass, buffer, offset)` | (本轮补完参数) |
+| `draw_indexed_indirect(&self, pass, buffer, offset)` | (本轮补完参数) |
+| `dispatch(&self, pass, x, y, z)` | 计算 pass 调度 |
+| `end_render_pass(&self, pass)` | `&JsValue` |
+| `finish_command_encoder(&self, encoder)` | `&JsValue -> JsValue` |
+| `submit(&self, &[JsValue])` | 命令缓冲提交 |
+| `copy_texture_to_buffer(&self, src, dst, &Extent3D)` | 纹理→buffer 拷 |
+| `write_texture(&self, &JsValue queue, &TextureWriteDescriptor, &[u8])` | (本轮新增) |
+| `read_buffer(&self, buffer, offset, size) -> Option<Vec<u8>>` (async) | **async fn**(本轮新增,不是 sync — 同步会卡死 wasm executor) |
+| `generate_mipmaps(&self, texture)` | (本轮新增) |
+| `push_error_scope(&self, filter: &str) -> JsValue` | (本轮新增,错误诊断) |
+| `pop_error_scope(&self) -> JsValue` | (本轮新增,返回 Promise<JsValue>) |
+| `apply_camera(&self, ...)` | 2D 相机 |
+| `create_texture_view` / `create_depth_texture` / `create_offline_render_target` | 2D 离屏 RT |
+| `create_uniform_buffer` / `create_uniform_bind_group` | 2D 路径快速方法 |
+
+### 16.3 描述符结构(struct.rs)
+
+```rust
+pub struct TextureViewDescriptor {
+    pub format: Option<&'static str>,        // "rgba8unorm" / "depth24plus" / ...
+    pub dimension: Option<&'static str>,     // "1d"/"2d"/"2d-array"/"cube"/"cube-array"
+    pub aspect: Option<&'static str>,        // "all"/"depth-only"/"stencil-only"
+    pub base_mip_level: u32,                 // 0 = default
+    pub mip_level_count: u32,                // 0 = default (全 mip)
+    pub base_array_layer: u32,
+    pub array_layer_count: u32,
+}
+pub struct TextureWriteDescriptor {
+    pub texture: JsValue,                    // **不是 Option** — 必传
+    pub mip_level: u32,
+    pub origin: Option<JsValue>,             // {x,y,z} 字典
+    pub data_layout: JsValue,                // {offset,bytesPerRow,rowsPerImage} 字典
+    pub size: JsValue,                       // {width,height,depthOrArrayLayers} 字典
+}
+```
+
+> ⚠️ Lombok `Getter` 对 `u32` 字段生成 `fn get_x(&self) -> u32`(value,**非** `&u32`),对 `Option<T>` 生成 `fn get_x(&self) -> Option<T>`(value)。**`u32` 字段不要 `*` 解引用**。
+
+### 16.4 坑表(WebGPU 路径)
+
+| 坑 | 解决 |
+|---|---|
+| 加 const 触发 `E0428 duplicate` | **先 grep `engine/src/renderer/const.rs`,99% 已存在** |
+| 加方法触发 `E0592 duplicate` | **Rust 不支持 method overloading**。改用不同名字(如 `create_shader_module_with_label` 而非 `create_shader_module` 重复) |
+| `await` 在 `fn` 里报 `E0728` | 改 `async fn`,由调用方 `await` |
+| `Reflect::set(&dict, &key, value)` 第三个参数要 `&JsValue` | `Reflect::set` 是 `(&JsValue, &JsValue, &JsValue) -> Result` |
+| `if let Some(x) = d.get_origin()` 让 `x: &JsValue` | 直接 `&x` 用,不要 `&&JsValue` |
+| sync `read_buffer` 卡死 wasm executor | 必须 `pub async fn read_buffer`,由 `wasm_bindgen_futures::JsFuture` 驱动 |
+| `baseMipLevel=0` 触发浏览器报错 | 0 = default,跳过 set 让浏览器兜底 |
+
+### 16.5 验证脚本
+
+```bash
+# 真实 const 清单
+grep -oE "WEBGPU_(PROPERTY|METHOD|MAP_MODE)_[A-Z_]+" \
+  /root/projects/euv/engine/src/renderer/const.rs | sort -u | wc -l
+
+# 真实方法清单
+grep -oE "pub fn [a-z_]+" /root/projects/euv/engine/src/renderer/impl.rs | sort -u
+
+# cargo check 0 错
+cd /root/projects/euv/engine && cargo check --target wasm32-unknown-unknown
+# cargo test 0 fail
+cd /root/projects/euv/engine && cargo test
+# euv fmt 0 file changed
+cd /root/projects/euv && euv fmt
+```

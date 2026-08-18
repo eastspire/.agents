@@ -112,3 +112,8 @@ test -f ~/.hermes/skills/$SKILL/SKILL.md && echo "✅ symlink resolved"
 5. **`gh api` vs GraphQL** — `read:org` 缺失时不要用 `gh pr view --json` 复杂查询(部分走 GraphQL),用 `gh api` 单条 REST 更稳
 6. **PR title 跟内容不符** — 多个 commit 推到 head branch 后,gh pr create 不会自动改 title,需要用 `gh pr edit --title ...` 或 REST PATCH
 7. **没搜重就开新 PR** — commit 之前先 `gh pr list --search` 看是否已有相关 PR
+8. **`Path.exists()` / `is_file()` 在 broken symlink 上返回 False**(2026-08-18 踩雷)— 用它们判定"src 是否健康"会把 broken symlink 当不存在,导致 `if not src.exists()` 走错分支,删除真实目录后建了 self-loop symlink。**改用 `os.lstat` + `os.readlink` 验证** symlink 健康度
+9. **`git checkout HEAD -- <path>` 不会覆盖 untracked 的 symlink 替换**(2026-08-18 踩雷)— 工作区如果有个 tracked 目录被替换成 symlink,git 看到工作区是 symlink 就保留,不会恢复。**需要先 `find . -type l -exec rm {} \;` 删 symlink,再 `git checkout HEAD -- <path>`**
+10. **skill 库默认偏好"长期 / 通用 / 非单项目"**(2026-08-18 用户明说)— 不要把"单项目踩坑 / 单 bug 记录 / 一次性扩展 / show-and-tell"打包成 skill。单 bug 写 memory 即可,单项目踩坑不值得占库位
+11. **`gh pr edit` GraphQL 字段失败会静默退出** — `login` / `name` / `slug` 字段需 `read:org` scope,缺这 scope 时 `gh pr edit` 静默无输出,看起"成功了"实际没改。**改 PR title/body 用 REST**: `curl -X PATCH -H "Authorization: token $GH_TOKEN" -d @payload.json https://api.github.com/repos/<owner>/<repo>/pulls/<n>`,并用 `curl GET` 验证替换结果
+12. **临时 skill 筛选标准**(2026-08-18 总结):内容含"自荐 / show and tell"、单一 bug 记录(该写 memory)、单项目一次性踩坑、单工具偶尔用 — 都不该加进 skill 库
