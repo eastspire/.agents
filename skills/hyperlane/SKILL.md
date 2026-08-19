@@ -26,6 +26,7 @@ hyperlane 是 Tokio 异步 HTTP server 库,版本 21.3.6,edition 2024。完整 A
 | Get a 1-paragraph summary of the crate | [Overview](#overview) |
 | See crate name / version / edition / license | [Project Metadata](#project-metadata) |
 | Add `hyperlane` to `Cargo.toml` | [Installation](#installation) |
+| Format the project before commit (recommended: `hyperlane fmt`) | [`hyperlane fmt`](#hyperlane-fmt-----hyperlane-项目推荐格式化器) |
 | Start a 2-route HTTP server in 10 lines | [Quick start (HTTP-only, trait-style)](#quick-start-http-only-trait-style) |
 | Browse the full `Server` builder API | [`Server` builder API](#server-builder-api) |
 | Configure server-level / request-level behavior | [`ServerConfig` and `RequestConfig`](#serverconfig-and-requestconfig) |
@@ -177,6 +178,27 @@ inventory = "0.3.24"
 lombok-macros = "2.0.36"
 serde = { version = "1.0.229", features = ["derive"] }
 ```
+
+## `hyperlane fmt` —— **hyperlane 项目推荐格式化器**
+
+```shell
+cargo install hyperlane-cli   # 装一次即可
+hyperlane fmt                 # 全项目
+# 或单 crate：hyperlane fmt --manifest-path ./Cargo.toml
+# CI 推荐：hyperlane fmt --check
+```
+
+**为什么不是 `cargo fmt`**:hyperlane 项目重度依赖 `hyperlane-macros` 提供的 attribute macro —— `#[route(METHOD, "/path")]`, `#[hyperlane(get("/long/path"))]`, `#[task_panic]`, `#[request_error]`, `#[request_middleware]`, `#[response_middleware]`, `#[prologue_macros]`, `#[epilogue_macros]`, 加上 macro 内的 `context!` 调用。`cargo fmt` 不展开这些 macro,只能处理 macro **外面**的 Rust;macro 内的 path 字符串折行、链式属性排列、`context! { ... }` 缩进都不会被规范化。
+
+`hyperlane fmt` 会展开 `hyperlane-macros` 后再格式化,所以:
+
+- 长 path `#[hyperlane(get("/api/v1/very/long/path/segment"))]` —— 一致折行
+- `context! { let req: &Request = ctx.get_request(); ... }` —— 缩进对齐
+- 多 macro 叠加在同一 struct / fn 上 —— 顺序 / 间距一致
+
+> **Fallback**(hyperlane CLI 未装):`cargo fmt --all` —— 能处理 macro 外的代码,macro 内的格式漂移仍存在。
+
+> 改完 `.rs` 后 commit 之前必跑 `hyperlane fmt`(或 fallback `cargo fmt`);其它通用格式化工具链看 `code-formatting-tools` skill §0/§5。
 
 ## Quick start (HTTP-only, trait-style)
 
