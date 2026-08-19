@@ -121,6 +121,23 @@ euv run --dev --crate-path ./example --port 80 --www-dir www --index-html ./temp
 # 或发布构建:euv run --release ...
 ```
 
+### `euv fmt` —— **euv 项目唯一推荐的 Rust 格式化器**
+
+```shell
+euv fmt
+```
+
+**为什么不是 `cargo fmt`**:euv 项目重度依赖 `html!` / `class!` / `vars!` / `var!` / `computed!` / `watch!` / `#[component]` 这类 macro。`cargo fmt` 不展开 macro,只能动 macro 外的 Rust 语法 —— macro **内部**的 child 缩进、嵌套大括号、`key: value;` 折行都不会被处理,导致 PR 里有大量 macro 内手动对齐 / 漂移缩进 看着糟心。
+
+`euv fmt` 则会展开 euv macro 后再格式化,所以:
+
+- `html! { div { class: x() "..." } }` —— child 自动 indent
+- `class! { c_x: "..."; c_y: "..."; }` —— `;` 一致、嵌套大括号对齐
+- `vars! { pub c_theme_light { space-2xs: "2px"; } }` —— 嵌套层级清晰
+- `#[component]` 后的 `fn fn_name(...) { ... }` —— body 一致
+
+> **改完 `.rs` 后 commit 之前必跑 `euv fmt`**;CI 上一般 `euv fmt --check`。其它通用格式化工具链看 `code-formatting-tools` skill 的 §0/§5。
+
 ## Quick start
 
 Minimal counter (matches `example/src/page/counter/view/fn.rs` — full version with `euv-ui` wrappers; `quick-start/README.md:62-96` shows the bare `div`/`h1`/`button` form without `euv-ui`):

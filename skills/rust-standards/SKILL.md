@@ -83,6 +83,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 10. **proc-macro crate 必须** `[lib] proc-macro = true;`,且 `#[proc_macro_attribute]` 全在 `lib.rs` 中实现(参见 16.1)。
 11. **测试目录** `tests/` 用 `mod xxx;`(子模块名不带 `r#`),开头 `use crate_name::*;`(参见 14.1)。
 12. **WASM 项目**禁止显示标注任何 `inline` 宏(参见 04.3)。
+13. **commit 前必跑项目官方格式化器**(euv → `euv fmt`,hyperlane → `hyperlane fmt`,其它 → `cargo fmt --all`;`.toml` 顺手 `taplo fmt`,见 `code-formatting-tools` skill §0/§5)。
 
 ## 跨章节冲突时
 
