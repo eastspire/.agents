@@ -92,6 +92,7 @@ Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile i
 | config.yaml sections, toolsets, voice/STT/TTS | `references/configuration.md` |
 | AGENTS.md / .hermes.md / CLAUDE.md project rules | `references/project-context-files.md` |
 | Secret redaction, PII, approval modes, "reset permissions" | `references/security-privacy.md` |
+| Multi-agent team setup (5-step profile + SOUL/AGENTS), 4 modes (Delegation / Kanban / MoA / Spawn) | `multi-agent-team-setup` + `references/background-systems.md` |
 | Delegation, cron, curator, kanban | `references/background-systems.md` |
 | MCP servers (add, catalog, `hermes mcp`) | `references/native-mcp.md` |
 | Webhook routes and event-driven runs | `references/webhooks.md` |
@@ -153,7 +154,9 @@ terminal(command="tmux send-keys -t agent1 '/exit' Enter && sleep 2 && tmux kill
 
 ### Multi-Agent Coordination
 
-```
+> For the **full multi-agent workflow** (5-step team setup, 4 coordination modes: Delegation / Kanban / MoA / Spawn, Leader+Researchers case, configuration, cost control, common pitfalls), load `multi-agent-team-setup`. This section is the **tmux-based spawning cheatsheet**.
+
+```bash
 # Agent A: backend
 terminal(command="tmux new-session -d -s backend -x 120 -y 40 'hermes -w'", timeout=10)
 terminal(command="sleep 8 && tmux send-keys -t backend 'Build REST API for user management' Enter", timeout=15)
@@ -166,6 +169,17 @@ terminal(command="sleep 8 && tmux send-keys -t frontend 'Build React dashboard f
 terminal(command="tmux capture-pane -t backend -p | tail -30", timeout=5)
 terminal(command="tmux send-keys -t frontend 'Here is the API schema from the backend agent: ...' Enter", timeout=5)
 ```
+
+For **persistent multi-agent collaboration** (跨小时、任务状态轮转、原子认领) use **Kanban**:
+
+```bash
+hermes kanban init                      # init the board
+hermes kanban create --title "..."      # enqueue a task
+hermes kanban list                       # monitor from the leader profile
+# profiles that are dashboard subscribers pick tasks up automatically
+```
+
+See `multi-agent-team-setup` §0 for the Delegation vs Kanban vs MoA vs Spawn decision tree.
 
 ### Session Resume
 

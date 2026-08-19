@@ -1,0 +1,5 @@
+# Hermes-curator sidecar files -- never commit
+.usage.json
+.usage.json.lock
+.curator_state
+.curator_ledger.jsonl
