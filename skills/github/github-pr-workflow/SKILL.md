@@ -1,7 +1,7 @@
 ---
 name: github-pr-workflow
-description: "GitHub PR lifecycle: branch, commit, open, CI, merge."
-version: 1.1.0
+description: "GitHub PR lifecycle: branch, commit, open, CI, merge. Includes fork-first path for no-write targets and tarball-to-PR recovery when only api.github.com works."
+version: 1.2.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -15,10 +15,18 @@ metadata:
 
 Complete guide for managing the PR lifecycle. Each section shows the `gh` way first, then the `git` + `curl` fallback for machines without `gh`.
 
+## When to Use This Skill
+
+Use this skill whenever the outcome is a PR — feature work, bugfix, docs update, refactor. Load it even for "just push this fix" requests, since the user may have a no-direct-push rule that makes the PR step mandatory (not optional). Quick decision tree:
+
+- **You already have a local repo with `origin` set and write permission on it** → straight PR workflow.
+- **You only have a tarball/working tree (no `.git/`), or you only have read access to the target repo** → see `## Tarball-Only and Read-Only Sources` below BEFORE doing anything.
+- **The user said "禁止直接 push" / "no direct push" / "always via PR"** → treat as hard constraint, not a soft preference; do not push to the base branch even if you have write permission.
+
 ## Prerequisites
 
 - Authenticated with GitHub (see `github-auth` skill)
-- Inside a git repository with a GitHub remote
+- Inside a git repository with a GitHub remote, OR following the tarball fallback below
 
 ### Quick Auth Detection
 
@@ -148,6 +156,76 @@ curl -s -X POST \
 The response JSON includes the PR `number` — save it for later commands.
 
 To create as a draft, add `"draft": true` to the JSON body.
+
+### Creating a PR From a Tarball (no local git history)
+
+If you only have a downloaded tarball or working tree — no `.git/` directory — you cannot `git push` because there is no branch, no remote, and no commit graph. The fix is to re-create the history before pushing:
+
+```bash
+# 1. Get a real git repo by either re-cloning or init-from-tarball
+# Option A: clone if network permits
+git clone https://github.com/<owner>/<repo>.git ./repo
+# Option B: init from an existing tarball (only when clone is impossible)
+cd ./repo
+# IMPORTANT: tarball doesn't carry history — do NOT claim to preserve upstream history
+git init && git remote add origin git@github.com:<your-fork>/<repo>.git
+# Pull the actual history from origin to populate .git/, then layer your changes on top
+git fetch origin
+git checkout -b feat/my-change origin/main  # or: git pull origin main --allow-unrelated-histories
+# Restore your tarball changes on top of the fetched history
+# ...then add, commit, push, PR
+```
+
+Once you have a real `git` repo with the base branch checked out, continue with the normal `git push -u origin HEAD` flow above.
+
+### Cross-Org / No-Write Permission (the "fork first" path)
+
+You cannot push to a branch on a repo you lack write permission to — typical when the user account has push rights only to their own fork, not to the upstream organization. Steps:
+
+```bash
+# 1. Fork the upstream repo to the user's account (UI button OR API)
+gh repo fork <owner>/<repo> --clone   # with gh
+# or via API: POST /repos/<owner>/<repo>/forks
+# 2. Add upstream as a separate remote so you can sync later
+git remote add upstream https://github.com/<owner>/<repo>.git
+# 3. Push the branch to YOUR fork, NOT upstream
+git push -u origin HEAD
+# 4. Open the PR against the upstream base
+gh pr create --base main --head <user>:<branch>
+# or: POST /pulls with head="<user>:<branch>", base="main"
+```
+
+Stop and ask the user if you don't know whether they have push rights to the target repo. Trying to push and failing wastes a turn on the same diagnostic.
+
+### Fork Disabled — Direct Branch Push (when you already have write access)
+
+Some orgs disable forks entirely (`POST /repos/<o>/<r>/forks` returns 403 "forking is disabled"). When the user's account is admin/owner of the upstream, the fork path is moot anyway — skip it and push straight to the upstream:
+
+```bash
+# Confirm your permission level BEFORE pushing
+gh api repos/<owner>/<repo>/collaborators/<user>/permission --jq .permission
+# Expected: "admin" / "maintain" / "write". Anything else means you can't push here.
+
+# Create a new branch on the upstream directly (ref-based, no clone needed)
+MASTER_SHA=$(gh api repos/<owner>/<repo>/commits/<base-branch> --jq .sha)
+gh api -X POST repos/<owner>/<repo>/git/refs \
+  -f ref="refs/heads/<branch>" \
+  -f sha="$MASTER_SHA"
+
+# Now upload your file changes to that branch via the Contents API
+# (see references/github-api-file-upload.md — this is how you avoid clone stalls)
+# ...
+
+# Open the PR with the upstream branch as head
+gh pr create --repo <owner>/<repo> --head <branch> --base <base-branch>
+```
+
+This is the right path when:
+- The target repo is private (forks of private repos are still blocked on free orgs) **or** the org has "forking is disabled" in settings
+- The user's account has admin/maintain/write on the upstream
+- The tarball would be too slow to clone (`codeload.github.com` 1–2 MB/min on a 200MB repo = 100+ minutes; SSH `index-pack` at 24 KiB/s = even worse)
+
+See `references/github-api-file-upload.md` for the Contents API recipe that makes this work without `git clone`.
 
 ## 4. Monitoring CI Status
 
@@ -365,3 +443,63 @@ git push -u origin HEAD
 | Request review | `gh pr edit N --add-reviewer user` | `curl -X POST .../pulls/N/requested_reviewers -d '{"reviewers":["user"]}'` |
 | Close PR | `gh pr close N` | `curl -X PATCH .../pulls/N -d '{"state":"closed"}'` |
 | Check out someone's PR | `gh pr checkout N` | `git fetch origin pull/N/head:pr-N && git checkout pr-N` |
+
+## Pitfalls
+
+- **Editing the build product, not the source.** Before you open a PR that touches `*.html`, check whether the repo is a Vercel/Netlify/Cloudflare Pages auto-deploy target. `package.json` referencing `vuepress build src` / `next build && next export` / `hugo` / `mkdocs build`, plus commit messages matching `Deploy from @<sha>`, are the giveaways. Those HTML files get overwritten on every deploy — your diff will vanish. Always edit the source repo (markdown / source files), not the rendered output. See `references/build-product-vs-source-repo.md` for the full diagnostic.
+- **Pushing to a repo you only have read access to.** `git push` returns 403 with "Permission denied". Always check `gh repo view <owner>/<repo> --json viewerPermission` (or `GET /repos/<owner>/<repo>` `permissions.pull`) before pushing; if you only have `read`, the fork-first path is the only option.
+- **Trying to fork a repo where forking is disabled.** Many orgs turn this off in settings, and private repos often can't be forked on free orgs. `POST /repos/<o>/<r>/forks` returns 403 with "forking is disabled". If the user is admin/owner of the upstream, skip the fork entirely and push to a new branch on the upstream directly — see the "Fork Disabled" recipe below.
+- **Trying to PR from a tarball-only working tree.** `git push` fails with "not a git repository" or "no upstream branch". A tarball has no commit graph — re-clone (preferred) or `git init` + `git fetch origin` first.
+- **Treating the user's "no direct push" rule as soft.** If they said "禁止直接 push" / "always via PR", that is the policy. Do not push to base/main even when you have write access — branch, commit, push branch, open PR.
+- **`git push` over HTTPS hangs even when SSH works.** On GFW-throttled hosts, HTTPS `github.com` smart-HTTP can stall indefinitely on push (handshake succeeds, then nothing). **SSH push to the same repo is fast** — odd but observed. If `git push https://...` is stuck, switch the remote to SSH: `git remote set-url origin git@github.com:<o>/<r>.git` and retry.
+- **codeload.github.com single-connection bandwidth is heavily throttled on GFW-blocked hosts.** A 50–200MB tarball can take 30–45 min at 1–2 MB/min. If `wget`/`curl` keeps getting `HTTP/2 stream CANCEL` or `Recv failure`, retry with `wget --tries=infinite --waitretry=3 --read-timeout=60` instead of `curl` (single-connection retries less aggressively). SSH `git clone` to the same host is usually *slower* than HTTPS tarball under throttling (24 KiB/s observed), so prefer the tarball.
+- **GitHub rate limits Contents API hard.** Single-file `PUT /repos/<o>/<r>/contents/<path>` counts as one request; bulk edits of N files can hit the 5000/hour limit on personal tokens. For multi-file doc sync, batch into a single commit if the API allows, or pace your calls. See `references/github-api-file-upload.md`.
+- **Pushing without checking the base branch.** `git push -u origin HEAD` defaults to whatever upstream says; on a freshly forked repo that may be `master`, not `main`. Verify with `git symbolic-ref refs/remotes/origin/HEAD` before opening the PR, and pass `--base` explicitly when creating the PR.
+- **Using `gh` for `gh api` when only `gh auth login` works for HTTPS but SSH keys are also configured.** Pick one mode and stay in it — mixing auth modes mid-workflow leaks credentials into shell history or kills the agent's auth on rotation.
+- **Reporting "PR opened" without checking the response.** `gh pr create` returns the PR URL on success and exits non-zero on failure (e.g., "no history in common with base"). Always read the actual output, not the exit code, before claiming success.
+
+## Related References
+
+- `references/gfw-throttled-github-fetch.md` — when `codeload.github.com` and `raw.githubusercontent.com` are heavily throttled or blocked but `api.github.com` and `git@github.com` work. Covers `wget` retry recipe, `api.github.com/contents` + base64 fallback for reading raw files, and why tarballs are NOT git repos (implications for PR workflows).
+- `references/build-product-vs-source-repo.md` — when the repo you're about to edit is a Vercel/Netlify/Cloudflare Pages auto-deploy target. Why editing the rendered HTML is wasted work, how to identify the source repo, and what to do instead.
+- `references/github-api-file-upload.md` — Contents API (`PUT /repos/<o>/<r>/contents/<path>`) recipe for uploading file changes without `git clone`. Used when the repo is too large to clone in the time budget, or forking is disabled and you must push straight to the upstream.
+
+---
+
+## Build Product vs Source Repository
+
+A category of repos you should NOT push to without first checking what they are: **auto-deployed documentation sites**. The pattern:
+
+```
+<org>/<docs-source-repo>     (private, often) — VuePress/Docusaurus/Hugo/MkDocs sources
+                                     ↓ yarn build / npm run build / hugo / mkdocs build
+                                     ↓ output → <build-output-dir>
+                                     ↓ Vercel/Netlify/Cloudflare Pages auto-commit
+<org>/<build-product-repo>   (often public, named like "...-pages", "site", "www") — static HTML + assets
+```
+
+The build product repo has `*.html` only — no markdown sources, no `package.json`, no `_config.yml`. It exists because the hosting platform needs a public, history-tracked place to push rendered artifacts.
+
+### How to detect a build-product repo (cheap heuristics)
+
+1. `GET https://api.github.com/repos/<o>/<r>/contents` — if the listing is `*.html` / `assets/` / `sitemap.xml` / `robots.txt` / `404.html` and **zero** markdown sources / `package.json` / build configs, it's almost certainly the output side.
+2. `GET /repos/<o>/<r>/commits` — commit messages matching `Deploy from @<sha>` (Vercel), `Deploy <id>` (Netlify), or `pages build` (Cloudflare Pages) are deployment-bot signatures.
+3. If the repo has a private sibling in the same org (e.g., `docs-pages/docs` private + `docs-pages/pages` public), the private one is almost certainly the source — fetch its `package.json` / `.vuepress/` / `_config.yml` to confirm.
+
+### Why "just edit the HTML" is the wrong move
+
+- The next auto-deploy will overwrite your HTML changes with the freshly built output.
+- Your reviewer sees a 50,000-character HTML diff with shiki highlight spans and inline CSS — high signal-to-noise ratio, hard to review.
+- The source repo (where humans actually edit) goes out of sync with the public site the moment your PR merges.
+
+### What to do instead
+
+- Identify the **source repo** (the private sibling, or the repo with `package.json` / `*.md` / `_config.yml`).
+- Open your PR against the **source** repo, in the markdown / config file that the build pipeline consumes.
+- After merge, the auto-deploy will produce the HTML — your changes appear on the live site without you touching the HTML repo.
+
+### Edge cases
+
+- The source repo is private and you only have read access on it: same Contents-API-without-clone recipe applies (next section). You don't need clone access if the repo is small enough to PUT file-by-file.
+- The repo really is single-repo (no source sibling) but still auto-deployed: it must be a static site generator with `*.md` IN the same repo as the build output. Look for `vuepress build src` in scripts — the `src/` directory is the source, the rest is generated.
+- The repo is hand-maintained HTML with no auto-deploy (an old GitHub Pages setup): treat it like a normal repo and edit the HTML.
