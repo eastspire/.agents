@@ -1,7 +1,7 @@
 ---
 name: github-repo-management
-description: "Clone/create/fork repos; manage remotes, releases."
-version: 1.1.0
+description: "Clone/create/fork repos; manage remotes, releases. Includes codeload tarball fallback when SSH clone is throttled."
+version: 1.2.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -81,6 +81,53 @@ git clone git@github.com:owner/repo-name.git
 gh repo clone owner/repo-name
 gh repo clone owner/repo-name -- --depth 1
 ```
+
+### When SSH clone is too slow (codeload fallback)
+
+On hosts where `git clone` via SSH crawls at <50 KiB/s but HTTPS to `codeload.github.com` works (heavily throttled but functional), the fastest path is the tarball — **but a tarball is NOT a git repo**, so you must unpack it then init:
+
+```bash
+# 1. Download the tarball with retry (curl will fail on HTTP/2 stream CANCEL; wget retries)
+wget --tries=infinite --waitretry=3 --read-timeout=60 \
+     -O /tmp/repo.tar.gz \
+     https://codeload.github.com/owner/repo-name/tar.gz/refs/heads/master
+
+# 2. Verify the tail of the gzip isn't truncated (very common on throttled connections)
+tar -tzf /tmp/repo.tar.gz > /tmp/listing.txt
+wc -l /tmp/listing.txt  # if the listing looks too short, re-download
+
+# 3. Extract — note: NO .git/ directory, no commit history, no branches
+tar -xzf /tmp/repo.tar.gz --strip-components=1 -C ./repo
+
+# 4. To PR from this, see github-pr-workflow § "Creating a PR From a Tarball"
+```
+
+Do NOT claim you "cloned" the repo after this — you downloaded and extracted it. State that distinction in user-facing messages.
+
+#### Faster: codeload wrapped in a GitHub mirror (when direct codeload is throttled)
+
+On GFW-restricted hosts where direct `codeload.github.com` caps at ~33 KB/s but mirror wrappers are reachable, try a GitHub-mirror-wrapped URL. Verified mirrors (pick the first that works):
+
+```bash
+# Tier 1: ghfast.top — usually full-speed (~MB/s range)
+wget --tries=infinite --waitretry=3 --read-timeout=60 \
+     -O /tmp/repo.tar.gz \
+     "https://ghfast.top/https://github.com/owner/repo-name/tar.gz/refs/heads/master"
+
+# Tier 2: ghproxy.net — slower (~40 KB/s) but works
+wget --tries=infinite --waitretry=3 --read-timeout=60 \
+     -O /tmp/repo.tar.gz \
+     "https://ghproxy.net/https://github.com/owner/repo-name/tar.gz/refs/heads/master"
+
+# Known dead/blocked mirrors to skip:
+#   ghproxy.com, mirror.ghproxy.com, gh-proxy.com,
+#   hub.fastgit.xyz, github.akams.cn, ghps.cc
+#   gh.api.99988866.xyz (TLS handshake fail)
+```
+
+Same `tar -tzf /tmp/repo.tar.gz` truncation check applies — even fast mirrors can drop the gzip trailer; re-download if file count looks short.
+
+This also works for **release tarballs** (e.g. `gh` CLI binary) — same wrapper pattern: `https://ghfast.top/https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>`.
 
 ## 2. Creating Repositories
 
