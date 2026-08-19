@@ -20,8 +20,8 @@ metadata:
 | `.md` | Prettier | `npx prettier --write "**/*.md"` (或 scoped 到改过的 md) |
 | `.yaml / .yml` | yamlfmt | `yamlfmt <file>` (fallback `taplo fmt <file>`) |
 | `.toml` | taplo | `taplo fmt <file>` |
-| `.rs` 在 **euv** 项目 | euv-cli | `euv fmt` —— 比 `cargo fmt` 强,专处理 `html!` / `class!` / `vars!` macros 内缩进 |
-| `.rs` 在 **hyperlane** 项目 | hyperlane CLI | `hyperlane fmt`;未安装就回退 `cargo fmt --all` |
+| `.rs` 在 **euv** 项目 | euv-cli | `euv fmt` —— 真的会展开 `html!` / `class!` / `vars!` macros 后再格式化 |
+| `.rs` 在 **hyperlane** 项目 | hyperlane CLI | `hyperlane fmt`(实测是 `cargo fmt` 的 wrapper,不会展开 hyperlane-macros) |
 | 其它 `.rs` | rustfmt | `cargo fmt --all` |
 | `.json` | Prettier | `npx prettier --write <file>` |
 | `.html` (非 euv macro 输出) | Prettier | `npx prettier --write <file>` |
@@ -77,7 +77,7 @@ taplo fmt --check  # CI 校验
 | 项目类型 | 第一选择 | fallback |
 | --- | --- | --- |
 | euv 项目（含 `html!`/`class!`/`vars!` macros） | `euv fmt` | `cargo fmt --all`（euv macros 内不会被处理） |
-| hyperlane 项目（含 `#[route]` / `#[hyperlane]` macros） | `hyperlane fmt` | `cargo fmt --all`（hyperlane macros 折行不会被处理） |
+| hyperlane 项目（含 `#[route]` / `#[hyperlane]` macros） | `hyperlane fmt` | 等同 `cargo fmt`(hyperlane-cli 只是 wrapper,不展开 macros) |
 | 其它 Rust / 通用 crate | `cargo fmt --all` | — |
 
 ```bash
@@ -92,7 +92,10 @@ hyperlane fmt
 cargo fmt --all
 ```
 
-**关键**:euv `html! { ... }` 内 child 缩进、`class! { ... }` 嵌套、`vars! { ... }` 缩进,`cargo fmt` 不管,必须用 `euv fmt`。同理 `#[hyperlane(get("/.../long/path"))]` 这种长 macro 走 `hyperlane fmt` 才能折行。
+**关键差异**:
+- euv `html! { ... }` 内 child 缩进、`class! { ... }` 嵌套、`vars! { ... }` 缩进,`cargo fmt` 不管 —— **必须用 `euv fmt`**(真的会展开 macro)。
+- `hyperlane fmt` **只是 `cargo fmt` 的 wrapper**(hyperlane-cli v0.1.25 实测),不做 macro 展开 —— 等同直接跑 `cargo fmt`。走 `hyperlane fmt` 只是为了"用项目官方入口"这一契约,不期待 macro 内特殊行为。macro 内部要做严格对齐,需要 nightly rustfmt + `rustfmt.toml`,或手调。
+- 通用 Rust 没有 macro 折行需求的项目,直接 `cargo fmt --all` 即可,不必装 euv-cli / hyperlane-cli。
 
 ## 6. 流程（commit / PR 前）
 
