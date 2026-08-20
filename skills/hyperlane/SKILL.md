@@ -179,26 +179,28 @@ lombok-macros = "2.0.36"
 serde = { version = "1.0.229", features = ["derive"] }
 ```
 
-## `hyperlane fmt` —— **hyperlane 项目推荐格式化器**
+## `hyperlane fmt` —— **hyperlane 项目推荐入口（实际是 `cargo fmt` 的 wrapper）**
 
 ```shell
 cargo install hyperlane-cli   # 装一次即可
 hyperlane fmt                 # 全项目
-# 或单 crate：hyperlane fmt --manifest-path ./Cargo.toml
-# CI 推荐：hyperlane fmt --check
+# 或单 crate:hyperlane fmt --manifest-path ./Cargo.toml
+# CI 推荐:hyperlane fmt --check
 ```
 
-**为什么不是 `cargo fmt`**:hyperlane 项目重度依赖 `hyperlane-macros` 提供的 attribute macro —— `#[route(METHOD, "/path")]`, `#[hyperlane(get("/long/path"))]`, `#[task_panic]`, `#[request_error]`, `#[request_middleware]`, `#[response_middleware]`, `#[prologue_macros]`, `#[epilogue_macros]`, 加上 macro 内的 `context!` 调用。`cargo fmt` 不展开这些 macro,只能处理 macro **外面**的 Rust;macro 内的 path 字符串折行、链式属性排列、`context! { ... }` 缩进都不会被规范化。
+**实际做了什么**:`hyperlane fmt` 是 `hyperlane-cli` 提供的 **convenience 入口** —— 它在当前目录或 `--manifest-path` 指定处调 `cargo fmt`(underlying 实现走 `hyperlane-cli/src/fmt/fn.rs::run_cargo_fmt`)。所以功能上等同于:
 
-`hyperlane fmt` 会展开 `hyperlane-macros` 后再格式化,所以:
+```shell
+cargo fmt                       # 同 hyperlane fmt（不加 --check）
+cargo fmt -- --check            # 同 hyperlane fmt --check
+```
 
-- 长 path `#[hyperlane(get("/api/v1/very/long/path/segment"))]` —— 一致折行
-- `context! { let req: &Request = ctx.get_request(); ... }` —— 缩进对齐
-- 多 macro 叠加在同一 struct / fn 上 —— 顺序 / 间距一致
+**结论**:
+- ✅ **首选用 `hyperlane fmt`**(用户偏好:项目官方入口统一调用,符合开篇契约)
+- ✅ 装好 `hyperlane-cli` 后全项目 `hyperlane fmt` 走一次
+- ⚠️ **`hyperlane fmt` 不展开 hyperlane-macros**(与 `euv fmt` 不同,euv fmt 真的会展开 `html!`/`class!`/`vars!` 再格式化)—— macro 内部(`#[hyperlane(get("/..."))]`、`context! { ... }` 块)走 `cargo fmt` 的标准行为,**部分 attribute macro 的长 path 不会被折行**。如果项目要求 macro 内部严格对齐,需要 rustfmt nightly + 自定义 `rustfmt.toml` + nightly toolchain,或手调;`hyperlane fmt` 本身不做这个。
 
-> **Fallback**(hyperlane CLI 未装):`cargo fmt --all` —— 能处理 macro 外的代码,macro 内的格式漂移仍存在。
-
-> 改完 `.rs` 后 commit 之前必跑 `hyperlane fmt`(或 fallback `cargo fmt`);其它通用格式化工具链看 `code-formatting-tools` skill §0/§5。
+> CI 上跑 `--check` 模式;其它通用格式化工具链看 `code-formatting-tools` skill §0/§5。
 
 ## Quick start (HTTP-only, trait-style)
 
