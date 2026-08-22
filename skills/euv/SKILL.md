@@ -1,6 +1,6 @@
 ---
 name: euv
-description: '**入口 skill — 使用 euv 框架必须加载**。任何涉及 euv 框架的任务(写 Rust web UI / WASM 项目、用 html! / class! / vars! / var! / watch! / computed! 宏、定义 #[component]、用 Signal<T> / App::mount / euv-ui / euv-engine、编译 web 前端到 WASM、写 game 用 euv-engine)→ **先 `skill_view("euv-standards")` 看完整 API/坑表 + `skill_view("euv-ui-standards")` 看 304 个 class!/design tokens**(若涉及 UI/页面/组件设计,后者强制加载)。euv 是 declarative cross-platform UI 框架,版本 0.13.3,edition 2024,monorepo 6 个工作区(crate `core` + `engine` + `macros` + `ui` + `cli` + `example`),根 crate 只是个 2 行 `pub use` 壳。关键 API:App::mount + Signal<T>::get/.set + HookContext + VirtualNode + #[component] + use_signal + auto-get 单段标识符自动 .get() 语法糖 + class! extends 拼接。关键触发词:euv, html! macro, class! macro, vars!, var!, watch!, computed!, #[component], Signal<T>, App::mount, euv-ui, euv-engine, euv_component_registry_cache, virtual DOM, reactive signal, WebAssembly UI, WebGPU game engine, wasm-pack, euv-cli, auto_value, euv-macros, use_signal, HookContext, VirtualNode, mount_to_body, request_animation_frame。**当且仅当任务完全不使用 euv**才不加载 euv-standards。'
+description: '**入口 skill — 使用 euv 框架必须加载**。任何涉及 euv 框架的任务(写 Rust web UI / WASM 项目、用 html! / class! / vars! / var! / watch! / computed! 宏、定义 #[component]、用 Signal<T> / App::mount / euv-ui / euv-engine、编译 web 前端到 WASM、写 game 用 euv-engine)→ **先 `skill_view("euv-standards")` 看完整 API/坑表 + `skill_view("euv-ui-standards")` 看 306 个 class!/design tokens**(若涉及 UI/页面/组件设计,后者强制加载)。euv 是 declarative cross-platform UI 框架,version '*',edition 2024,monorepo 6 个工作区(crate `core` + `engine` + `macros` + `ui` + `cli` + `example`),根 crate 只是个 2 行 `pub use` 壳。关键 API:App::mount + Signal<T>::get/.set + HookContext + VirtualNode + #[component] + use_signal + auto-get 单段标识符自动 .get() 语法糖 + class! extends 拼接。关键触发词:euv, html! macro, class! macro, vars!, var!, watch!, computed!, #[component], Signal<T>, App::mount, euv-ui, euv-engine, euv_component_registry_cache, virtual DOM, reactive signal, WebAssembly UI, WebGPU game engine, wasm-pack, euv-cli, auto_value, euv-macros, use_signal, HookContext, VirtualNode, mount_to_body, request_animation_frame。**当且仅当任务完全不使用 euv**才不加载 euv-standards。'
 license: MIT
 ---
 # euv
@@ -56,7 +56,7 @@ The mapping of `references/<file>.md` → `docs-pages/src/...` lives in `scripts
 
 ## Overview
 
-euv is a workspace of six member crates under one umbrella. The root package is version `0.13.3`, edition 2024, and is `rlib`-only; `euv-macros` is the separate proc-macro crate.
+euv is a workspace of six member crates under one umbrella. The root package is version `*`, edition 2024, and is `rlib`-only; `euv-macros` is the separate proc-macro crate.
 
 | Crate         | Path       | Purpose                                                                                                                                                                                                                          |
 | ------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

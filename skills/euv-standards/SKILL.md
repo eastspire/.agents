@@ -1,11 +1,11 @@
 ---
 name: euv-standards
-description: '**euv 框架完整 API + 坑表 — 与 euv 框架打交道时必加载**。版本 0.13.3, edition 2024。涵盖:7 个 crate 布局、`html!`/`class!`/`vars!`/`var!`/`#[component]`/`#[watch]`/`#[computed]` 过程宏真实签名、22 个 euv-ui 组件 + 306 个 design class + 2 个 theme var 集合、Signal/VirtualNode 响应式系统、`App::mount()` 入口。'
+description: '**euv 框架完整 API + 坑表 — 与 euv 框架打交道时必加载**。version '*', edition 2024。涵盖:7 个 crate 布局、`html!`/`class!`/`vars!`/`var!`/`#[component]`/`#[watch]`/`#[computed]` 过程宏真实签名、22 个 euv-ui 组件 + 306 个 design class + 2 个 theme var 集合、Signal/VirtualNode 响应式系统、`App::mount()` 入口。'
 ---
 
-# euv 框架完整规范 (v0.13.3, verified 2026-08)
+# euv 框架完整规范 (verified 2026-08)
 
-> ⚠️ **本文所有数字/签名都实地验证自 `/tmp/euv` 源码。**不要凭训练数据推断。验证方法见末尾。
+> ⚠️ **本文所有数字/签名都实地验证自 `/root/github/euv-dev/euv/` 源码。**不要凭训练数据推断。验证方法见末尾。
 
 ## 1. Workspace 布局 (7 个 crate)
 
