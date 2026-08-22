@@ -178,6 +178,34 @@ git checkout -b feat/my-change origin/main  # or: git pull origin main --allow-u
 
 Once you have a real `git` repo with the base branch checked out, continue with the normal `git push -u origin HEAD` flow above.
 
+### Eastspire-Owned Orgs — Skip the Fork Decision
+
+When the target repo belongs to an org where the user (`eastspire`) has admin/maintain permission, **always push directly to a new branch on the upstream** — do not even try `gh repo fork`. The 4 orgs this applies to (verified 2026-08):
+
+- `hyperlane-dev/*` — hyperlane framework
+- `crates-dev/*` — Rust crates release
+- `euv-dev/*` — euv framework
+- `docs-pages/*` — docs (note: fork disabled on most private repos here, but Contents/git-refs API + direct branch push still works)
+
+```bash
+# 1. (optional but cheap) verify permission before pushing — 1 API call
+PERM=$(gh api repos/<owner>/<repo>/collaborators/eastspire/permission --jq .permission 2>/dev/null)
+case "$PERM" in
+  admin|maintain|write) echo "✓ $PERM — direct push OK" ;;
+  *)                   echo "⚠ $PERM — switch to fork-first path below" ;;
+esac
+
+# 2. Branch + commit + push straight to upstream
+git checkout -b <scope>/<descr>-YYYY-MM-DD origin/master
+# ... make changes, git commit ...
+git push -u origin <branch>
+
+# 3. Open PR
+gh pr create --base master --head <branch> --title "..." --body-file /tmp/pr-body.md
+```
+
+Why this matters: `gh repo fork` on a user-owned repo fails with `cannot be forked. A single user account cannot own both a parent and fork` (verified on `eastspire/.agents`). For other eastspire-owned orgs (`hyperlane-dev`, `crates-dev`, `euv-dev`, `docs-pages`), forking either errors out or produces a meaningless same-account fork. Always check the org first; if it's one of these four, skip fork entirely.
+
 ### Cross-Org / No-Write Permission (the "fork first" path)
 
 You cannot push to a branch on a repo you lack write permission to — typical when the user account has push rights only to their own fork, not to the upstream organization. Steps:
