@@ -1,12 +1,12 @@
 ---
 name: euv-game-real-api-notes
-description: Real euv 0.13.3 + euv-engine 0.1.0 API surface verified by reading source at /workspace/orgs/euv-dev/euv/{,engine,macros}. Load before scaffolding any euv WASM project — the documented examples drift from the actual API.
+description: Real euv + euv-engine API surface verified by reading source at /root/github/euv-dev/euv/{,engine,macros}. Load before scaffolding any euv WASM project — the documented examples drift from the actual API.
 ---
 
-# euv / euv-engine Real API (verified 0.13.3 / 0.1.0)
+# euv / euv-engine Real API (verified / current)
 
-> Source paths: `/workspace/orgs/euv-dev/euv/{engine,macros,core,ui}/src/`.
-> Example at `/workspace/orgs/euv-dev/euv/example/src/`.
+> Source paths: `/root/github/euv-dev/euv/{engine,macros,core,ui}/src/`.
+> Example at `/root/github/euv-dev/euv/example/src/`.
 
 ## Cargo.toml minimum (works without an org-relative path)
 
@@ -15,7 +15,7 @@ description: Real euv 0.13.3 + euv-engine 0.1.0 API surface verified by reading 
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-euv = "0.13.3"
+euv = "*"
 euv-engine = "0.1.0"
 ```
 
@@ -35,7 +35,7 @@ use euv::*;
 use euv_engine::*; // gives you Color, Vector2D, DrawList, CanvasRenderer, RenderConfig, Engine
 ```
 
-## Engine bootstrap (verified from `euv-cli 0.13.3 euv build`)
+## Engine bootstrap (verified from `euv-cli * euv build`)
 
 `euv build` calls `wasm-pack build --dev --out-dir www/pkg --target web`. The crate is mounted via:
 
