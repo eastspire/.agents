@@ -270,10 +270,16 @@ pub struct EuvButtonProps {
 | 写 `<div className="x">` (React 习惯) | euv 是 `class: c_xxx()`,无 className |
 | 写 `class: "static-string"` | 编译会过但绕过了 design system,**不推荐** |
 | `Signal` 写 `let s: Signal<i32> = ...;` 然后传值 | Signal 必须 clone 或传引用,不能 move |
-| 在 `class!` 块里写嵌套选择器 | 宏不解析嵌套,**单层** |
+| 在 `class!` 块里写嵌套选择器 | 仅支持伪类/伪元素(`hover`/`before`,拼成 `.c_x:hover`);**后代选择器不支持**,见本条下方专项 |
 | 路由刷新丢 state | 路由 state 必须在 `App::mount` 之前 `use_signal` 一次 |
 | `match` 在 `html!` 里大小写写错 | 关键字 `match`(小写),分支用 `=>` 不是 `->` |
 | 给组件加额外字段想放 children | **错**。children 永远走 `node.get_child_node()`,**不是 props** |
+| 在 `class!` 里写后代选择器(`.parent h1`) | **不支持**。element selector block(`h1 { ... }`)序列化时与父类名**直接拼接无空格**(`.c_fooh1`,无效选择器)。需要后代/排版样式时用 `Css::inject_css(raw_css)` 注入原始 CSS(verified 0.14.2,`macros/src/class/fn.rs` flatten_selector_blocks 拼接 + `core` inject_style 无空格) |
+| `html!` 子位置写 `{ foo(x) }` 带参函数调用 | 宏解析报 `expected `,``。在 html! 外预计算 `let node = foo(x);`,然后裸标识符嵌入 `node` |
+| `html!` 里裸文本以 `": "` 结尾(如 `"Page not found: "`)后接 `{ expr }` | proc macro panic `"..." is not a valid identifier`。合并成单个 `{ format!("Page not found: {x}") }` |
+| `html!` 里 `match prev { ... }`(scrutinee 不带花括号) | 报 `expected `,` following match arm`。必须写 `match { expr } { ... }` |
+| `match { prev }` / `if { active }` 里 prev/active 是 Option/bool 等**非 Signal** 局部变量 | 单段标识符在 `{}` 内被自动重写为 `.get()` → `Option`/`bool` 无 `get` 方法编译失败。解法:(a) 条件类名改用函数指针 `let cls: fn() -> &'static Css = if active { c_a } else { c_b };` + `class: cls()`;(b) 或写成多段表达式如 `if { heading.level == 3u8 }`(多 token 不触发 auto-get) |
+| 给 task list / 条件属性写 `checked: if { c } { "checked" } else { "" }` | HTML 里 `checked=""` 也算 checked。拆两个分支分别渲染带/不带该属性的元素 |
 
 ## 13. 最小可运行模板
 
