@@ -280,6 +280,12 @@ pub struct EuvButtonProps {
 | `html!` 里 `match prev { ... }`(scrutinee 不带花括号) | 报 `expected `,` following match arm`。必须写 `match { expr } { ... }` |
 | `match { prev }` / `if { active }` 里 prev/active 是 Option/bool 等**非 Signal** 局部变量 | 单段标识符在 `{}` 内被自动重写为 `.get()` → `Option`/`bool` 无 `get` 方法编译失败。解法:(a) 条件类名改用函数指针 `let cls: fn() -> &'static Css = if active { c_a } else { c_b };` + `class: cls()`;(b) 或写成多段表达式如 `if { heading.level == 3u8 }`(多 token 不触发 auto-get) |
 | 给 task list / 条件属性写 `checked: if { c } { "checked" } else { "" }` | HTML 里 `checked=""` 也算 checked。拆两个分支分别渲染带/不带该属性的元素 |
+| `class!` 里写 `media("(max-width: 767px)") { ... }` 调用形式 | **静默丢弃**(编译过但生成的 CSS 没有 @media 规则,媒体查询全部失效)。必须用块形式 `@media ((max-width: 767px)) { ... }`(euv-ui 全部 306 个 class 的写法;生成的 CSS 条件就是双层括号,浏览器接受)。排查法:运行时 `document.styleSheets` 里找类名对应的 `@media` 规则是否存在(verified 0.14.3,euv-docs) |
+| 根 `app()` 的 html! 是纯静态树(没有任何 reactive `if`/`match`/`for`) | **整个应用的 signal 订阅全部失效**:`Mount::setup` 直接 `render_fn()` 一次,只有 reactive `if`/`match`/`for` 才创建 DynamicNode;signal.get() 读在没有 DynamicNode 的静态子树里不订阅任何节点,路由/主题切换零 DOM 更新。必须镜像官方 example 的根模式:`html! { if { cond_reading_signal } { shell_a {...} } else { shell_b {...} } }`(verified 0.14.3:静态根下 hashchange 事件触发但 docs 组件不重渲染) |
+| reactive `if { cond }` 的 cond 是不读 signal 的裸 prop/局部 bool | 条件闭包**捕获首次渲染的值**,之后 prop 变了也不更新(如侧边栏在首页隐藏后永远不回来)。cond 里必须直接读 signal:`if { !route_is_home(&route_signal.get()) }`(verified 0.14.3) |
+| 组件标签上写 `key:`(如 `my_comp { key: x }`) | `key` 被当成 props 字段 → `E0560 struct has no field named key`。要按 key 强制重挂载组件,外面包一层 `div { key: x style: "display: contents" my_comp {...} }` |
+| 经历无关的重渲染(如切主题)后,再切路由,页面部分内容变陈旧 | diff 路径下嵌套 Dynamic 子树可能不刷新。用上面的 keyed `display:contents` 包装强制 remount(verified 0.14.3,euv-docs:切主题 2 次后 en→zh 路由,侧边栏变中文但正文停在英文) |
+| 文档/长内容布局出现水平溢出(pre/长 inline code 撑破) | flex 链 `min-width: auto` 让内容 min-content 穿透。给 flex 容器逐级补 `min-width: "0px"`(body > main > main_inner > content 整条链) |
 
 ## 13. 最小可运行模板
 
