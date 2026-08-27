@@ -97,12 +97,14 @@ test -f ~/.hermes/skills/$SKILL/SKILL.md && echo "✅ symlink resolved"
 
 ## PR body 风格
 - **英文**(用户铁律:所有 GitHub 公开仓库的 issue/PR/discussion 礼貌、英文、有内容,见 memory)
+- **commit message 同样必须纯英文**(subject + body):本 skill 早期版本仅约束 PR body,2026-08-27 用户扩展到 commit message。`rust-standards` §2.7 是该规则的规范化版本,跨 skill 引用
 - **不要复述已有内容** — search existing issues first,comment 而不是开新 issue,补充新角度
 - **不要主动揽活** — 不写 "happy to help / happy to PR / I can implement" 之类
 - 不主动 ping reviewer / maintainer,发完等回复
 - 三段式: `## Summary` / `## Verification` / `## Notes`
 - 改动跨多 skill 时,Summary 顶部用 bullet 列出本次涉及的所有 skill
 - commit subject 英文(符合 git 惯例),body 也英文(本 skill 一致性)
+- commit subject 使用 git conventional commits 风格:`<type>(<scope>): <subject>`,type ∈ {feat, fix, refactor, perf, docs, test, build, ci, chore, style}
 
 ## 易踩的坑
 1. **忘清 __pycache__** — 每次 commit 前必须清
