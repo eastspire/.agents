@@ -119,3 +119,19 @@ test -f ~/.hermes/skills/$SKILL/SKILL.md && echo "✅ symlink resolved"
 10. **skill 库默认偏好"长期 / 通用 / 非单项目"**(2026-08-18 用户明说)— 不要把"单项目踩坑 / 单 bug 记录 / 一次性扩展 / show-and-tell"打包成 skill。单 bug 写 memory 即可,单项目踩坑不值得占库位
 11. **`gh pr edit` GraphQL 字段失败会静默退出** — `login` / `name` / `slug` 字段需 `read:org` scope,缺这 scope 时 `gh pr edit` 静默无输出,看起"成功了"实际没改。**改 PR title/body 用 REST**: `curl -X PATCH -H "Authorization: token $GH_TOKEN" -d @payload.json https://api.github.com/repos/<owner>/<repo>/pulls/<n>`,并用 `curl GET` 验证替换结果
 12. **临时 skill 筛选标准**(2026-08-18 总结):内容含"自荐 / show and tell"、单一 bug 记录(该写 memory)、单项目一次性踩坑、单工具偶尔用 — 都不该加进 skill 库
+13. **已 merged PR 只改 body 不改代码**(2026-08-27 verified euv PR #23): 用户发现 PR body 是中文而 commits 是英文,要求"只是更新pr不改代码"。**正确做法**: `PATCH /repos/<owner>/<repo>/issues/<N` (issue endpoint 是 PR 的兼容别名,因为 PR 也是 issue) — 改 `body` 字段不需要 reopen,不需要 force-push,**不会触发 CI**。Python 模板:
+    ```python
+    import urllib.request, json, os
+    with open('/tmp/pr-body.md') as fh: body = fh.read()
+    req = urllib.request.Request(
+        f'https://api.github.com/repos/{owner}/{repo}/issues/{n}',
+        method='PATCH',
+        data=json.dumps({'body': body}).encode('utf-8'),
+        headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                 'Accept': 'application/vnd.github+json',
+                 'User-Agent': 'hermes-cli',
+                 'Content-Type': 'application/json'},
+    )
+    urllib.request.urlopen(req)
+    ```
+    验证后立刻 `GET /pulls/<N` 读 `body` 字段确认替换生效(`gh pr view --json body` 因 GraphQL scope 缺失可能返空,优先用 REST)。同样适用于 title 修改。**禁止**为改文案 reopen PR + force-push — 这会触发新的 CI run,引入额外 commit 历史噪音。

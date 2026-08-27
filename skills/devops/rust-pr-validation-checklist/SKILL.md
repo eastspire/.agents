@@ -261,3 +261,64 @@ gh pr create --repo owner/repo --base master --head eastspire:fix/<scope>-<desc>
 - **rust-crate-use**: 第三方 crate 查询 + docs.rs,**依赖层**
 
 加载顺序: rust-pr-contribution-workflow → rust-pr-validation-checklist → (按需) 其他
+
+---
+
+## 10. workspace version bump — root-only 编辑 + CI 同步(euv pattern)
+
+> 2026-08-27 verified on euv PR #25: root-only `Cargo.toml` 编辑即可,流水线自动同步子 crate。
+
+### 10.1 现象
+
+Cargo workspace 项目版本号分布在 7+ 个 `Cargo.toml`(root + 每个 member crate)。如果手动 sed 改每一处:
+
+```bash
+sed -i 's/version = "0.14.1"/version = "0.14.2"/g' Cargo.toml cli/Cargo.toml ...
+```
+
+**致命陷阱**: 同一 workspace 内第三方 crate 可能恰好在同一版本号(如 euv 的 `qrcode = "0.14.1"` 巧合),sed 会把无关的第三方 crate 也改掉,然后 `cargo check` 报 `failed to select a version for the requirement qrcode = "^0.14.2"`。
+
+### 10.2 正确做法: 只改 root, 流水线补 sub-crate
+
+euv 项目 `.github/workflows/rust.yml` 里有 `sync_workspace_version` job:
+
+1. 读 root `Cargo.toml` 的 `[package] version`
+2. sed 改 root 里所有 `[workspace.dependencies] <pkg> = { ..., version = "<old>" }` 为新版本
+3. sed 改每个 `<member>/Cargo.toml` 的 `[package] version`
+4. 提交一个 `chore: sync all package versions to <new>` follow-up commit 到当前分支
+5. 在 `check` job 跑之前完成,所以 `cargo check` 在 CI 里绿
+
+**用户偏好(2026-08-27)**:"只改根目录toml的version,其他不动,流水线会自动同步版本"。
+
+### 10.3 本地 `cargo check` 会失败 — 预期行为
+
+如果 root 已经 0.14.2 但 sub-crate 还是 0.14.1,本地跑:
+
+```bash
+cargo check --workspace
+#  error: failed to select a version for the requirement `euv-core = "^0.14.2"`
+```
+
+这是 cargo 对 path-dep 的版本一致性强制(workspace dependency 的 `version` 必须匹配 path target 的 `package.version`)。**预期会失败**,由 CI 的 `sync_workspace_version` job 在 push 后修复。本地只验证:
+- `euv fmt` 不改东西
+- `cargo fmt --all` 干净
+- `audit_*.py` 0 violations
+
+PR body 要明示:"本地 cargo check 会失败直到 CI sync job 跑完"。
+
+### 10.4 增量 sed 模式(如果要手动 sed sync)
+
+如果 CI 没跑成、需要手动同步,**先**精确限定 sed 到 root 的 `[workspace.dependencies]` 块:
+
+```bash
+# 同步 root 的 path-dep entries
+sed -i -E "s|^([a-z_-]+ = \{ path = \".+\", version = \")[^\"]+(\".*)|\1NEW_VERSION\2|" Cargo.toml
+# 同步 root 的 [package] version
+sed -i -E "0,/^(version = \")[^\"]+(\")/s||\1NEW_VERSION\2|" Cargo.toml
+# 然后逐个 sub-crate (不能批量)
+for m in cli core engine example macros ui; do
+  sed -i -E "0,/^(version = \")[^\"]+(\")/s||\1NEW_VERSION\2|" "$m/Cargo.toml"
+done
+```
+
+**关键**: `qrcode` 这种第三方 line 必须用更严格的 anchor(如 `path = "<dir>"`),或手工 skip。**永远不要**在 root Cargo.toml 上做 `s/version = "OLD"/version = "NEW"/g` 全局替换。
