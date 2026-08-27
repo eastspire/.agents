@@ -1,6 +1,6 @@
 ---
 name: rust-wasm-gh-pages-deploy-pitfalls
-description: Rust + euv → WASM + GitHub Pages 部署踩坑记录,涵盖 import path 错误、CDN 缓存、master ref 损坏的解法
+description: Rust + euv → 发布/部署踩坑记录,涵盖 WASM/GitHub Pages 部署 (import path / CDN 缓存 / master ref 损坏) + crates.io cargo publish (workspace dev-dep chicken-and-egg / 版本号静默失败 / pre-flight dep resolver)。同一仓库任意 Rust 发布链路触发本 skill。
 ---
 
 # Rust → WASM + GitHub Pages 部署踩坑记录
@@ -121,3 +121,29 @@ jobs:
 
 - `actions/deploy-pages@v4` 走 GitHub 官方 Pages API,**不依赖 git push**。即使 master ref 损坏也能部署。**首选**。
 - `peaceiris/actions-gh-pages` 内部用 `git push` → 同样会卡在坏 object。**避免**。
+
+## `cargo publish` 鸡生蛋鸡生蛋 + CI 静默吞失败
+
+发布 euv / hyperlane / 任何 Cargo workspace 时,如果 `publish` step 看起来都 success 了,**直接去 `https://crates.io/api/v1/crates/<crate>` 查 `max_stable_version`**。workflow 的 retry+continue loop 会把 per-package publish 失败转 `continue`,run exit code = 0,但 crates.io 上的版本号是落后 git tag 的。
+
+详细踩坑记录(circular workspace dev-dep、path-only 修复、TOML 不加注释、facade vs 底层 crate 选择)→ `rust-standards/references/13-dependency.md` §13.4–13.6。本 skill 只在 "发布链路失败但 CI 绿" 这条上下文下指向那条规范。
+
+验证清单(命中 "发包失败" 时):
+
+```bash
+TOKEN=$(grep -oP 'export GH_TOKEN="\K[^"]+' /root/.bashrc.d/gh_token.sh)
+for crate in euv euv-macros euv-ui euv-cli euv-core euv-engine; do
+  curl -s -H "Authorization: Bearer $TOKEN" \
+    "https://crates.io/api/v1/crates/$crate" \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'$crate = {d[\"crate\"][\"max_stable_version\"]}')"
+done
+```
+
+任何一项落后 git tag → 走 §13.4–13.6 排查(鸡生蛋 / 路径 / 伞 vs 底层 / TOML 注释)。
+
+## 同仓库多 PR 触发 publish 时的常见 sequence
+
+- 每个 PR merge → GitHub Actions 触发 `publish` step
+- 每个 PR 都可能改 crates.io
+- 检查顺序:`git log --first-parent` 看 merge 顺序 → 对照 crates.io 查实际发布顺序 → 找出哪次 merge 后**没**真正 publish
+- 关键 PR(`fix(macros)` 类)即使 CI 绿,实际可能根本没影响 crates.io —— 这是 `cargo publish` 静默失败的常见伪装

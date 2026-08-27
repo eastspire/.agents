@@ -42,3 +42,12 @@ yarn-error.log*
 # Coverage
 coverage/
 .nyc_output/
+
+# Hermes curator / hub state (do NOT commit; local skill-management only)
+skills/.bundled_manifest
+skills/.bundled_manifest.*
+skills/.curator_backups/
+skills/.curator_ledger.jsonl
+skills/.curator_state
+skills/.usage.json
+skills/.hub/

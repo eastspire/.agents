@@ -278,7 +278,7 @@ sed -i 's/version = "0.14.1"/version = "0.14.2"/g' Cargo.toml cli/Cargo.toml ...
 
 **致命陷阱**: 同一 workspace 内第三方 crate 可能恰好在同一版本号(如 euv 的 `qrcode = "0.14.1"` 巧合),sed 会把无关的第三方 crate 也改掉,然后 `cargo check` 报 `failed to select a version for the requirement qrcode = "^0.14.2"`。
 
-### 10.2 正确做法: 只改 root, 流水线补 sub-crate
+### 10.2 正确做法: 只改 root L3, 流水线补所有其他版本字段
 
 euv 项目 `.github/workflows/rust.yml` 里有 `sync_workspace_version` job:
 
@@ -288,7 +288,19 @@ euv 项目 `.github/workflows/rust.yml` 里有 `sync_workspace_version` job:
 4. 提交一个 `chore: sync all package versions to <new>` follow-up commit 到当前分支
 5. 在 `check` job 跑之前完成,所以 `cargo check` 在 CI 里绿
 
-**用户偏好(2026-08-27)**:"只改根目录toml的version,其他不动,流水线会自动同步版本"。
+**用户偏好(2026-08-27, 两轮纠正逐步收紧)**:
+
+- 第一轮: "只改根目录toml的version,其他不动,流水线会自动同步版本" — root + 6 sub-crate 都不动
+- 第二轮: "依赖版本也不改" — **root 内的 `[workspace.dependencies]` 里 7 个 path-dep 的 `version = "..."` 字段也不要改**
+
+**精确规则: 只动 root `Cargo.toml` 第 3 行 `[package] version = "OLD"` → `version = "NEW"`(1 行 / +1 / -1)**。其他全部由 CI 同步:
+
+| 字段 | 是否本地改 | 改的地方 |
+|------|-----------|----------|
+| 根 `Cargo.toml` `[package] version` | ✅ 是 | 手动(本次 commit) |
+| 根 `Cargo.toml` `[workspace.dependencies]` path-dep `version` (7 处) | ❌ 否 | CI `sync_workspace_version` |
+| 子 crate `Cargo.toml` `[package] version` (6 处) | ❌ 否 | CI `sync_workspace_version` |
+| 第三方 crate (如 `qrcode`) | ❌ 否 | 不动(已发布巧合) |
 
 ### 10.3 本地 `cargo check` 会失败 — 预期行为
 
@@ -305,6 +317,53 @@ cargo check --workspace
 - `audit_*.py` 0 violations
 
 PR body 要明示:"本地 cargo check 会失败直到 CI sync job 跑完"。
+
+### 10.5 改动 proc-macro crate dev-dep 前: 确认依赖的是 facade 还是真身
+
+> 2026-08-27 verified on euv PR #26 → PR #27。误把 facade 当 dev-dep target,触发 cargo publish 死锁 + 后需 cascade 重构。
+
+**陷阱**: workspace 里 proc-macro crate 的 `[dev-dependencies]` (或普通 deps) 容易写到 **facade re-export crate** 而非真正的 type 定义 crate。euv 的结构:
+
+```
+euv/src/lib.rs
+  pub use {euv_core::*, euv_macros::*};   ← 全部 from re-export
+```
+
+`macros/tests/` 里写 `use euv::*` 能拿到 `HookContext`/`Signal`/`RawHtml`,看起来 `euv` 就是 deps,但实际上 `HookContext` 定义在 `core/src/reactive/hook/struct.rs`。先 `grep "pub struct <type>"` 验证 type 真正定义在哪个 crate。
+
+**cascade 影响**:
+1. 改 dev-dep target `euv` → `euv-core`,**还不够**
+2. proc-macro 生成的 token 里 `::euv::Css` / `::euv::HookContext` / `::euv::Signal` / `::euv::VirtualNode` 等所有路径(往往 100+ 处 / 8 个文件)要改成 `::euv_core::X` —— 否则 `::euv::` 找不到 crate
+3. 所有**消费**该宏的 crate (euv-ui / euv-engine / euv-example 等) 都要在 `[dependencies]` 加 `euv-core`,否则 lib code 展开后找不到 `euv_core` 这个 crate
+4. version bump 要 patch (因为是结构性 fix,不是简单 workaround)
+
+**最小变更判断矩阵**:
+
+| 改动深度 | 何时采用 |
+|---|---|
+| 仅改 dev-dep 为 path form (`{ path = "..." }`) | 用户要求"最小修复"+ 宏生成的 `::euv::X` 路径不依赖 dev-dep 名字时 |
+| 改 dev-dep + 宏源码 + 消费方 deps + version bump | 用户接受结构性 fix,要求"用正确的 crate 名" |
+
+**触发场景自检 — 改 `macros/Cargo.toml` 前必跑**:
+
+```bash
+# 1. 找出宏源码里 ::euv:: 的所有 token 引用
+grep -rho '::euv::[A-Za-z_][A-Za-z0-9_]*' macros/src/ | sort -u
+
+# 2. 每个 type 在 euv-core 真的有定义吗?
+grep -rln 'pub struct <TypeName>\|pub enum <TypeName>' core/src/
+
+# 3. 所有 token 类型在 core 都有 → 改 dev-dep 到 euv-core 是安全的
+# 4. 部分 token 在 core 没有 → 不能简化为 euv-core dev-dep,需要保留 euv (facade)
+```
+
+**user 真实使用** (2026-08-27):
+> Q: "macros 依赖的是 euv core 吧不是 euv 吧"
+> A: "拆 use 和重写测试吧"
+
+→ 用户已知 facade vs 真身区别,期望直接做结构性 fix。第一轮保守修 (`path = "../"`) 视为过渡,后续 PR 必做真结构性 fix。
+
+---
 
 ### 10.4 增量 sed 模式(如果要手动 sed sync)
 
