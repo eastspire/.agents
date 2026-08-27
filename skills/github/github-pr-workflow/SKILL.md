@@ -1,7 +1,7 @@
 ---
 name: github-pr-workflow
 description: "GitHub PR lifecycle: branch, commit, open, CI, merge. Includes fork-first path for no-write targets and tarball-to-PR recovery when only api.github.com works."
-version: 1.2.0
+version: 1.3.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -136,7 +136,7 @@ Closes #42"
 
 Options: `--draft`, `--reviewer user1,user2`, `--label "enhancement"`, `--base develop`
 
-**With git + curl:**
+### With git + curl:
 
 ```bash
 BRANCH=$(git branch --show-current)
@@ -154,6 +154,66 @@ curl -s -X POST \
 ```
 
 The response JSON includes the PR `number` — save it for later commands.
+
+### Language for GitHub artifacts (English only)
+
+All text shipped to GitHub must be English: PR title, PR body, commit message
+(subject + body), issue title/body, PR review comments, branch name (use ASCII).
+Agent-to-user chat replies stay in the user's preferred language; the rule is
+about *artifacts a reviewer or contributor will read*, not about the agent's
+conversational replies. Self-check before `gh pr create`:
+
+```bash
+grep -P "[\p{Han}]" /tmp/pr-body.md && echo "FAIL: Chinese chars in PR body" && exit 1
+git log -1 --format=%B | grep -P "[\p{Han}]" && echo "FAIL: Chinese chars in commit message" && exit 1
+```
+
+### Editing a PR body after creation
+
+`gh pr edit --body-file` goes through GraphQL and requires `read:org` scope on
+the token; most fork PATs (the `notifications, repo, workflow` set common on
+this host) will hit HTTP 422 instead of updating. Workaround via REST, which
+only needs `repo`:
+
+```bash
+gh api -X PATCH repos/$OWNER/$REPO/pulls/$PR_NUMBER \
+  -f body="$(cat /tmp/pr-body.md)"
+```
+
+PR title is updated the same way (`-f title=...`). **Commit message already
+pushed to GitHub cannot be force-edited** — that requires a `git commit
+--amend` plus force-with-lease push, or a rebase. So the commit-message
+English rule has to be checked *before* the commit lands, not after.
+
+### Writing the commit message before `git commit`
+
+Conventional Commits format with English-only body:
+
+```bash
+git commit -m "speed(euv_playground): use s/thin release profile instead of z+lto+codegen-units=1
+
+The playground build was configuring Cargo.toml with the slowest
+combination for both dev and release profiles:
+
+  opt-level = \"z\"
+  lto = true
+  codegen-units = 1
+  incremental = false
+  debug = false
+
+wasm-pack build --release then runs wasm-opt -Oz on the output,
+so cargo-side z+lto+1 is redundant work and dominates build time
+without measurable size benefit.
+
+Replaces with profiles that match cargo's default-but-constrained
+shape:
+
+  [profile.dev]      opt-level = 0, debug = true, incremental = true, codegen-units = 256
+  [profile.release]  opt-level = \"s\", lto = \"thin\", codegen-units = 16, debug = false, strip = \"symbols\""
+```
+
+Wrap body lines at 72 chars, lead verb forms (`Replaces with...`, `Drops ...`),
+no trailing period.
 
 To create as a draft, add `"draft": true` to the JSON body.
 
