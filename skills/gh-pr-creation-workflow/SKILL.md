@@ -135,3 +135,45 @@ test -f ~/.hermes/skills/$SKILL/SKILL.md && echo "✅ symlink resolved"
     urllib.request.urlopen(req)
     ```
     验证后立刻 `GET /pulls/<N` 读 `body` 字段确认替换生效(`gh pr view --json body` 因 GraphQL scope 缺失可能返空,优先用 REST)。同样适用于 title 修改。**禁止**为改文案 reopen PR + force-push — 这会触发新的 CI run,引入额外 commit 历史噪音。
+
+## Supersede 流程(2026-08-27 verified skills PR #25→#26)
+
+**场景**: 已经开了一个 PR,后来发现需要把范围扩大(更多文件 + 配套修改 + .gitignore 规则),用户要求"都在一个pr"。**不要开第二个新 PR**,而是 supersede 第一个。
+
+**操作序列**:
+```bash
+# 1) 关闭原 PR(带 supersede 注释,reviewer 知道去哪找新版)
+gh pr close <N> --comment "Superseded by upcoming PR that bundles X+Y into one review."
+
+# 2) 同一个 branch 继续工作:把新文件 stage + amend
+git add <new-files> <gitignore>
+git commit --amend --no-edit          # 合并到上一个 commit
+# 如需改 commit message:
+git commit --amend -m "new subject"
+
+# 3) 关键点:amend 改了 SHA,remote 还是旧 SHA,
+#    `--force-with-lease` 会因 "stale info" 拒绝;**直接 `--force`**
+git push --force origin <branch>
+
+# 4) 用同一个 branch 头开新 PR
+gh pr create --base master --head <branch> \
+  --title "..." --body-file /tmp/pr-body.md
+```
+
+**关键点**:
+- PR body 加一段 `## Supersedes` 引用被关闭的 PR 号,reviewer 一眼能串起来
+- `--force-with-lease` 在 amend 后**会失败**("stale info"),因为 lease 假设的 remote HEAD 还是 amend 前的 SHA。**supersede 场景必须 `--force`**(或 `--force-with-lease=refs/heads/<branch>:<known-old-sha>`)
+- 新 PR 的 number 会自增(原 PR 占用过的号不复用)
+- 文件清单从 5→22 时,body "Stats" 段必须同步更新(否则 reviewer 看到的 diff 跟摘要对不上)
+- 临时文件(`.tmp-pr-body-*.md` / `.bundled_manifest` / `.hub/`)如果只在 worktree 出现,**加进 `.gitignore` 入 commit** 而不是只 `rm -f` — 防止下次 session 又堆出来
+
+## 配套规则:.gitignore 与"防勿提交"(2026-08-27 verified)
+
+**用户铁律**: 即使是 patch 一行 / 改 typo / 加一条 ignore rule 也走 PR,不能直推 master。本 session 在 supersede 流程里顺便把 `.tmp-pr-body-*.md` 加进 `skills/.gitignore`,3 行 diff,正常 amend 入 PR。
+
+**最小化 diff 写法**(避免 review 时把整个 .gitignore 重写):
+- `git show HEAD:.gitignore` 先看 HEAD 真实内容(避免本地 working tree 与 HEAD 错位时改错基础)
+- 用 `patch` 加 3 行:`# 注释\n\n新规则`,不要 `write_file` 全文覆盖
+- 验证 `git diff .gitignore` 只显示追加,无删除
+
+**别忘了 commit**: `rm -f <draft>` 删了本地临时文件后,顺手 `echo "<pattern>" >> .gitignore && git add .gitignore`,否则下次同种草稿还会出现。

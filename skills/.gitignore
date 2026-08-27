@@ -3,3 +3,6 @@
 .usage.json.lock
 .curator_state
 .curator_ledger.jsonl
+
+# Throwaway PR-body drafts (prevent accidental commit; never landed in a PR)
+.tmp-pr-body-*.md
