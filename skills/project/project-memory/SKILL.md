@@ -80,8 +80,9 @@ git fetch upstream && git checkout -b <type>/<descr>-YYYY-MM-DD upstream/master
 # 3. Make changes, commit
 git add -A
 git -c user.name='eastspire' -c user.email='root@ltpp.vip' commit -m "<type>(<scope>): <subject>"
-# 4. Push the branch to the FORK (origin when cloned from the fork, or a dedicated fork remote)
-git push -u <fork-remote> <branch>
+# 4. Push the branch to the FORK (local convention: `origin` = fork, `upstream` = source repo;
+#    e.g. ~/github/euv-dev/euv has origin → eastspire/euv, upstream → euv-dev/euv)
+git push -u origin <branch>
 # 5. PR with the fork as head
 gh pr create --repo <owner>/<repo> --base master --head eastspire:<branch> --title "..." --body-file /tmp/pr-body.md
 ```
