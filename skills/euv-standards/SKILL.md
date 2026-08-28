@@ -487,3 +487,7 @@ cd /root/projects/euv/engine && cargo test
 # euv fmt 0 file changed
 cd /root/projects/euv && euv fmt
 ```
+
+## 17. 版本升级规则(用户说「升级版本」时)
+
+只改根 `Cargo.toml` 的**第一个** `version` 字段(`[package] version` 行)。`[workspace.dependencies]` 里 path-dep 的 `version` 和子 crate 的 `package.version` **一律不动** —— CI 的 `sync_workspace_version` job 会自动从根同步到全部 member。禁止全局 sed `version = "X.Y.Z"`(会误伤第三方依赖版本号)。详细版规见 `project-memory` skill 的 Version policy 节。
