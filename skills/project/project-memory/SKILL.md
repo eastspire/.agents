@@ -32,10 +32,10 @@ All repos live under `~/github/<owner>/<repo>/` (per `repo-projects` user prefer
 
 | Org              | Purpose                              | Admin/permission model                          |
 | ---------------- | ------------------------------------ | ----------------------------------------------- |
-| `hyperlane-dev`  | hyperlane Rust framework repos       | eastspire admin → direct push to upstream branches |
-| `crates-dev`     | Rust crates release                  | eastspire admin → direct push                    |
-| `euv-dev`        | euv UI framework repos               | eastspire admin → direct push                    |
-| `docs-pages`     | Eastspire documentation site         | eastspire admin → direct push; fork disabled on private repos |
+| `hyperlane-dev`  | hyperlane Rust framework repos       | eastspire admin, but **fork + PR** (orgs are non-personal; rule changed 2026-08-28) |
+| `crates-dev`     | Rust crates release                  | eastspire admin, but **fork + PR**               |
+| `euv-dev`        | euv UI framework repos               | eastspire admin, but **fork + PR** (`eastspire/euv` fork exists) |
+| `docs-pages`     | Eastspire documentation site         | eastspire admin, but **fork + PR**; `docs-pages/docs` has fork disabled → Contents API flow below |
 
 ### Key repos — what lives where
 
@@ -43,11 +43,11 @@ All repos live under `~/github/<owner>/<repo>/` (per `repo-projects` user prefer
 | ------------------------------------ | -------------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
 | `docs-pages/docs`                    | docs-pages           | VuePress source: `src/**/*.md`, sidebar/navbar/config.ts | **Source of truth** for the docs site. Edit here.              |
 | `docs-pages/pages`                   | docs-pages           | Vercel build output: `*.html` + assets                    | **Do NOT edit by hand** — `Deploy from @<sha>` commits overwrite it. UI rebuilds on next deploy. |
-| `euv-dev/euv`                        | euv-dev              | The euv framework Rust source (workspace, 6 member crates) | Direct push to master allowed (admin).                         |
-| `euv-dev/euv-cli`                    | euv-dev              | Standalone CLI binary crate                               | Same as above.                                                 |
-| `euv-dev/euv-core` / `euv-engine` / `euv-macros` / `euv-ui` / `euv-example` | euv-dev | The 6 member crates                  | Same as above.                                                 |
-| `crates-dev/*`                       | crates-dev           | Crates-dev release repositories                           | Direct push.                                                   |
-| `hyperlane-dev/*`                    | hyperlane-dev        | hyperlane framework repos                                 | Direct push.                                                   |
+| `euv-dev/euv`                        | euv-dev              | The euv framework Rust source (workspace, 6 member crates) | Fork + PR — push feature branches to the `eastspire/euv` fork, PR with `--head eastspire:<branch>`. |
+| `euv-dev/euv-cli`                    | euv-dev              | Standalone CLI binary crate                               | Same as above (fork + PR).                              |
+| `euv-dev/euv-core` / `euv-engine` / `euv-macros` / `euv-ui` / `euv-example` | euv-dev | The 6 member crates                  | Same as above (fork + PR).                              |
+| `crates-dev/*`                       | crates-dev           | Crates-dev release repositories                           | Fork + PR.                                               |
+| `hyperlane-dev/*`                    | hyperlane-dev        | hyperlane framework repos (incl. `hyperlane-quick-start`) | Fork + PR (`eastspire/hyperlane-quick-start` fork exists). |
 
 ### Short-name → repo mapping (user vocabulary)
 
@@ -63,25 +63,30 @@ If unsure which repo a request refers to, **ask before editing** — the wrong r
 
 ### Hard rules
 
-1. **All code changes go through PR** — no direct push to base branches. Direct push to feature branches on `euv-dev` / `docs-pages` / `crates-dev` / `hyperlane-dev` is fine, but the merge into `master` must happen via a PR.
-2. **Fork-first for non-org repos** — any repo outside the 4 eastspire orgs requires `gh repo fork` first.
-3. **No fork for org repos** — eastspire is admin on the 4 orgs. Forks produce "single user account cannot own both parent and fork" errors. Skip the fork; push straight to a new branch on the upstream.
-4. **PR body / commit message in English** — every public PR/issue/commit on these orgs uses English, three conventional sections (`## Summary` / `## Verification` / `## Notes`), no Chinese. Applies to commit messages too (rule extended 2026-08-27).
-5. **`gh pr edit` for GraphQL fields silently fails** when `GH_TOKEN` lacks `read:org` scope. Fall back to REST `PATCH /repos/<owner>/<repo>/issues/<N>` (PRs share the issue endpoint) to update body/title without force-push/reopen.
+1. **All code changes go through PR** — no direct push to base branches, ever.
+2. **Fork-first for every non-personal repo** (rule changed 2026-08-28) — the 4 eastspire orgs (`euv-dev`, `docs-pages`, `crates-dev`, `hyperlane-dev`) count as non-personal: `gh repo fork <org>/<repo>` once per repo (the `eastspire/<repo>` forks for `euv` and `hyperlane-quick-start` already exist), push feature branches to the **fork**, open the PR against the org repo with `--head eastspire:<branch>`.
+3. **No fork for personal repos** — repos under the `eastspire` **user account** itself (e.g. `eastspire/.agents`) get a direct feature branch on the upstream + PR. Forking your own personal repo fails with "single user account cannot own both parent and fork".
+4. **Exception: `docs-pages/docs` is private with fork disabled** — skip the fork, use the Contents API + git refs flow below (direct branch on upstream is the only option).
+5. **PR body / commit message in English** — every public PR/issue/commit on these orgs uses English, three conventional sections (`## Summary` / `## Verification` / `## Notes`), no Chinese. Applies to commit messages too (rule extended 2026-08-27).
+6. **`gh pr edit` for GraphQL fields silently fails** when `GH_TOKEN` lacks `read:org` scope. Fall back to REST `PATCH /repos/<owner>/<repo>/issues/<N>` (PRs share the issue endpoint) to update body/title without force-push/reopen.
 
-### Standard recipe for org repos
+### Standard recipe (org / third-party repo — fork-first)
 
 ```bash
-git checkout master && git fetch upstream && git pull --rebase
-git checkout -b chore/<descr>-YYYY-MM-DD origin/master
-# ... make changes with write_file/patch, then:
+# 1. Fork once per repo (skip when eastspire/<repo> already exists)
+gh repo fork <owner>/<repo> --clone=false
+# 2. Branch from upstream master
+git fetch upstream && git checkout -b <type>/<descr>-YYYY-MM-DD upstream/master
+# 3. Make changes, commit
 git add -A
 git -c user.name='eastspire' -c user.email='root@ltpp.vip' commit -m "<type>(<scope>): <subject>"
-git push -u upstream <branch>
-gh pr create --repo <owner>/<repo> --base master --head <branch> --title "..." --body-file /tmp/pr-body.md
+# 4. Push the branch to the FORK (origin when cloned from the fork, or a dedicated fork remote)
+git push -u <fork-remote> <branch>
+# 5. PR with the fork as head
+gh pr create --repo <owner>/<repo> --base master --head eastspire:<branch> --title "..." --body-file /tmp/pr-body.md
 ```
 
-For non-org repos: replace `upstream` push with `origin` (fork) and add `--head <user>:<branch>` to `gh pr create`.
+For personal repos (`eastspire/*`): skip the fork — push the branch to the upstream repo directly and use `--head <branch>` (no `eastspire:` prefix needed).
 
 ### For large repos where `git checkout <tree>` times out
 
@@ -104,9 +109,11 @@ The Contents API creates one commit per call; the diff is identical to a single 
 - **Exception**: Demo/example data inside code blocks (`let version: &str = "0.8.29";`) is fine — it's a value, not a version statement.
 - Search before editing euv sections: `grep -rn "euv[\s-].*0\.[1-9]\.\d\|0\.1[3-9]\.\d"` should return 0 matches in body (frontmatter `version: '*'` is fine).
 
-### euv Cargo.toml version bumps
+### Cargo.toml version bumps (euv, hyperlane-quick-start, and every Rust repo here)
 
-- Cargo.toml version is bumped in **one place only**: the root `[package] version` line.
+When the user says **"升级版本" / "bump the version"** (rule extended 2026-08-28 — previously euv-only, now applies to `euv-dev/*` **and** `hyperlane-dev/hyperlane-quick-start` alike):
+
+- Bump **one place only**: the root `Cargo.toml`'s **first** `version` field — the `[package] version` line (e.g. `euv`: `0.16.0`; `hyperlane-quick-start`: `23.0.36`).
 - **Do not** touch `[workspace.dependencies]` path-dep `version` fields, **do not** touch sub-crate `package.version` — the `sync_workspace_version` CI job propagates root → all members.
 - **Do not** sed-replace `version = "X.Y.Z"` globally — collides with third-party dep versions (e.g. `qrcode = "0.14.2"`). Use Python TOML parsing to edit only the root `[package]` section.
 

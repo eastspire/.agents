@@ -47,6 +47,10 @@ license: MIT
 - 关键宏支持: 派生自 `lombok-macros` (`Data`, `New`, `Getter`, `GetterMut`, `Setter`, `CustomDebug`, `DisplayDebug`, `Eq`, `PartialEq`, `Hash`, `Clone`, `Default`)
 - profile: `[profile.dev]` + `[profile.release]` 都用 `opt-level = 3`, `lto = true`, `incremental = false`, `panic = "unwind"`, `debug = false`, `codegen-units = 1`, `strip = "debuginfo"`
 
+### 1.1 版本升级规则(用户说「升级版本」时,hyperlane 全家桶通用,含 `hyperlane-quick-start`)
+
+只改目标仓库根 `Cargo.toml` 的**第一个** `version` 字段(`[package] version` 行,如 `hyperlane-quick-start` 的 `23.0.36`)。**不动** `[workspace.dependencies]` / `[dependencies]` 里任何依赖的 `version`,也**不动**子 crate 的 `package.version` —— 依赖同步由发版流程/CI 负责。禁止全局 sed `version = "X.Y.Z"`(会误伤第三方依赖,如 `http-type = "20.1.9"`)。详细版规见 `project-memory` skill 的 Version policy 节。
+
 ## 2. Installation
 
 ```shell
