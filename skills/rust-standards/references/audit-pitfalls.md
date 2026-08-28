@@ -80,6 +80,41 @@ fully-qualified `core::...` paths. The file opens with a `//` comment
 explaining this. Audit script category 7 reports it; manually verify
 the comment before fixing.
 
+## 7a. Direct `///` doc comment on `const.rs` / `static.rs` / `fn.rs`
+    / `trait.rs` / `impl.rs` without `use super::*;` first — NOT a
+    violation
+
+Master pattern treats every keyword-only sub-file the same way
+`audit-pitfalls #5` already covers `enum.rs` / `struct.rs` /
+`type.rs`: when the file defines only items in its dedicated keyword
+(constants / statics / fns / traits / impls) and does not need any
+parent-module symbol, it may open with a `///` doc comment directly.
+A repo-wide grep for the first non-comment line across
+`example/src/**/const.rs` returns 26 files in master, none of which
+start with `use super::*;` — confirming the pattern is universal.
+
+The audit script category 7 used to misreport these. As of
+2026-08-28 it now matches by `basename` and skips every
+keyword-only sub-file (`const.rs` / `static.rs` / `fn.rs` /
+`enum.rs` / `struct.rs` / `trait.rs` / `impl.rs` / `type.rs`).
+When in doubt, manually confirm the file doesn't reference any
+parent-module symbol via the `use super::*;` chain before fixing.
+
+## 7b. `mod r#async;` / `mod r#await;` / `mod r#try;` / `mod r#dyn;`
+    in any mod.rs — NOT a violation
+
+Per audit-pitfalls #1, `mod r#<keyword>;` is required whenever the
+module path collides with a Rust keyword. The original exemption
+list covered the nine traditional keywords (`const`, `static`, `fn`,
+`enum`, `struct`, `trait`, `impl`, `type`, `mod`) but missed the
+four keywords added by RFC 2018 (`async`, `await`, `try`) and the
+2018 keyword-softening pass (`dyn`). Master accepts `mod r#async;`
+in `example/src/page/mod.rs` and other pages whose module path
+matches an RFC 2018 keyword. Audit script category 11 now matches
+the full keyword list; if you see `mod r#<reserved>;` and the
+identifier is a Rust keyword, the report is stale and should be
+ignored.
+
 ## 8. `try_get_child_node` (or any helper that "should be removed") — VERIFY before deletion
 
 The R6.4 audit table says helpers only used by ONE caller should be

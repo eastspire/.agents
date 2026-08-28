@@ -99,6 +99,17 @@ done
 cd {target}
 git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -vE "/(mod|lib|raw_html)\\.rs$|/tests/" | while read f; do
   [ -f "$f" ] || continue
+  # Per audit-pitfalls #5 / #5a, files dedicated to a single keyword
+  # (`const.rs` / `static.rs` / `fn.rs` / `enum.rs` / `struct.rs`
+  # / `trait.rs` / `impl.rs` / `type.rs`) are allowed to open with
+  # a `///` doc comment when they do not need any parent-module
+  # symbol. The audit script now matches by the file's *basename*
+  # so that every keyword-only sub-file is exempt from the
+  # `use super::*;` requirement, matching what master accepts.
+  bn=$(basename "$f")
+  case "$bn" in
+    const.rs|static.rs|fn.rs|enum.rs|struct.rs|trait.rs|impl.rs|type.rs) continue ;;
+  esac
   first=$(grep -nE "^[^[:space:]/]" "$f" 2>/dev/null | head -1 | cut -d: -f1)
   if [ -z "$first" ]; then continue; fi
   line=$(sed -n "${{first}}p" "$f")
@@ -126,8 +137,14 @@ git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/(mod)\
   if [[ "$f" == *"/tests/"* ]]; then continue; fi
   grep -oE "mod r#[a-z_]+;" "$f" 2>/dev/null | while read line; do
     name=$(echo "$line" | sed -E "s/mod r#([a-z_]+);/\\1/")
+    # Per audit-pitfalls #1 the `r#` prefix is required for every
+    # Rust keyword, including the four keywords that were added
+    # after the original nine (RFC 2018 added `async` / `await` /
+    # `try`; RFC 3324-era work brought `dyn`). Master accepts
+    # `mod r#async;` for example-page modules whose path collides
+    # with these reserved words.
     case "$name" in
-      const|static|fn|enum|struct|trait|impl|type|mod) ;;
+      const|static|fn|enum|struct|trait|impl|type|mod|async|await|try|dyn) ;;
       *) echo "$f: r#$name" ;;
     esac
   done
