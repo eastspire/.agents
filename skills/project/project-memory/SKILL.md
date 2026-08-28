@@ -63,9 +63,9 @@ If unsure which repo a request refers to, **ask before editing** — the wrong r
 
 ### Hard rules
 
-1. **All code changes go through PR** — no direct push to base branches, ever.
+1. **Non-personal repos: all code changes go through PR** — no direct push to base branches there. Personal repos (`eastspire/*`) are exempt: direct push to `master` is allowed (rule changed 2026-08-28).
 2. **Fork-first for every non-personal repo** (rule changed 2026-08-28) — the 4 eastspire orgs (`euv-dev`, `docs-pages`, `crates-dev`, `hyperlane-dev`) count as non-personal: `gh repo fork <org>/<repo>` once per repo (the `eastspire/<repo>` forks for `euv` and `hyperlane-quick-start` already exist), push feature branches to the **fork**, open the PR against the org repo with `--head eastspire:<branch>`.
-3. **No fork for personal repos** — repos under the `eastspire` **user account** itself (e.g. `eastspire/.agents`) get a direct feature branch on the upstream + PR. Forking your own personal repo fails with "single user account cannot own both parent and fork".
+3. **Personal repos: no fork, no PR** — repos under the `eastspire` **user account** itself (e.g. `eastspire/.agents`) accept direct commits + pushes to `master`. Forking your own personal repo fails with "single user account cannot own both parent and fork", and the PR step is explicitly waived.
 4. **Exception: `docs-pages/docs` is private with fork disabled** — skip the fork, use the Contents API + git refs flow below (direct branch on upstream is the only option).
 5. **PR body / commit message in English** — every public PR/issue/commit on these orgs uses English, three conventional sections (`## Summary` / `## Verification` / `## Notes`), no Chinese. Applies to commit messages too (rule extended 2026-08-27).
 6. **`gh pr edit` for GraphQL fields silently fails** when `GH_TOKEN` lacks `read:org` scope. Fall back to REST `PATCH /repos/<owner>/<repo>/issues/<N>` (PRs share the issue endpoint) to update body/title without force-push/reopen.
@@ -87,7 +87,7 @@ git push -u origin <branch>
 gh pr create --repo <owner>/<repo> --base master --head eastspire:<branch> --title "..." --body-file /tmp/pr-body.md
 ```
 
-For personal repos (`eastspire/*`): skip the fork — push the branch to the upstream repo directly and use `--head <branch>` (no `eastspire:` prefix needed).
+For personal repos (`eastspire/*`): skip everything — commit directly on `master` and `git push origin master`. No fork, no branch, no PR.
 
 ### For large repos where `git checkout <tree>` times out
 
