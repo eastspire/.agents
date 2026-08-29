@@ -617,6 +617,9 @@ let sched: SchedulerHandle = SchedulerHandle::start(cfg, handler);
 10. **`c_euv_button_*` classes force `flex: 1 1 120px`** — any `display:flex` parent will stretch them to ≥120px. Wrap in a non-flex container or add `flex: none` override. (基于 `ui/src/style/class/fn.rs` 源码,docs-pages 未覆盖。)
 11. **`<form onsubmit=...>` 必须 `event.prevent_default()`** — 否则页面会刷新 (`form.md:99-101`)。
 12. **`ondragover` 必须 `event.prevent_default()`** — 否则 `ondrop` 不会触发 (`form.md:241-243, 261`)。
+13. **Mobile safe-area 永远由 header/nav 组件自己管,不要在 root 重复声明**。`c_mobile_app_root` 的 `padding-top` 必须保持 `0px`(`env(safe-area-inset-top)` 在 iOS app webview 是 0,但 Android 系统浏览器可能是 URL bar 高度 ≈ 50-70px,会被 `use_safe_area_fix` 钩子缓存并塞进 inline style,污染整个 shell)。`c_mobile_header` 用 `min(max(env-safe-area-inset-top, 16px), 24px)` 自己吃 safe-area,header bg 同时覆盖 safe-area 区段(否则空白区与 page bg 同色,user 看不到 navbar 边界以为是"顶部空白")。**`c_app_root`(desktop)同样规则**:删除 `padding-top: env-safe-area`,改让 `c_app_nav` 用 `padding-top: min(max(env-safe-area-inset-top, 16px), 24px)`(`c_mobile_header` 的同一个公式)——两边算法保持一致,mobile/desktop 切换时 brand 元素视觉位置不跳。
+14. **`use_safe_area_fix` 钩子用 inline style 覆盖 `--safe-area-inset-*` 在 app root 上**(见 `ui/src/component/layout/hook/impl.rs`),inline style specificity 高于 stylesheet,所以**headless 测试模拟 safe-area 必须 `el.style.setProperty("--safe-area-inset-top", "47px")` 写在 `.c_mobile_app_root` 或 `.c_app_root` 上**,不能 `:root { --safe-area-inset-top: 47px }` ——后者会被 inline style 盖掉。env() 在 headless Chrome 永远返回 0px(没有 notch、URL bar、status bar),所以验证 safe-area 行为只能靠 inline injection。
+15. **不要相信视觉测量的"顶部空白"**。euv 默认 light mode navbar bg = page bg = `var(--background)`,safe-area padding(尤其在 iPhone notch/Android URL bar 场景)是"看不见的白条",user 看到 URL bar 底到 navbar 按钮之间的间距会以为是 bug——其实 navbar bg 已经填满了那段。修法不是删 safe-area,而是用 min/max 加 base(确保 immersive 下也有 16px 视觉间距,匹配浏览器模式 URL bar 高度) + 上限(避免 iPhone notch 47px 推得太下)。完整方案见 PR #54 → #55 → #56 → #57。
 
 ## Verification checklist
 
