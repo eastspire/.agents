@@ -1,7 +1,7 @@
 ---
 name: github-pr-workflow
 description: "GitHub PR lifecycle: branch, commit, open, CI, merge. NEVER auto-merge — agent must wait for the user to merge when downstream work depends on it. Includes fork-first path for no-write targets and tarball-to-PR recovery when only api.github.com works."
-version: 1.4.0
+version: 1.5.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -587,6 +587,14 @@ If the user prefers a tighter loop ("just merge them all in sequence and report 
 - **Using `gh` for `gh api` when only `gh auth login` works for HTTPS but SSH keys are also configured.** Pick one mode and stay in it — mixing auth modes mid-workflow leaks credentials into shell history or kills the agent's auth on rotation.
 - **Reporting "PR opened" without checking the response.** `gh pr create` returns the PR URL on success and exits non-zero on failure (e.g., "no history in common with base"). Always read the actual output, not the exit code, before claiming success.
 - **Auto-merging a PR because the next task depends on it.** Default state is "stop at green, wait for the user to press the merge button". Never run `gh pr merge --auto`, `gh pr merge --squash`, or `enablePullRequestAutoMerge` unless the user has *just now* typed something like "merge it" / "go ahead" / "approve and merge". When the next task needs a PR to land first, post a "PR #N ready to merge, awaiting your go-ahead" report and stop — do not unstick yourself by force-merging or rebasing the next branch onto the still-open one. Full rule in [Section 6 § Pitfall: Auto-Merging PRs](#pitfall-auto-merging-prs) and [Section 7a](#7a-multi-pr-workflow--when-a-pr-blocks-the-next-one).
+- **`gh api /repos/<o>/<r>/branches` only returns protected/default branches.** Default `/branches` endpoint omits regular feature/chore branches and silently hides the branches you actually came to inspect. Always use `/git/refs/heads` to enumerate ALL branch heads:
+  ```bash
+  gh api repos/<owner>/<repo>/git/refs/heads \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); [print(b['ref']) for b in d]"
+  ```
+  This matters when the user asks you to "delete all non-master branches" or audit a repo — using `/branches` will report a false "only master exists" and you'll miss everything you should have deleted. Confirmed 2026-08-29 on `euv-dev/euv`: `/branches` returned only `master`, but `/git/refs/heads` revealed `chore/bump-0-17-1-2026-08-29` and `fix/macros-publish-dev-dep-2026-08-27` that had to be deleted.
+- **"Source repo" vs "fork" branch cleanup — fork is NOT in scope.** When the user says "clean up branches under org X" they mean the *source* repos under that org (`X/<repo>`), not your personal fork (`<user>/<repo>`). Forks live in the user's personal namespace and have their own branch lifecycle. Before `git push <remote> --delete <branch>`, run `git remote -v` to confirm which remote is the source of truth: typically `origin` = fork, `upstream` = source. Verified 2026-08-29: I deleted a `chore/bump-deps-*` branch on `eastspire/euv-docs` thinking it was the source, but the actual source was `euv-dev/euv-docs` (no such branch there) and the fork had inherited it from a prior PR. Cross-check the target org on GitHub (`gh api repos/<owner>/<repo>`) before deleting.
+- **Personal skill/agent repos: push directly to master, never via PR.** The user's own org (e.g. `eastspire/.agents`) has a "personal repo = direct push to master" rule. `gh repo fork <personal-repo>` fails with "cannot be forked. A single user account cannot own both a parent and fork". Always branch + commit + `git push origin master` (after a quick `git fetch origin && git reset --hard origin/master` to make sure your local `master` matches the remote). If your edits were on a different local branch with other sessions' working-tree noise mixed in, use `git stash push -m "wip-not-mine"` → `git checkout master` → `git reset --hard origin/master` → `git cherry-pick <only-your-sha>` → `git push origin master` → `git branch -D <branch>` → `git stash pop`. Cherry-pick conflicts: use `git show <sha>:<file> > /tmp/v && cp /tmp/v <file> && git add` to take your version verbatim.
 
 ## Related References
 
