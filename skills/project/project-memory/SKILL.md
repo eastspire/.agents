@@ -101,6 +101,88 @@ Use the **Contents API + git refs API** flow (verified on `docs-pages/docs` — 
 
 The Contents API creates one commit per call; the diff is identical to a single batched git push. Rate-limit budget is 5000 req/hour per token; large file edits stay well under.
 
+### Build-script / install-time file drift — reset before commit
+
+`docs-pages/docs` has two files that change **on every `yarn install` or `yarn build`** without your edits touching them. They show up in `git status` after install/build and must be reset before staging:
+
+| File | When it drifts | What it does | Reset |
+| --- | --- | --- | --- |
+| `package.json` | `yarn install` (yarn 4 normalizes key order alphabetically) | No semantic change, just key reordering | `git checkout HEAD -- package.json` |
+| `src/.vuepress/sidebar.js` | `yarn build` (calls `node plugin/creat-sidebar.js` which regenerates the file from `ls src/`) | Real content drift — drops entries whose source dir is gone, adds entries for newly-added dirs (e.g. `/server-manager`, `/udp`, `/udp-request`); also strips trailing newline | `git checkout HEAD -- src/.vuepress/sidebar.js` |
+
+These drifts are NOT caused by your edits and should NEVER be bundled with your fix's commit. After `yarn install` and `yarn build`, run:
+
+```bash
+git status --short | awk '{print $2}' | xargs -I{} git diff --quiet HEAD -- {} || \
+  git checkout HEAD -- package.json src/.vuepress/sidebar.js
+git status --short   # should now show only your intended files
+```
+
+Verified 2026-08-29 on `docs-pages/docs` (yarn 4.10.3 + vuepress 2.0.0-rc.26 + hope-theme 2.0.0-rc.101).
+
+### Local build output path ≠ committed deploy path
+
+The build script's `dest: resolve(__dirname, '../../pages')` writes to a **new sibling** `docs/pages/` inside the source checkout, NOT to the committed deploy path `~/github/docs-pages/pages/` (which is what Vercel reads). The committed `pages/` is a separate git repo (or directory) that Vercel auto-pushes to.
+
+Implication for local testing:
+
+- `yarn build` produces artifacts at `~/github/docs-pages/docs/pages/` (the `pages/` inside the source tree).
+- Built HTML references assets as `/pages/assets/app-<hash>.css` etc. (base path = `/pages/`).
+- To serve locally: `mkdir -p /tmp/docs-serve && ln -s ~/github/docs-pages/docs/pages /tmp/docs-serve/pages && python3 -m http.server 8765 -d /tmp/docs-serve` — then hit `http://localhost:8765/pages/`.
+- DO NOT serve from `~/github/docs-pages/docs/pages/` directly — the asset URLs would resolve to `http://localhost:8765/assets/...` (404) instead of `/pages/assets/...`.
+
+Verified 2026-08-29.
+
+### Headless iPhone safe-area testing — `env()` returns 0 on Linux Chrome
+
+Linux headless Chrome **cannot simulate iOS notch safe-area insets**. With viewport-fit=cover set, `env(safe-area-inset-top)` still resolves to `0px` — the OS doesn't have a notch to report. To verify a safe-area CSS rule fires correctly, **inject a CSS override that forces the computed value** instead of trying to fake the env():
+
+```python
+# Inject what env(safe-area-inset-top) WOULD return on an iPhone 14 Pro (47px)
+page.add_style_tag(content="""
+    .vp-navbar {
+        padding-top: calc(47px + var(--navbar-padding-y)) !important;
+        height: calc(var(--navbar-height) + 47px) !important;
+    }
+""")
+# Now measure: navbar height should = original-height + 47px, logo top should = 47 + original-padding-y
+```
+
+Setting `--safe-area-inset-top: 47px` as a CSS custom property and reading it via `var()` does NOT work either — `env()` and `var()` are separate. Only the `env()` runtime call reads from the OS; `var()` reads from CSS custom properties. To verify the rule logic, substitute the env() expression with the hard-coded value it would compute to.
+
+Verified 2026-08-29 on Chromium 138 + Playwright (Linux, no iOS emulation available). The 3-state verification pattern (no-notch baseline / simulated notch / desktop ≥768px) is the minimum to claim "no regression + correct on notch devices + desktop untouched".
+
+### Safe-area fix recipe — `c_app_root`-style for any fixed-top element
+
+When porting euv's `c_app_root` / `c_mobile_app_root` safe-area pattern to a non-euv site (e.g. VuePress hope-theme's `.vp-navbar`), the full recipe is:
+
+1. **Add `viewport-fit=cover` to the viewport meta** in the framework config (VuePress: `src/.vuepress/config.ts` `head[]`):
+   ```html
+   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+   ```
+   Without this, `env(safe-area-inset-*)` always returns `0px` on iOS notch devices.
+
+2. **Mobile-only (`@media (max-width: 767px)`)** — for `position: fixed; top: 0` elements, set:
+   ```css
+   .vp-navbar {
+     padding-top: calc(env(safe-area-inset-top, 0px) + var(--navbar-padding-y));
+     height:      calc(var(--navbar-height)      + env(safe-area-inset-top, 0px));
+   }
+   ```
+   Just adding padding-top WITHOUT growing height leaves the logo overflowing — the box can hold `padding-top + padding-bottom + content` only as much as its fixed height allows. Grow height too.
+
+3. **Desktop (`@media (min-width: 768px)`)** — leave untouched; hope-theme / framework default behavior preserved.
+
+The reference implementation is `c_app_root` in `euv/ui/src/style/class/fn.rs`:
+```rust
+pub c_app_root {
+    padding-top: var!(safe-area-inset-top);
+    padding-bottom: var!(safe-area-inset-bottom);
+    // ...
+}
+```
+plus `c_mobile_app_root` which sets all four sides to `safe-area-inset-*`. The docs-pages fix (2026-08-29, PR open against `docs-pages/docs`) is the first external port of this pattern.
+
 ## Version policy
 
 ### docs仓 (docs-pages/docs)
