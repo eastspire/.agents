@@ -1,7 +1,7 @@
 ---
 name: github-pr-workflow
-description: "GitHub PR lifecycle: branch, commit, open, CI, merge. Includes fork-first path for no-write targets and tarball-to-PR recovery when only api.github.com works."
-version: 1.3.0
+description: "GitHub PR lifecycle: branch, commit, open, CI, merge. NEVER auto-merge — agent must wait for the user to merge when downstream work depends on it. Includes fork-first path for no-write targets and tarball-to-PR recovery when only api.github.com works."
+version: 1.4.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -22,6 +22,7 @@ Use this skill whenever the outcome is a PR — feature work, bugfix, docs updat
 - **You already have a local repo with `origin` set and write permission on it** → straight PR workflow.
 - **You only have a tarball/working tree (no `.git/`), or you only have read access to the target repo** → see `## Tarball-Only and Read-Only Sources` below BEFORE doing anything.
 - **The user said "禁止直接 push" / "no direct push" / "always via PR"** → treat as hard constraint, not a soft preference; do not push to the base branch even if you have write permission.
+- **A green PR is ready to merge, or downstream work depends on it** → STOP. Post the "ready to merge" template and wait for the user to press the merge button. Never run `gh pr merge --auto` or `enablePullRequestAutoMerge`. See [Section 6](#6-merging).
 
 ## Prerequisites
 
@@ -442,17 +443,28 @@ When asked to auto-fix CI, follow this loop:
 
 ## 6. Merging
 
-**With gh:**
+> **⛔ NEVER auto-merge PRs. NEVER run `gh pr merge --auto`, `enablePullRequestAutoMerge`, or any other path that merges without the user explicitly pressing the button in the GitHub UI.**
+>
+> The user owns merge decisions. Auto-merge removes that gate and can race ahead of CI, force-push a reviewer's expectations, or merge a PR the user wanted to amend. See [Pitfall: Auto-merging PRs](#pitfall-auto-merging-prs) for the full rule and the "wait-for-merge" workflow.
+
+**The agent's job ends at "PR is green and ready"** — preparing the squash, deleting the source branch afterwards, syncing the local base branch, etc., are all things to do **after** the user confirms merge. Do not pre-merge.
+
+When the user gives an explicit "merge it" / "go ahead and merge" instruction, then — and only then — use the commands below.
+
+**With gh** (only when the user has explicitly asked for the merge):
 
 ```bash
 # Squash merge + delete branch (cleanest for feature branches)
 gh pr merge --squash --delete-branch
 
-# Enable auto-merge (merges when all checks pass)
-gh pr merge --auto --squash --delete-branch
+# Plain merge commit (preserve history)
+gh pr merge --merge --delete-branch
+
+# Rebase merge
+gh pr merge --rebase --delete-branch
 ```
 
-**With git + curl:**
+**With git + curl** (only when the user has explicitly asked for the merge):
 
 ```bash
 PR_NUMBER=<number>
@@ -461,9 +473,9 @@ PR_NUMBER=<number>
 curl -s -X PUT \
   -H "Authorization: token $GITHUB_TOKEN" \
   https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER/merge \
-  -d "{
-    \"merge_method\": \"squash\",
-    \"commit_title\": \"feat: add user authentication (#$PR_NUMBER)\"
+  -d "{ \
+    \"merge_method\": \"squash\", \
+    \"commit_title\": \"feat: add user authentication (#$PR_NUMBER)\" \
   }"
 
 # Delete the remote branch after merge
@@ -477,21 +489,39 @@ git branch -d $BRANCH
 
 Merge methods: `"merge"` (merge commit), `"squash"`, `"rebase"`
 
-### Enable Auto-Merge (curl)
+### Pitfall: Auto-Merging PRs
 
-```bash
-# Auto-merge requires the repo to have it enabled in settings.
-# This uses the GraphQL API since REST doesn't support auto-merge.
-PR_NODE_ID=$(curl -s \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER \
-  | python -c "import sys,json; print(json.load(sys.stdin)['node_id'])")
+**Always treat `gh pr merge --auto` / `enablePullRequestAutoMerge` as forbidden** unless the user has *just now* typed an instruction like "merge it", "go ahead", "approve and merge". The default state is "stop at green, wait for user".
 
-curl -s -X POST \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/graphql \
-  -d "{\"query\": \"mutation { enablePullRequestAutoMerge(input: {pullRequestId: \\\"$PR_NODE_ID\\\", mergeMethod: SQUASH}) { clientMutationId } }\"}"
+The classic failure mode is **downstream work depending on the merge**:
+
+1. Agent opens PR #42 with `feat: add v2 API endpoint`.
+2. Agent then starts working on PR #43 that *uses* the v2 endpoint — pulling from `master`, hitting a `use of undeclared crate` error.
+3. Agent either (a) silently gives up on PR #43, (b) rebases PR #43 onto PR #42's branch and bundles them, or (c) force-merges PR #42 via `--auto` to "unstick" itself.
+4. None of those is what the user wanted. They wanted a review window between #42 and #43.
+
+**Correct sequence when a PR is "ready but not merged"** and downstream work needs it:
+
+1. `gh pr checks <N>` → all green.
+2. Post a single-line summary to the user: *"PR #42 is green (CI: ✓). Ready to merge — say the word and I'll clean up the source branch, or I can start PR #43 on a fresh base now and rebase it once #42 lands."*
+3. **Stop and wait.** Do not run `gh pr merge` of any flavor.
+4. If the user replies "merge it" / "go ahead" → run the merge block above.
+5. If the user replies "start #43 anyway" → proceed with the new branch off the current base; remember to rebase or merge `master` into it once #42 lands.
+
+### Reporting "ready to merge" to the user
+
+Use this template when stopping at green:
+
+```text
+PR #<N> ready to merge: <title>
+  • Branch: <branch> → <base>
+  • CI: <gh pr checks summary>
+  • Files: +<add>/-<del> across <N> files
+  • Reviewers: <list, or "none requested yet">
+Awaiting your "go ahead" before merging.
 ```
+
+Do **not** post "merged #42" until the user has approved and the merge API call has returned 200 OK with a non-null `merged: true` in the response body.
 
 ## 7. Complete Workflow Example
 
@@ -518,8 +548,19 @@ git push -u origin HEAD
 
 # 7. Monitor CI (see Section 4)
 
-# 8. Merge when green (see Section 6)
+# 8. Stop at green and report to the user (see Section 6 — NEVER auto-merge)
 ```
+
+## 7a. Multi-PR Workflow — When a PR blocks the next one
+
+When the agent is working through a sequence of PRs (PR #N+1 depends on PR #N being merged), do NOT auto-merge #N to "unstick" #N+1. The default is:
+
+1. Open PR #N with full diff + CI green.
+2. Report: "PR #N is green. Ready to merge. Awaiting your go-ahead before I start PR #N+1, which depends on #N landing."
+3. **Wait for the user to merge #N themselves** (or give explicit "merge it" instruction).
+4. Once #N is merged, `git fetch origin && git rebase origin/master` on the local base, then proceed with #N+1.
+
+If the user prefers a tighter loop ("just merge them all in sequence and report at the end"), they will say so explicitly — capture that as an exception in the response and still report between merges, just batched. Do **not** infer "tighten up" from silence.
 
 ## Useful PR Commands Reference
 
@@ -545,6 +586,7 @@ git push -u origin HEAD
 - **Pushing without checking the base branch.** `git push -u origin HEAD` defaults to whatever upstream says; on a freshly forked repo that may be `master`, not `main`. Verify with `git symbolic-ref refs/remotes/origin/HEAD` before opening the PR, and pass `--base` explicitly when creating the PR.
 - **Using `gh` for `gh api` when only `gh auth login` works for HTTPS but SSH keys are also configured.** Pick one mode and stay in it — mixing auth modes mid-workflow leaks credentials into shell history or kills the agent's auth on rotation.
 - **Reporting "PR opened" without checking the response.** `gh pr create` returns the PR URL on success and exits non-zero on failure (e.g., "no history in common with base"). Always read the actual output, not the exit code, before claiming success.
+- **Auto-merging a PR because the next task depends on it.** Default state is "stop at green, wait for the user to press the merge button". Never run `gh pr merge --auto`, `gh pr merge --squash`, or `enablePullRequestAutoMerge` unless the user has *just now* typed something like "merge it" / "go ahead" / "approve and merge". When the next task needs a PR to land first, post a "PR #N ready to merge, awaiting your go-ahead" report and stop — do not unstick yourself by force-merging or rebasing the next branch onto the still-open one. Full rule in [Section 6 § Pitfall: Auto-Merging PRs](#pitfall-auto-merging-prs) and [Section 7a](#7a-multi-pr-workflow--when-a-pr-blocks-the-next-one).
 
 ## Related References
 

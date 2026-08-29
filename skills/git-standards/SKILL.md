@@ -198,7 +198,7 @@ EOF
 6. **PR body via echo / printf** — use `cat <<'EOF'` with single-quoted EOF to prevent `$` and backtick expansion. Without `<<'EOF'`, the shell will eat `${VAR}` in body text.
 7. **Forgetting `--base master`** — `gh pr create` defaults to the default branch, but on personal repos with `main` as default this matters. Always pass `--base` explicitly.
 8. **Force-pushing after review** — never `git push --force` after a PR has comments; use `--force-with-lease` and only when amending a commit before any review.
-9. **Merging own PR without review** — even on personal repos, get a second pair of eyes via the PR review UI; do not `gh pr merge --auto` immediately after creating.
+9. **Auto-merging own PR or merging before user confirms** — never `gh pr merge --auto`, `gh pr merge --squash`, or `enablePullRequestAutoMerge` unless the user has just typed "merge it" / "go ahead". Default = "stop at green, wait for the user". If the next task depends on this PR landing, report and wait — do not unstick yourself by force-merging. Full rule in `skills/github/github-pr-workflow/SKILL.md` §6.
 10. **Committing `__pycache__/` or `.pyc`** — clean before every commit; the `.gitignore` should already cover these but stale files leak through.
 
 ## 5. Quick reference card
