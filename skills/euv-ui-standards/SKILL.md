@@ -907,3 +907,4 @@ div { class: c_home()
 ✅ 列表分隔、卡片下划线 → `1px dashed var!(border)`。
 ✅ 在桌面 nav / drawer / modal / FAB，所有 z-index：modal 1000；mobile overlay 200；drawer 201；vconsole fab 9999；vconsole panel 10001。
 ✅ Safe-area：所有"贴屏幕边"的浮层（fab、drawer、mobile nav）都要 `var!(safe-area-inset-*)`。
+❌ index.html 加 `viewport-fit=cover`（或 `apple-mobile-web-app-status-bar-style: black-translucent`）—— 会让页面在刘海屏 + 全屏 WebView（飞书/微信内置浏览器、PWA standalone）下延伸到状态栏下方，`env(safe-area-inset-top)` 变成 47~59px，`c_mobile_header` 的 safe-area padding 在 light mode 下显示为"导航栏顶部大片空白"（padding 与页面同色、不可见）。euv-cli 模板已移除 cover（euv-dev/euv PR #59），自定义 `--index-html` 也不要加回；去掉 cover 后 env() 恒为 0，safe-area CSS 全部退化为无害 no-op。
