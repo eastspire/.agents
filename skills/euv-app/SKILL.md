@@ -111,6 +111,16 @@ await invoke('open_external_url', { url: 'https://euv.dev' });
 
 Pre-fetched asset cache loaded from `bundled-cache/` at startup. Files split by Rust keyword: `const.rs` / `enum.rs` / `fn.rs` / `impl.rs` / `static.rs` / `struct.rs` / `type.rs`. Paired with `scripts/prefetch-cache.js` which downloads assets ahead of time so the APK can run offline.
 
+## Immersive safe-area injection (euv-app PR #4)
+
+The app runs **edge-to-edge immersive** (do NOT disable it — the page genuinely renders under the Android status bar). Since the served page comes from the remote cache (`remote.url = https://ltpp.vip/euv` via the `euv.localhost` custom protocol), the app cannot rely on the page HTML to declare immersion — it injects a script instead:
+
+- Injection point: `src-tauri/src/cache/fn.rs` — `IMMERSIVE_SAFE_AREA_SCRIPT` evaluated via `Builder::on_page_load(PageLoadEvent::Started)` → `webview.eval` (same channel as `LINK_INTERCEPTOR_SCRIPT`, both fired from `inject_page_scripts`).
+- The script: sets `window.__EUV_IMMERSIVE__ = true`; ensures the viewport meta contains `viewport-fit=cover` (required for `env(safe-area-inset-top)` to report real insets in the WebView — the public template intentionally omits it for letterbox browsers, PR #59); measures the real top inset with a probe and writes it to `<html>` as `--euv-mobile-safe-top`; and injects a `#euv-immersive-compat` stylesheet (`!important`) so older cached pages built with euv-ui ≤ 0.18.11 (whose header does not consume the var) still get the top padding.
+- Framework side (euv-ui ≥ 0.18.12, euv PR #63): `c_mobile_header` / `c_mobile_nav_drawer` consume `var(--euv-mobile-safe-top, 0px)`; `UseEuvLayout::use_safe_area_fix` detects the `__EUV_IMMERSIVE__` flag / `<meta name="euv-immersive">` and writes the measured env value into the var. Browsers never declare it → default 0 → header always flush to top.
+
+**Rule: the page never trusts `env()` directly; only hosts that know they are immersive declare it.**
+
 ## Log (`src-tauri/src/log/`)
 
 Thin wrapper over `tauri-plugin-log` with custom macros (`log/macros.rs`). Call sites use:
@@ -126,7 +136,7 @@ Log output goes to both Android logcat (via tauri-plugin-log) and `dist/logs/` o
 
 - `euv` — frontend framework this app packages
 - `euv-standards` — frontend coding standards (`App::mount`, `App::use_signal`, html!/class! macros)
-- `euv-ui-standards` — UI design system (304 class! + design tokens)
+- `euv-ui-standards` — UI design system (358 class! + design tokens)
 - `euv-html-macro-traps` — html! / class! macro pitfalls
 - `tauri` ecosystem (third-party skill, see `<Tauri>` plugin catalog)
 - `agent-file-standards` — Tauri `dist/` + `bundled-cache/` + `node_modules/` are exempt from temp-file rules; only repo-tracked sources are subject

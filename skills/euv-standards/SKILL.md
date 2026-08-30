@@ -1,6 +1,6 @@
 ---
 name: euv-standards
-description: '**euv 框架完整 API + 坑表 — 与 euv 框架打交道时必加载**。version '*', edition 2024。涵盖:7 个 crate 布局、`html!`/`class!`/`vars!`/`var!`/`#[component]`/`#[watch]`/`#[computed]` 过程宏真实签名、22 个 euv-ui 组件 + 306 个 design class + 2 个 theme var 集合、Signal/VirtualNode 响应式系统、`App::mount()` 入口。'
+description: '**euv 框架完整 API + 坑表 — 与 euv 框架打交道时必加载**。version '*', edition 2024。涵盖:7 个 crate 布局、`html!`/`class!`/`vars!`/`var!`/`#[component]`/`#[watch]`/`#[computed]` 过程宏真实签名、28 个 euv-ui 组件（带 view/）+ 358 个 design class + 2 个 theme var 集合、Signal/VirtualNode 响应式系统、`App::mount()` 入口。'
 ---
 
 # euv 框架完整规范 (verified 2026-08)
@@ -15,7 +15,7 @@ euv/
 ├── core/               # euv-core: VirtualNode / Signal / App 核心
 ├── macros/             # euv-macros: 7 个 proc_macro
 ├── src/                # euv: re-export = euv_core::* + euv_macros::*
-├── ui/                 # euv-ui: 22 组件 + 306 class + 2 theme vars
+├── ui/                 # euv-ui: 28 组件 + 358 class + 2 theme vars
 ├── engine/             # euv-engine: 渲染引擎
 ├── cli/                # euv-cli: CLI 工具
 └── example/            # euv-example: 25 个 page 演示
@@ -101,9 +101,9 @@ euv_modal { open: sig children }
 
 **裸组件**(`euv_card {}`)和带子节点(`euv_modal { open: sig }  children  `)都可。
 
-## 5. `class!` 宏 — 306 个 design class
+## 5. `class!` 宏 — 358 个 design class
 
-文件:`ui/src/style/class/fn.rs`(3338 行,单宏调用)。
+文件:`ui/src/style/class/fn.rs`(3789 行,单宏调用)。
 
 **形态**:
 
@@ -112,7 +112,7 @@ class! {
     pub c_euv_button_primary_md { /* CSS */ }
     pub c_euv_button_outline_md { /* CSS */ }
     pub c_card { /* ... */ }
-    // ... 共 306 个
+    // ... 共 358 个
 }
 ```
 
@@ -122,10 +122,10 @@ class! {
 
 ```bash
 grep -cE "^[[:space:]]+pub c_" /tmp/euv/ui/src/style/class/fn.rs
-# → 306
+# → 358
 ```
 
-> ❌ 旧版 skill 写"304",实测 306,差 2。**永远以源码为准**。
+> ❌ 旧版 skill 写"304"/"306",实测 358(0.18.x,含 §3.F 站点组件 + c_euv_* 系列)。**永远以源码为准**。
 
 ## 6. `vars!` / `var!` — 2 个 theme 集合
 
@@ -152,13 +152,16 @@ vars! {
 }
 ```
 
-## 7. 22 个 euv-ui 组件(实地列表)
+## 7. 28 个 euv-ui 组件(实地列表,`ls -d ui/src/component/*/view`)
 
 ```
-alert / badge / browser / button / camera / card / checkbox / field / header /
-info / input / layout / loading / logo / modal / nav / router / tag / theme /
-touch / vconsole / virtual_list
+alert / badge / button / card / checkbox / debug / doc_layout / drawer /
+dropdown / field / header / hero / info / input / loading / logo / markdown /
+modal / navbar / nav / pagination / result / router / sidebar / tag / toc /
+vconsole / virtual_list
 ```
+
+> 纯 hook 工具组件(无 `view/`,不进 euv_* 渲染树):`browser / camera / layout / theme / touch`。
 
 每个组件文件结构(以 button 为例):
 
@@ -309,6 +312,7 @@ pub struct EuvButtonProps {
 | euv 仓** minor 版本升级**(如 0.15.x→0.16.0）后本地 `cargo check` 报 `failed to select a version for the requirement euv = "^0.15.3"` | workspace 内 path-dep 钉了 `^0.15.3`,minor bump 超出区间；patch bump 不受影响。**本地复现 CI `sync_workspace_version` 的 sed 并随 PR 提交**（根 `workspace.dependencies` 各 euv* version + 各 member `package.version`),CI sync 变 no-op；之后 `cargo generate-lockfile` 再验证                                                                                                                      |
 | 文档站/长页面切换主题后**一屏以下区域配色不对**（暗色模式下页面底部一大片白）                                                        | `c_app_root` 是 `height: 100%` 的视口锁定 app 壳（example 内部容器滚动）；文档站若是 document 滚动，根元素只有 1 视口高，主题 `background` 到 1 视口高度就断了。两种修法：(a) 根 class 覆盖 `height: "auto"`（保留 `min-height: "100%"`)；(b) **对齐 example：根保持 100%，内容放进 `c_app_main`/`c_mobile_main` 内部滚动容器**（euv-docs PR #9 采用，同时根治）。亮色模式白底看不出，暗色才暴露（verified 0.16.0/0.16.1, euv-docs PR #8/#9)                                                                                                       |
 | 文档站壳上的 locale 绑定文本（侧栏树/section label/品牌标题）切换语言后**不更新**，停留在旧语言                                        | 壳组件 mount 时从 route 算 locale，信号变化不会重建组件体（key 加在静态根 div 上也不订阅信号）；`Router::navigate` 异步生效，紧跟 `location.reload()` 会把导航冲掉。正确姿势：`location.set_hash(route)`（同步生效）**再 `location.reload()`**，整页重启按新 locale 重建（i18n 文档站标准行为，verified euv-docs PR #9)                                                                                                       |
+| 移动端 header/drawer 顶部间距直接写 `env(safe-area-inset-top)`（无条件信任 env）| **letterbox 浏览器会谎报 env**（VivoBrowser 类报 41px 造成"顶部大片空白"；PWA/沉浸式 WebView env 又是真值必须消费）——静态规则无法区分两种宿主。最终架构（PR #63,0.18.12）：`c_mobile_header`/`c_mobile_nav_drawer` 消费 `var(--euv-mobile-safe-top, 0px)`（**默认 0**，浏览器永远贴顶）；沉浸式宿主显式声明（`window.__EUV_IMMERSIVE__=true` 或 `<meta name="euv-immersive" content="true">`），框架 `UseEuvLayout::use_safe_area_fix` 实测 env 后把变量写到 `<html>`。页面永不直接信任 env()，由知道自己沉浸式的宿主声明（euv-app 注入点 = `src-tauri/src/cache/fn.rs` `on_page_load` → `webview.eval`，euv-app PR #4)                                                                                                                                                                                                                                               |
 
 ## 13. 最小可运行模板
 
@@ -338,11 +342,11 @@ pub fn app() -> VirtualNode {
 ## 14. 数字/事实验证脚本(用这个对账)
 
 ```bash
-# 组件数
-ls -d /tmp/euv/ui/src/component/*/ | wc -l          # → 22
+# 组件数(带 view/ 的)
+ls -d /tmp/euv/ui/src/component/*/view | wc -l      # → 28(另有 browser/camera/layout/theme/touch 5 个纯 hook 组件无 view/)
 
 # class 数
-grep -cE "^[[:space:]]+pub c_" /tmp/euv/ui/src/style/class/fn.rs   # → 306
+grep -cE "^[[:space:]]+pub c_" /tmp/euv/ui/src/style/class/fn.rs   # → 358
 
 # vars 数
 grep -cE "^[[:space:]]+pub c_" /tmp/euv/ui/src/style/var/fn.rs     # → 2
@@ -353,7 +357,7 @@ grep -E "proc_macro" /tmp/euv/macros/src/lib.rs
 # 组件带 hook 的列表
 find /tmp/euv/ui/src/component -name "hook" -type d
 
-# 25 个 example page
+# 32 个 example page
 ls /tmp/euv/example/src/page/ | grep -v mod.rs | wc -l
 ```
 
@@ -363,7 +367,7 @@ ls /tmp/euv/example/src/page/ | grep -v mod.rs | wc -l
 
 - **rust-standards**:同时必加载(任何 Rust 任务)。Rust 代码风格/错误处理/lombok 以它为准。
 - **rust-crate-use**:euv 用的第三方 crate(`lombok-macros` / `wasm_bindgen` / `web-sys` / `js-sys`)由它管。
-- **euv-ui-standards**:UI 设计规范 + 304 个 class 的具体样式含义(虽然数字 304→306,以本文 306 为准)。
+- **euv-ui-standards**:UI 设计规范 + 358 个 class 的具体样式含义(以 §5 实测为准)。
 - **euv-pixel-game-scaffold**:用 euv 搭游戏的脚手架(euv 实际能力不止 web,也能做 2D/3D 游戏 —— example 里有 `game_2d` / `game_3d` page)。
 
 ## 16. euv-engine WebGPU renderer 真实 API(2026-08 实地补完)
