@@ -372,6 +372,8 @@ euv_tag { variant: Solid | Outline  color: Black | White  text  on_click }
 
 均 font-weight:600 + cursor:pointer（可点击）。尺寸比 badge 大一档：sm 字号。
 
+> ⚠️ **为什么 tag 必须 `display: inline-block` + `vertical-align: middle` + `text-align: center` + `line-height: 1`**（PR #68 教训，0.18.16 起）。早期 tag 用 `inline-flex` + `justify-content: center`：当 text 换行时 box 撑成父容器宽度，`justify-content` 只居中第一行，**换行后的行左对齐，右边短了一截**。改为 `inline-block` 后每个 fragment 画完整 box。**这条经验同样适用于任何带 border 的 inline UI（badge / 自定义 `<kbd>` / 等等）**。
+
 ### 3.5 Alert / Error / Success
 
 ```
@@ -913,3 +915,5 @@ div { class: c_home()
 ✅ 在桌面 nav / drawer / modal / FAB，所有 z-index：modal 1000；mobile overlay 200；drawer 201；vconsole fab 9999；vconsole panel 10001。
 ✅ Safe-area：贴屏幕边（右/下/左）的浮层（fab、drawer 底部、mobile nav）用 `var!(safe-area-inset-*)`；**顶部 inset 例外**——只消费 `var(--euv-mobile-safe-top, 0px)` 变量契约（§2.3），永不直接写 `env(safe-area-inset-top)`。
 ❌ **mobile header/drawer 的顶部 padding 直接写 `env(safe-area-inset-top)`**（PR #61 删 env → PR #63 改变量契约的最终结论）—— 国产 Android 浏览器（VivoBrowser 等）把页面 letterbox 到状态栏下方（页面并未伸到状态栏后）却**仍报告非零 env**（实测 VivoBrowser 31/Android 16 = 41px），此时 env padding = 纯死空白，light mode 下显示为"导航栏顶部大片空白"；而 euv-app 沉浸式 WebView 里 env 又是真值、不消费则 header 与状态栏文字重合。静态规则无法区分两种宿主。**最终模式（0.18.12）**：header/drawer 只消费 `var(--euv-mobile-safe-top, 0px)`（默认 0 = 浏览器贴顶），沉浸式宿主声明 `__EUV_IMMERSIVE__` / meta 后由框架实测 env 写变量（§2.3）；index.html 模板无 `viewport-fit=cover`（PR #59），浏览器场景顶部避让完全交给 letterbox。诊断手法：`screen.height - innerHeight` 差值大 = 已 letterbox；env>0 + 已 letterbox = env 说谎。
+
+❌ **给 inline `<code>` / `<kbd>` / `<span>` 等带 border 的 inline 元素只加 `box-decoration-break: clone`**（PR #71 → PR #72 教训）。这是 CSS2.1 处理 inline 元素跨行 border 的常用修复，但**在 Chromium 实际行为下不够**：第一行的右边框 + 第二行的左边框 paint 在同位置，**且中间的 background 把两段边框视觉合并**，看起来只有一条线、两端都不闭合。`docs/guide/getting-started.md` 第 7 行 `wasm32-unknown-unknown` 在窄视口下复现率 100%。**正确修复（PR #72）**：`.md-body code { display: inline-block; vertical-align: text-top; line-height: 1.4; }`——每个 fragment 画完整 box + 4 边框，与 `euv_tag` 的解法同源（§3.4）。`box-decoration-break: clone` 留作防御性 fallback。**诊断手法**：在 200px 宽度容器放长 inline `<code>` 字符串，4× DPR 截图看每行 4 条边是否完整闭合。
