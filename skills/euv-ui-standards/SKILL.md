@@ -72,11 +72,40 @@ accent-muted ── #ffffff   ──  #000000
 border       ── #000000   ──  #ffffff
 ring         ── #000000   ──  #ffffff
 text-on-accent (色上文字) ─ #ffffff (光) / #000000 (暗)
-bg-overlay   ── rgba(0,0,0,0.45) / rgba(0,0,0,0.60)
+bg-overlay   ── rgba(0,0,0,0.20) / rgba(255,255,255,0.08)
 ```
 
 注意：`muted-foreground` 在 light 下与 foreground 同色，但**语义不同** — 用于次级文字/占位。
 阴影、滚动条都只用黑/白 alpha，永远**不引入彩色**。
+
+#### 1.1.1 Overlay / Scrim alpha 阈值（`bg-overlay`，v0.18.36+）
+
+`bg-overlay` 渲染到页面背景上 = 模态/抽屉/浮层的遮罩层。**不是** `background` token —— 是 overlay-only。
+
+**实测像素 vs 用户感知**（page bg = `#000` dark / `#fff` light，modal panel 与 bg 同色）：
+
+| light alpha | dark alpha | light 渲染色 | dark 渲染色 | 备注 |
+|-------------|-----------|------------|-----------|------|
+| 0.20        | 0.08      | `rgb(204, 204, 204)` | `rgb(20, 20, 20)` | **当前默认值**（v0.18.36） |
+| 0.45        | 0.45 白   | `rgb(140, 140, 140)` | `rgb(115, 115, 115)` | 太突兀 |
+| 0.20 白     | 0.20 白   | `rgb(204, 204, 204)` | `rgb(51, 51, 51)` | dark「白 halo」 |
+| 0.10 白     | 0.10 白   | `rgb(229, 229, 229)` | `rgb(26, 26, 26)` | dark 区分不出来 |
+| 0.04 白     | 0.04 白   | `rgb(245, 245, 245)` | `rgb(10, 10, 10)` | 几乎隐形 |
+
+**铁律（暗色模式遮罩设计）**：
+
+1. **在 `#000` 背景上，任何「比 `#000` 亮」的遮罩都读作「白」（相对感知）**。用户反馈模式：50 RGB 提亮 → 「突兀」；26 RGB 提亮 → 「白」；10 RGB 提亮 → 「区分不出来」。
+2. **Sweet spot = 20 RGB 单位提亮**（v0.18.36 = `rgba(255,255,255, 0.08)` → `rgb(20, 20, 20)`）。低于 15 RGB 用户区分不出，高于 30 RGB 用户读作「白 halo」。
+3. **保持半透明**（solid `rgb(50,50,50)` 之类会完全遮住背后内容，破坏「modal 调暗背景」的 UX）。
+4. **modal 面板必须 = 页面背景色**（在 euv-ui 里 modal panel 用 `var!(background)` = `#000`），scrim 必须 = `背景色 + 20 RGB` 单位，modal 面板 = 背景色。差值 20 让 panel 「比 scrim 更深的洞」自然成焦点。
+5. **light 模式保持 0.20**（`rgba(0,0,0, 0.20)` → `rgb(204, 204, 204)`），0.45 太突兀，0.20 平衡。
+
+**调整路径**：改 `ui/src/style/var/fn.rs` 的 `bg-overlay` token，单点修复同时影响 `c_modal_overlay` / `c_vconsole_overlay` / `c_mobile_overlay` / `c_drawer_mask` 四个 overlay consumer + 任何未来 `var!(bg-overlay)` 用户。
+
+**禁止**：
+- ❌ dark 模式用 `rgba(0,0,0, X)`（在 `#000` 上 = `#000`，scrim 不可见）
+- ❌ dark 模式用 `rgb(50,50,50)` solid 类（破坏半透明 UX）
+- ❌ 引入彩色 overlay（违反 monochrome 设计系统）
 
 ### 1.2 间距（shadcn/ui Tailwind 间距）
 
@@ -325,6 +354,30 @@ euv_button { variant: Primary | Outline  label: "..."  onclick: handler }
 
 按钮成组：包一层 `c_button_controls` (display:flex; flex-wrap:wrap; gap:gap-element; margin-top:gap-component)。
 
+#### 3.1.1 variant 选择约定 — 默认 Primary,仅互斥激活组才翻 variant
+
+> 2026-08-25 用户偏好（PR #48 明确）+ 2026-08-31 hooks_async 页面再次确认。
+
+**默认**：所有 `euv_button` 写 `variant: EuvButtonVariant::Primary`,始终黑底白字,不随状态翻。
+
+**唯一例外**:多按钮组里**恰好一个按钮按下后改变状态、且视觉上要表达"当前激活的那一个"**——这种互斥激活组才允许按状态翻 variant。
+
+| 场景 | 是否翻 variant | 理由 |
+|------|---------------|------|
+| Refetch / Load / Submit 等 action 按钮 | **不翻**(始终 Primary) | 不是状态切换 |
+| Resolve / Fail / Reset 三选一(改 phase) | 翻——其中恰一个 Primary | 视觉表达"当前是哪个 phase 决定器" |
+| Healthy / Panic 二选一(改 status) | 翻——其中恰一个 Primary | 同上 |
+| Reset 这种"回到默认"的常驻逃逸按钮 | **不翻**(始终 Primary) | 不参与互斥,应该始终可点 |
+| 任何单一按钮 | 不翻 | 没有互斥可言 |
+
+**反例**(2026-08-31 hooks_async Reset):Reset 按钮早期写成 `if Pending { Primary } else { Outline }`,与 Refetch 的"始终 Primary"风格不一致。**正确**:Reset 始终 Primary,Resolve / Fail 互斥翻 variant。
+
+**易踩坑**:
+
+- 整组按钮都翻 variant 但每组不止一个 Primary → 视觉混乱,**禁止**。互斥组必须**恰一个** Primary
+- 把"互斥激活"和"hover 高亮"混为一谈——hover 是 CSS 自带,不要用 variant 表达
+- Reset / Cancel / Back 这类"逃逸"按钮即使在互斥组里也保持始终 Primary(euv 例子: Resolve / Fail 互斥翻,Reset 不参与)
+
 ### 3.2 Card（`euv_card`）
 
 ```
@@ -373,6 +426,8 @@ euv_tag { variant: Solid | Outline  color: Black | White  text  on_click }
 均 font-weight:600 + cursor:pointer（可点击）。尺寸比 badge 大一档：sm 字号。
 
 > ⚠️ **为什么 tag 必须 `display: inline-block` + `vertical-align: middle` + `text-align: center` + `line-height: 1`**（PR #68 教训，0.18.16 起）。早期 tag 用 `inline-flex` + `justify-content: center`：当 text 换行时 box 撑成父容器宽度，`justify-content` 只居中第一行，**换行后的行左对齐，右边短了一截**。改为 `inline-block` 后每个 fragment 画完整 box。**这条经验同样适用于任何带 border 的 inline UI（badge / 自定义 `<kbd>` / 等等）**。
+
+> ⚠️ **重要区分** —— 上方 recipe 中的 `vertical-align: middle` **只适用于 tag-style 可换行元素**（euv_tag、badge 等,有 `text-align: center` 配合 inline-block 处理 wrap）。**inline `<code>` / `<kbd>` 等句中高亮元素应该用 `vertical-align: baseline` + `line-height: 1`**（PR #77 修正, 0.18.23 起）。详见 §9 anti-patterns 末尾 inline `<code>` baseline fix。
 
 ### 3.5 Alert / Error / Success
 
@@ -471,6 +526,7 @@ euv_modal { open children }
 
 - 移动端（max-width: 767px）：`max-width:100%; width:calc(100% - 32px); max-height:85vh; overflow-y:auto`。
 - 关闭按钮：`c_modal_close_button` 有 transition opacity 0.15s。
+- 遮罩色 = `var!(bg-overlay)`，alpha 阈值见 §1.1.1（暗色 0.08 / 亮色 0.20）。**禁止在 page 内覆盖 overlay 颜色**——用项目级 token 必须改 framework 的 `bg-overlay`，否则破坏 monochrome 设计系统一致性。
 
 ### 3.16 Tabs（手写，无组件）
 
@@ -916,4 +972,36 @@ div { class: c_home()
 ✅ Safe-area：贴屏幕边（右/下/左）的浮层（fab、drawer 底部、mobile nav）用 `var!(safe-area-inset-*)`；**顶部 inset 例外**——只消费 `var(--euv-mobile-safe-top, 0px)` 变量契约（§2.3），永不直接写 `env(safe-area-inset-top)`。
 ❌ **mobile header/drawer 的顶部 padding 直接写 `env(safe-area-inset-top)`**（PR #61 删 env → PR #63 改变量契约的最终结论）—— 国产 Android 浏览器（VivoBrowser 等）把页面 letterbox 到状态栏下方（页面并未伸到状态栏后）却**仍报告非零 env**（实测 VivoBrowser 31/Android 16 = 41px），此时 env padding = 纯死空白，light mode 下显示为"导航栏顶部大片空白"；而 euv-app 沉浸式 WebView 里 env 又是真值、不消费则 header 与状态栏文字重合。静态规则无法区分两种宿主。**最终模式（0.18.12）**：header/drawer 只消费 `var(--euv-mobile-safe-top, 0px)`（默认 0 = 浏览器贴顶），沉浸式宿主声明 `__EUV_IMMERSIVE__` / meta 后由框架实测 env 写变量（§2.3）；index.html 模板无 `viewport-fit=cover`（PR #59），浏览器场景顶部避让完全交给 letterbox。诊断手法：`screen.height - innerHeight` 差值大 = 已 letterbox；env>0 + 已 letterbox = env 说谎。
 
-❌ **给 inline `<code>` / `<kbd>` / `<span>` 等带 border 的 inline 元素只加 `box-decoration-break: clone`**（PR #71 → PR #72 教训）。这是 CSS2.1 处理 inline 元素跨行 border 的常用修复，但**在 Chromium 实际行为下不够**：第一行的右边框 + 第二行的左边框 paint 在同位置，**且中间的 background 把两段边框视觉合并**，看起来只有一条线、两端都不闭合。`docs/guide/getting-started.md` 第 7 行 `wasm32-unknown-unknown` 在窄视口下复现率 100%。**正确修复（PR #72）**：`.md-body code { display: inline-block; vertical-align: text-top; line-height: 1.4; }`——每个 fragment 画完整 box + 4 边框，与 `euv_tag` 的解法同源（§3.4）。`box-decoration-break: clone` 留作防御性 fallback。**诊断手法**：在 200px 宽度容器放长 inline `<code>` 字符串，4× DPR 截图看每行 4 条边是否完整闭合。
+❌ **给 inline `<code>` / `<kbd>` / `<span>` 等带 border 的 inline 元素只加 `box-decoration-break: clone`**（PR #71 → PR #72 → PR #77 教训）。这是 CSS2.1 处理 inline 元素跨行 border 的常用修复，但**在 Chromium 实际行为下不够**：第一行的右边框 + 第二行的左边框 paint 在同位置，**且中间的 background 把两段边框视觉合并**，看起来只有一条线、两端都不闭合。`docs/guide/getting-started.md` 第 7 行 `wasm32-unknown-unknown` 在窄视口下复现率 100%。
+
+**正确修复（PR #77，0.18.23 起）**：`.md-body code { display: inline-block; vertical-align: baseline; line-height: 1; -webkit-box-decoration-break: clone; box-decoration-break: clone; }`。**关键**: `vertical-align` 必须是 `baseline` (不是 `text-top` / `middle`)，`line-height` 必须是 `1` (不是 1.4)—— 文字版 `<code>` 在句中是**行内高亮**(短单词或长字符串),需要 baseline 与周围文字完美对齐,而不是行内框居中。
+
+**两阶段演进**(这两个组合千万不能混):
+
+| PR | vertical-align | line-height | 适用场景 | 视觉问题 |
+|----|---------------|-------------|----------|----------|
+| #68 (euv_tag) | `middle` | `1` | 多行 inline tag (整段高亮) | n/a — `text-align: center` 配合 inline-block 处理 wrap |
+| #72 (code v1) | `text-top` | `1.4` | ❌**错的** — 后来 PR #77 修正 | 框顶部对齐行顶部,但底部远低于周围文字 baseline,看起来"在下一行" |
+| #77 (code v2) | `baseline` | `1` | ✅ 当前正确 — 句中高亮 `<code>` | 框 baseline 与周围文字 baseline 完美对齐 |
+
+**为什么 `vertical-align: middle` 不能用于 `<code>`**: `middle` 让 `<code>` 框的 x-height 中点对齐 line x-height 中点。对短 inline `<code>` 这没问题,但对长 `<code>` 跨多行时,`middle` 让每行 fragment 的 vertical 中心对齐 line center,导致上下飘忽。`baseline` 严格对齐 line baseline,任何 fragment 都稳。
+
+**为什么 `vertical-align: text-top` + `line-height: 1.4` 是错的**: text-top 把框顶对齐 line top,但 1.4 的 line-height 让框本身很高 (25.78px @14px 字号),框底伸到 baseline 下方 8-10px。视觉上 code 框"浮在下一行"。**诊断手法**:Playwright `device_scale_factor=4` 高清截图 + 红色 baseline 标线 overlay,在 `euv-docs/#/zh/guide/getting-started.html` 第 10 行 `已安装 \`euv-cli\` (\`cargo install euv-cli\`)` 可看到两个 code 框 baseline 远低于红色 baseline 标线。
+
+**完整正确 CSS**:
+```css
+.md-body code {
+    font-family: ui-monospace, monospace;
+    font-size: 0.875em;
+    padding: 0.15em 0.4em;
+    background: var(--accent-muted);
+    border: 1px solid var(--border);
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+    display: inline-block;
+    vertical-align: baseline;
+    line-height: 1;
+}
+```
+
+**诊断手法**: 在 200px 宽度容器放长 inline `<code>` 字符串,4× DPR 截图看每行 4 条边是否完整闭合(border fix),然后叠加 baseline 红线 overlay 看 code 框 baseline 与文字 baseline 是否齐(baseline fix)。
