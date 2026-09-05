@@ -63,6 +63,8 @@ taplo fmt <file>
 
 不要混用：同一项目锁定一个工具；CI 加 `--check` 校验。
 
+**Redacting secrets before publishing YAML** (essays / blog posts / `examples/` / docs that embed real config files): a bare `[REDACTED]` marker is parsed by YAML 1.2 as a flow sequence (`["REDACTED"]`), silently changing the value's type from string to list and breaking downstream readers. Use `"[REDACTED]"` (quoted) so it stays a string. Preserve empty fields as `''` (don't blanket-redact — distinguishes "configured but empty" from "was redacted"), and don't redact env-var **names** like `access_token_env: BWS_ACCESS_TOKEN` (the name isn't sensitive). See `references/yaml-redaction.md` for the full pattern + verification recipe.
+
 ## 4. TOML
 
 ```bash
