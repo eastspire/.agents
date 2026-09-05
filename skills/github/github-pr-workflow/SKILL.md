@@ -239,33 +239,49 @@ git checkout -b feat/my-change origin/main  # or: git pull origin main --allow-u
 
 Once you have a real `git` repo with the base branch checked out, continue with the normal `git push -u origin HEAD` flow above.
 
-### Eastspire-Owned Orgs — Skip the Fork Decision
+### Eastspire-Owned Orgs — Skip the Fork Decision (2026-09-05 revision)
 
-When the target repo belongs to an org where the user (`eastspire`) has admin/maintain permission, **always push directly to a new branch on the upstream** — do not even try `gh repo fork`. The 4 orgs this applies to (verified 2026-08):
+When the target repo belongs to an org where the user (`eastspire`) has admin/maintain permission, the workflow depends on the org:
 
-- `hyperlane-dev/*` — hyperlane framework
-- `crates-dev/*` — Rust crates release
-- `euv-dev/*` — euv framework
-- `docs-pages/*` — docs (note: fork disabled on most private repos here, but Contents/git-refs API + direct branch push still works)
+| Org | Workflow | Why |
+| --- | --- | --- |
+| `eastspire/*` (personal) | **Direct push to master, no fork, no PR** | Self-account; PR review would be self-approval |
+| `docs-pages/*` | **Direct push to master, no fork, no PR** (2026-09-05) | eastspire is the entire admin team; no external reviewers |
+| `euv-dev/*` | Branch + push direct (upstream) + open PR | eastspire is admin, but each repo has a non-eastspire maintainer |
+| `hyperlane-dev/*` | same as `euv-dev/*` | same |
+| `crates-dev/*` | same as `euv-dev/*` | same |
+| Third-party (e.g. `tokio-rs/serde`) | `gh repo fork` + branch + push to fork + open PR | eastspire has no admin role |
 
 ```bash
-# 1. (optional but cheap) verify permission before pushing — 1 API call
+# 1. (optional but cheap) verify track via remote + owner
+git remote -v
+# origin ssh://git@github.com/<owner>/<repo>.git
+# If <owner> in {eastspire, docs-pages} → Track 1 (push master)
+# If <owner> in {euv-dev, hyperlane-dev, crates-dev} → Track 2 (branch + push + PR)
+# Else → Track 2 via gh repo fork
+
+# Optional: API permission check for Track 2
 PERM=$(gh api repos/<owner>/<repo>/collaborators/eastspire/permission --jq .permission 2>/dev/null)
 case "$PERM" in
-  admin|maintain|write) echo "✓ $PERM — direct push OK" ;;
-  *)                   echo "⚠ $PERM — switch to fork-first path below" ;;
+  admin|maintain|write) echo "✓ $PERM — direct branch push OK (Track 2)" ;;
+  *)                   echo "⚠ $PERM — fall back to gh repo fork path" ;;
 esac
 
-# 2. Branch + commit + push straight to upstream
+# 2a. Track 1 — personal + docs-pages
+git add -A
+git -c user.name=eastspire -c user.email=eastspire@users.noreply.github.com commit -m "..."
+git push origin master
+
+# 2b. Track 2 — eastspire-owned org with active maintainer OR third-party
 git checkout -b <scope>/<descr>-YYYY-MM-DD origin/master
 # ... make changes, git commit ...
 git push -u origin <branch>
-
-# 3. Open PR
 gh pr create --base master --head <branch> --title "..." --body-file /tmp/pr-body.md
 ```
 
-Why this matters: `gh repo fork` on a user-owned repo fails with `cannot be forked. A single user account cannot own both a parent and fork` (verified on `eastspire/.agents`). For other eastspire-owned orgs (`hyperlane-dev`, `crates-dev`, `euv-dev`, `docs-pages`), forking either errors out or produces a meaningless same-account fork. Always check the org first; if it's one of these four, skip fork entirely.
+Why this matters: `gh repo fork` on a user-owned repo fails with `cannot be forked. A single user account cannot own both a parent and fork` (verified on `eastspire/.agents`). For the three maintainer-orgs (`hyperlane-dev`, `crates-dev`, `euv-dev`), forking either errors out or produces a meaningless same-account fork — so always push the branch direct to upstream and open the PR from there. For `docs-pages/*` specifically, **don't open a PR at all** as of 2026-09-05; the user confirmed the docs site is fully self-administered and the PR ceremony is pure overhead.
+
+For the full decision tree see `gh-pr-creation-workflow`. For the historical context of `docs-pages` having a Contents-API workaround (pre-2026-09-05), see the older revisions of this file or `gh-pr-creation-workflow` §"Exception". The exception is no longer needed.
 
 ### Cross-Org / No-Write Permission (the "fork first" path)
 
@@ -443,7 +459,7 @@ When asked to auto-fix CI, follow this loop:
 
 ## 6. Merging
 
-> **⛔ NEVER auto-merge PRs. NEVER run `gh pr merge --auto`, `enablePullRequestAutoMerge`, or any other path that merges without the user explicitly pressing the button in the GitHub UI.**
+> **⛔ Auto-merge is OFF by default. NEVER run `gh pr merge --auto`, `enablePullRequestAutoMerge`, or any other path that merges without explicit per-PR approval, unless the user has typed a clear "merge it" / "go ahead" instruction for THAT specific PR in the current session.**
 >
 > The user owns merge decisions. Auto-merge removes that gate and can race ahead of CI, force-push a reviewer's expectations, or merge a PR the user wanted to amend. See [Pitfall: Auto-merging PRs](#pitfall-auto-merging-prs) for the full rule and the "wait-for-merge" workflow.
 
@@ -491,7 +507,11 @@ Merge methods: `"merge"` (merge commit), `"squash"`, `"rebase"`
 
 ### Pitfall: Auto-Merging PRs
 
-**Always treat `gh pr merge --auto` / `enablePullRequestAutoMerge` as forbidden** unless the user has *just now* typed an instruction like "merge it", "go ahead", "approve and merge". The default state is "stop at green, wait for user".
+**Treat `gh pr merge --auto` / `enablePullRequestAutoMerge` as forbidden
+unless the user has typed a "merge it" / "go ahead" instruction for the
+specific PR you're about to open.** Auto-merge removes the gate and can
+race ahead of CI, force-push a reviewer's expectations, or merge a PR the
+user wanted to amend.
 
 The classic failure mode is **downstream work depending on the merge**:
 
@@ -507,6 +527,36 @@ The classic failure mode is **downstream work depending on the merge**:
 3. **Stop and wait.** Do not run `gh pr merge` of any flavor.
 4. If the user replies "merge it" / "go ahead" → run the merge block above.
 5. If the user replies "start #43 anyway" → proceed with the new branch off the current base; remember to rebase or merge `master` into it once #42 lands.
+
+### User-Opted-In `--auto` Workflow (when the repo allows it)
+
+Some repos — verified 2026-08-30 on `euv-dev/euv-docs`, `eastspire/euv-docs`,
+plus all the user's `euv-dev/*` projects — have `allow_auto_merge=true`
+set as a long-standing repo preference (see memory entry
+"代码工作流 / PR 提交流程"). When this is set:
+
+- `gh pr create --auto --squash --delete-branch` will queue the PR to
+  auto-merge as soon as required status checks pass, and delete the
+  source branch once it lands.
+- This is the user's *preferred* workflow for routine CI fixes where
+  there's no human review expected and the change is straightforward
+  (rename a branch reference, bump a dep, fix a typo).
+- **Always verify the repo has `allow_auto_merge=true` before using
+  `--auto`** — `gh repo view $REPO --json allowAutoMerge` (or via
+  REST `gh api repos/$REPO --jq .allow_auto_merge`). If the repo does
+  NOT allow it, `--auto` is silently a no-op and the PR sits open
+  waiting for manual merge — confusing to the user.
+- For higher-stakes PRs (cross-cutting refactors, anything that
+  touches public APIs, anything breaking ABI/behavior), default to the
+  "stop at green, wait for user" flow regardless of `--auto`. A 60-second
+  pause beats a 60-minute revert.
+
+Enable on a repo:
+
+```bash
+gh api -X PATCH repos/$OWNER/$REPO -f allow_auto_merge=true
+gh api -X PATCH repos/$OWNER/$REPO -f delete_branch_on_merge=true
+```
 
 ### Reporting "ready to merge" to the user
 
@@ -586,7 +636,8 @@ If the user prefers a tighter loop ("just merge them all in sequence and report 
 - **Pushing without checking the base branch.** `git push -u origin HEAD` defaults to whatever upstream says; on a freshly forked repo that may be `master`, not `main`. Verify with `git symbolic-ref refs/remotes/origin/HEAD` before opening the PR, and pass `--base` explicitly when creating the PR.
 - **Using `gh` for `gh api` when only `gh auth login` works for HTTPS but SSH keys are also configured.** Pick one mode and stay in it — mixing auth modes mid-workflow leaks credentials into shell history or kills the agent's auth on rotation.
 - **Reporting "PR opened" without checking the response.** `gh pr create` returns the PR URL on success and exits non-zero on failure (e.g., "no history in common with base"). Always read the actual output, not the exit code, before claiming success.
-- **Auto-merging a PR because the next task depends on it.** Default state is "stop at green, wait for the user to press the merge button". Never run `gh pr merge --auto`, `gh pr merge --squash`, or `enablePullRequestAutoMerge` unless the user has *just now* typed something like "merge it" / "go ahead" / "approve and merge". When the next task needs a PR to land first, post a "PR #N ready to merge, awaiting your go-ahead" report and stop — do not unstick yourself by force-merging or rebasing the next branch onto the still-open one. Full rule in [Section 6 § Pitfall: Auto-Merging PRs](#pitfall-auto-merging-prs) and [Section 7a](#7a-multi-pr-workflow--when-a-pr-blocks-the-next-one).
+- **Auto-merging a PR because the next task depends on it.** Default state is "stop at green, wait for the user to press the merge button". Never run `gh pr merge --auto`, `gh pr merge --squash`, or `enablePullRequestAutoMerge` unless the user has *just now* typed something like "merge it" / "go ahead" / "approve and merge". When the next task needs a PR to land first, post a "PR #N ready to merge, awaiting your go-ahead" report and stop — do not unstick yourself by force-merging or rebasing the next branch onto the still-open one. Full rule in [Section 6 § Pitfall: Auto-Merging PRs](#6-merging) and [Section 7a](#7a-multi-pr-workflow--when-a-pr-blocks-the-next-one).
+- **`gh auth status` reports "not logged in" even though the user has `GH_TOKEN` working in their own terminal.** The token is set in `~/.bashrc` / `~/.profile` and the agent's `terminal()` runs a non-login, non-interactive shell that doesn't source those files. Don't waste a turn re-asking the user to set up auth — instead source the profile and re-run, or stash a wrapper like `/tmp/with-gh-env.sh` that does `source ~/.bashrc ~/.profile; exec "$@"`. Full recipe (detection probe + wrapper + why not to fix the global env) lives in the `github-auth` skill under "Pitfall: `GH_TOKEN` set in `~/.bashrc` / `~/.profile` but invisible to `gh`".
 - **`gh api /repos/<o>/<r>/branches` only returns protected/default branches.** Default `/branches` endpoint omits regular feature/chore branches and silently hides the branches you actually came to inspect. Always use `/git/refs/heads` to enumerate ALL branch heads:
   ```bash
   gh api repos/<owner>/<repo>/git/refs/heads \
@@ -594,7 +645,7 @@ If the user prefers a tighter loop ("just merge them all in sequence and report 
   ```
   This matters when the user asks you to "delete all non-master branches" or audit a repo — using `/branches` will report a false "only master exists" and you'll miss everything you should have deleted. Confirmed 2026-08-29 on `euv-dev/euv`: `/branches` returned only `master`, but `/git/refs/heads` revealed `chore/bump-0-17-1-2026-08-29` and `fix/macros-publish-dev-dep-2026-08-27` that had to be deleted.
 - **"Source repo" vs "fork" branch cleanup — fork is NOT in scope.** When the user says "clean up branches under org X" they mean the *source* repos under that org (`X/<repo>`), not your personal fork (`<user>/<repo>`). Forks live in the user's personal namespace and have their own branch lifecycle. Before `git push <remote> --delete <branch>`, run `git remote -v` to confirm which remote is the source of truth: typically `origin` = fork, `upstream` = source. Verified 2026-08-29: I deleted a `chore/bump-deps-*` branch on `eastspire/euv-docs` thinking it was the source, but the actual source was `euv-dev/euv-docs` (no such branch there) and the fork had inherited it from a prior PR. Cross-check the target org on GitHub (`gh api repos/<owner>/<repo>`) before deleting.
-- **Personal skill/agent repos: push directly to master, never via PR.** The user's own org (e.g. `eastspire/.agents`) has a "personal repo = direct push to master" rule. `gh repo fork <personal-repo>` fails with "cannot be forked. A single user account cannot own both a parent and fork". Always branch + commit + `git push origin master` (after a quick `git fetch origin && git reset --hard origin/master` to make sure your local `master` matches the remote). If your edits were on a different local branch with other sessions' working-tree noise mixed in, use `git stash push -m "wip-not-mine"` → `git checkout master` → `git reset --hard origin/master` → `git cherry-pick <only-your-sha>` → `git push origin master` → `git branch -D <branch>` → `git stash pop`. Cherry-pick conflicts: use `git show <sha>:<file> > /tmp/v && cp /tmp/v <file> && git add` to take your version verbatim.
+- **Personal/admin repos: push directly to master, never via PR.** As of 2026-09-05 the rule covers both `eastspire/*` (personal) AND `docs-pages/*` (admin-owned docs). `gh repo fork <personal-repo>` fails with "cannot be forked. A single user account cannot own both a parent and fork". For these repos, always commit + `git push origin master` directly (after a quick `git fetch origin && git reset --hard origin/master` to make sure your local `master` matches the remote). If your edits were on a different local branch with other sessions' working-tree noise mixed in, use `git stash push -m "wip-not-mine"` → `git checkout master` → `git reset --hard origin/master` → `git cherry-pick <only-your-sha>` → `git push origin master` → `git branch -D <branch>` → `git stash pop`. Cherry-pick conflicts: use `git show <sha>:<file> > /tmp/v && cp /tmp/v <file> && git add` to take your version verbatim. For `euv-dev`/`hyperlane-dev`/`crates-dev`/third-party, this pitfall does NOT apply — those still need branch + PR.
 
 ## Related References
 

@@ -30,18 +30,18 @@ All repos live under `~/github/<owner>/<repo>/` (per `repo-projects` user prefer
 
 ### `eastspire` GitHub organizations
 
-| Org              | Purpose                              | Admin/permission model                          |
-| ---------------- | ------------------------------------ | ----------------------------------------------- |
-| `hyperlane-dev`  | hyperlane Rust framework repos       | eastspire admin, but **fork + PR** (orgs are non-personal; rule changed 2026-08-28) |
-| `crates-dev`     | Rust crates release                  | eastspire admin, but **fork + PR**               |
-| `euv-dev`        | euv UI framework repos               | eastspire admin, but **fork + PR** (`eastspire/euv` fork exists) |
-| `docs-pages`     | Eastspire documentation site         | eastspire admin, but **fork + PR**; `docs-pages/docs` has fork disabled → Contents API flow below |
+| Org              | Purpose                              | Admin/permission model (2026-09-05)                          |
+| ---------------- | ------------------------------------ | ------------------------------------------------------------ |
+| `hyperlane-dev`  | hyperlane Rust framework repos       | eastspire admin, **fork + PR** (active maintainer outside eastspire) |
+| `crates-dev`     | Rust crates release                  | eastspire admin, **fork + PR** (active maintainer outside eastspire) |
+| `euv-dev`        | euv UI framework repos               | eastspire admin, **fork + PR** (`eastspire/euv` fork exists; active maintainer outside eastspire) |
+| `docs-pages`     | Eastspire documentation site         | eastspire admin, **direct push master** (no fork, no PR — promoted 2026-09-05; full admin team is eastspire) |
 
 ### Key repos — what lives where
 
 | Repo                                 | Owner/org            | What it is                                                | Editing rule                                                  |
 | ------------------------------------ | -------------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
-| `docs-pages/docs`                    | docs-pages           | VuePress source: `src/**/*.md`, sidebar/navbar/config.ts | **Source of truth** for the docs site. Edit here.              |
+| `docs-pages/docs`                    | docs-pages           | VuePress source: `src/**/*.md`, sidebar/navbar/config.ts | **Source of truth** for the docs site. Edit + `git push origin master` (Track 1 direct-push; no PR). |
 | `docs-pages/pages`                   | docs-pages           | Vercel build output: `*.html` + assets                    | **Do NOT edit by hand** — `Deploy from @<sha>` commits overwrite it. UI rebuilds on next deploy. |
 | `euv-dev/euv`                        | euv-dev              | The euv framework Rust source (workspace, 6 member crates) | Fork + PR — push feature branches to the `eastspire/euv` fork, PR with `--head eastspire:<branch>`. |
 | `euv-dev/euv-cli`                    | euv-dev              | Standalone CLI binary crate                               | Same as above (fork + PR).                              |
@@ -70,7 +70,7 @@ If unsure which repo a request refers to, **ask before editing** — the wrong r
 5. **PR body / commit message in English** — every public PR/issue/commit on these orgs uses English, three conventional sections (`## Summary` / `## Verification` / `## Notes`), no Chinese. Applies to commit messages too (rule extended 2026-08-27).
 6. **`gh pr edit` for GraphQL fields silently fails** when `GH_TOKEN` lacks `read:org` scope. Fall back to REST `PATCH /repos/<owner>/<repo>/issues/<N>` (PRs share the issue endpoint) to update body/title without force-push/reopen.
 
-### Standard recipe (org / third-party repo — fork-first)
+### Standard recipe — Track 2 (org / third-party repo — fork-first)
 
 ```bash
 # 1. Fork once per repo (skip when eastspire/<repo> already exists)
@@ -87,16 +87,16 @@ git push -u origin <branch>
 gh pr create --repo <owner>/<repo> --base master --head eastspire:<branch> --title "..." --body-file /tmp/pr-body.md
 ```
 
-For personal repos (`eastspire/*`): skip everything — commit directly on `master` and `git push origin master`. No fork, no branch, no PR.
+For Track 1 repos (owner ∈ {`eastspire`, `docs-pages`}): skip everything — commit directly on `master` and `git push origin master`. No fork, no branch, no PR. This applies to `eastspire/*` AND `docs-pages/*` (e.g. `docs-pages/docs`); opening a PR for any of these repos is wrong, not optional.
 
-### For large repos where `git checkout <tree>` times out
+### For large Track 2 repos where `git checkout <tree>` times out (Contents API workaround)
 
-Use the **Contents API + git refs API** flow (verified on `docs-pages/docs` — 466 files, git checkout 28+ min, Contents API <2 min):
+Use the **Contents API + git refs API** flow (last verified on `docs-pages/docs` before it was promoted to Track 1; works on any Track 2 repo where `git` is throttled — `euv-dev/euv` or `hyperlane-dev/hyperlane` if those ever get that large). It avoids git checkout entirely:
 
 1. `POST /repos/<owner>/<repo>/git/refs` — create branch from `master` SHA.
 2. For each modified file: `GET .../contents/<path>?ref=<branch>` (get current blob SHA) → `PUT .../contents/<path>` with `{message, branch, sha, content}`.
 3. For each deleted file: same shape but `DELETE` method, omit `content`.
-4. `gh pr create --base master --head <branch> ...`.
+4. `gh pr create --base master --head <branch> ...` (Track 2 only — docs-pages no longer uses this flow).
 5. Cleanup: `DELETE /repos/<owner>/<repo>/git/refs/heads/<branch>` after PR merge.
 
 The Contents API creates one commit per call; the diff is identical to a single batched git push. Rate-limit budget is 5000 req/hour per token; large file edits stay well under.
