@@ -313,6 +313,10 @@ pub struct EuvButtonProps {
 | 文档站/长页面切换主题后**一屏以下区域配色不对**（暗色模式下页面底部一大片白）                                                        | `c_app_root` 是 `height: 100%` 的视口锁定 app 壳（example 内部容器滚动）；文档站若是 document 滚动，根元素只有 1 视口高，主题 `background` 到 1 视口高度就断了。两种修法：(a) 根 class 覆盖 `height: "auto"`（保留 `min-height: "100%"`)；(b) **对齐 example：根保持 100%，内容放进 `c_app_main`/`c_mobile_main` 内部滚动容器**（euv-docs PR #9 采用，同时根治）。亮色模式白底看不出，暗色才暴露（verified 0.16.0/0.16.1, euv-docs PR #8/#9)                                                                                                       |
 | 文档站壳上的 locale 绑定文本（侧栏树/section label/品牌标题）切换语言后**不更新**，停留在旧语言                                        | 壳组件 mount 时从 route 算 locale，信号变化不会重建组件体（key 加在静态根 div 上也不订阅信号）；`Router::navigate` 异步生效，紧跟 `location.reload()` 会把导航冲掉。正确姿势：`location.set_hash(route)`（同步生效）**再 `location.reload()`**，整页重启按新 locale 重建（i18n 文档站标准行为，verified euv-docs PR #9)                                                                                                       |
 | 移动端 header/drawer 顶部间距直接写 `env(safe-area-inset-top)`（无条件信任 env）| **letterbox 浏览器会谎报 env**（VivoBrowser 类报 41px 造成"顶部大片空白"；PWA/沉浸式 WebView env 又是真值必须消费）——静态规则无法区分两种宿主。最终架构（PR #63,0.18.12）：`c_mobile_header`/`c_mobile_nav_drawer` 消费 `var(--euv-mobile-safe-top, 0px)`（**默认 0**，浏览器永远贴顶）；沉浸式宿主显式声明（`window.__EUV_IMMERSIVE__=true` 或 `<meta name="euv-immersive" content="true">`），框架 `UseEuvLayout::use_safe_area_fix` 实测 env 后把变量写到 `<html>`。页面永不直接信任 env()，由知道自己沉浸式的宿主声明（euv-app 注入点 = `src-tauri/src/cache/fn.rs` `on_page_load` → `webview.eval`，euv-app PR #4)                                                                                                                                                                                                                                               |
+| **`euv fmt` workspace clean 但 CI `cargo fmt --check` 报 diff** | 两个工具不一致：`euv fmt` 只重排 `class!`/`html!` 宏内部（macro-aware），impl 代码完全交给 `cargo fmt`。**Rust match arm 简单到能放一行时 `cargo fmt` 会压成 `Pattern => expr,` 单行**（PR #101 实际踩坑：原写多行 `Fragment(children) => { ... }` CI 不接受，必须合并成单行）。`euv fmt` 不会主动碰 impl 代码。**实战**：本地写完先用 `euv fmt` 跑一次，再跑 `cargo fmt`（如果装了）或参考最近 PR CI 风格确认 match arm 单行/多行一致性。 |
+| **patch tool 自带 rustfmt 报"let chains are only allowed in Rust 2024 or later"假错** | patch tool 自带的 rustfmt 是旧版（< 1.85），不支持 Rust 2024 `let chains` 语法。文件实际是合法的（CI 用 rustc 1.98 全过）。patch tool 输出 `lint.status: error` 不代表代码有问题——只要修改是局部的（patch 工具显示"Pre-existing lint errors — this edit didn't introduce new ones"）就放心提交。 |
+| **`match { signal }` arm 切换后，旧 tab 的 page-level `Signal<bool>` 状态幸存 → 切回 tab 时 overlay / 状态错位再现** | `match` arm 切换时 `core/src/renderer/render/impl.rs:914` 走 `render_full_replace`（整 arm DOM 子树销毁重建），但**注册在 page-level `HookContext` 里的 `Signal` 不会随之清除**——`hook_context.switch_arm`（`core/src/reactive/hook/impl.rs:24`）只清 per-arm hooks/cleanups。表现：fullscreen tab A 进入全屏 → `canvas_2d_fullscreen.set(true)`（page-level signal）→ 切到 tab B（A arm DOM 被销毁）→ 切回 A（A arm 重建）→ `c_game_container_fullscreen` overlay 重现，因为 `canvas_2d_fullscreen` signal 仍然是 `true`。**修复模式**：tab 切换处理器里**先复位所有 per-tab state signal 再 `tab.set(value)`**。例：`game_2d_on_tab_select(tab, value, fullscreen)` 在闭包最前面 `fullscreen.get_canvas_2d().set(false); fullscreen.get_web_gl().set(false); fullscreen.get_web_gpu().set(false);` 再 `tab.set(value)`。其他跨 arm 持有的 boolean / enum signal（modal-open、form-state、pending-uploads）同理。诊断：复现切 tab 后残留 UI → 在 `register_popstate_guard`/tab handler 加日志确认 signal 没复位。verified PR #104 (0.18.38)。 |
+| **fixed-aspect canvas（800×450 = 16:9）放进全屏容器后，绘制的球/精灵被拉伸成椭圆** | canvas backing buffer 是固定逻辑分辨率（`GAME_2D_CANVAS_WIDTH × GAME_2D_CANVAS_HEIGHT = 800 × 450`）。如果外层 `c_game_container_fullscreen`（`width: 100%; height: 100%; position: fixed`）直接铺满 viewport，再把 `<canvas>` 用 `width: 100%; height: 100%` 嵌进去，浏览器按 viewport 比例（如 1280×800 = 1.6:1）拉伸 16:9 的 bitmap → 球变横向椭圆。**修复：插一层 16:9 letterbox wrapper**——class 必备三件套 `aspect-ratio: "16 / 9"; width: "100%"; max-width: "100%"; max-height: "100%"; height: "auto"; display: "flex"; align-items: "center"; justify-content: "center";`，**外加 `position: "relative"`**（让 `c_game_loading_overlay` 这种 `position: absolute` 的子元素以此为定位锚点，否则会逃逸到 `c_game_container_fullscreen`）。view 里 `<div class: c_letterbox()><canvas class: c_canvas() .../></div>`，原 backing 不变（仍 800×450），浏览器均匀缩放到 letterbox。generic 模式：任何"fixed-aspect bitmap/sprite 嵌入 fluid 容器"都套这个 letterbox 包装。verified PR #104 (0.18.38, euv example game_2d/game_3d 全屏模式)。 |
 
 ## 13. 最小可运行模板
 
@@ -494,4 +498,52 @@ cd /root/projects/euv && euv fmt
 
 ## 17. 版本升级规则(用户说「升级版本」时)
 
-只改根 `Cargo.toml` 的**第一个** `version` 字段(`[package] version` 行)。`[workspace.dependencies]` 里 path-dep 的 `version` 和子 crate 的 `package.version` **一律不动** —— CI 的 `sync_workspace_version` job 会自动从根同步到全部 member。禁止全局 sed `version = "X.Y.Z"`(会误伤第三方依赖版本号)。详细版规见 `project-memory` skill 的 Version policy 节。
+euv 仓的 release bump **只改 1 个文件**(verified PR #101 + 2026-09-05 PR #148→#149/#150/#151 re-verified by user):
+**根 `Cargo.toml` 第 3 行 `[package] version = "X.Y.Z"`**。**只改一行**。
+
+CI `.github/workflows/rust.yml` 里 `sync_workspace_version` job(`if: github.event_name == 'push' && github.ref_name == 'master'`)在 master merge commit 上**自动 propagate**:
+- 6 个子 crate 各自的 `[package] version`(cli/core/engine/example/macros/ui)
+- 根 `[workspace.dependencies]` 里 6 个 path-dep 的 `version = "X.Y.Z"`
+
+PR 内 squash 后是 **1 file / +1/-1 diff**,典型。
+
+⚠️ **不要相信 §17 旧版的反向错误叙事**("必须本地手改全部 7 处")。**那个版本错的** — 2026-09-05 user 当场纠正原话："只应该升级根目录的最开头的version,其他的不应该升级,子包也不需要升级版本,流水线会升级"。当时 PR #148 主 agent 改 7 个文件后 user 立刻 reject。正确做法见下。
+
+**推荐脚本**(已验证 PR #101 + PR #151):
+
+```bash
+cd /root/github/euv-dev/euv
+NEW_VER="0.18.61"
+OLD_VER="0.18.60"
+# 只改根 Cargo.toml 的 [package] version
+sed -i "s/^version = \"$OLD_VER\"$/version = \"$NEW_VER\"/" Cargo.toml
+# 验证 git diff --stat 应该只有 1 file +1/-1
+git diff --stat
+# 期望:Cargo.toml | 2 +-
+```
+
+**不要**对 6 个子 crate `Cargo.toml` 或 `[workspace.dependencies]` path-dep 做任何 `sed`。CI 会处理。
+
+**验证清单**(PR commit 之前):
+- `git diff --stat` 输出**只有** `Cargo.toml` (根) + 1 line
+- 多任何文件 = 停下来,不要 commit,先 `git checkout HEAD -- <extra-file>`
+
+**PR 合并后验证**(CI sync_workspace_version 跑了之后):
+- `gh api repos/euv-dev/euv/contents/Cargo.toml --jq .content | base64 -d | grep '^version'`
+- 7 个 crate 都是 `X.Y.Z` (根 + 6 子)
+- master 出现 `chore: sync all package versions to X.Y.Z` 自动 commit
+
+**若 release PR 误改了 7 个文件**(历史教训,2026-09-05 PR #148):
+1. revert PR: `git revert -m 1 <merge_sha>` 在新分支 → PR → merge
+2. 重新提交**不含** Cargo.toml 改动的引擎代码 PR(用 `git cherry-pick --no-commit` + `git checkout HEAD -- */Cargo.toml`)
+3. 单独提交"只改根"的新 bump PR
+4. CI sync 会自动 propagate 0.X 版本给子 crate
+
+**千万不要全局 sed `version = "X.Y.Z"` 在所有子目录**(会误伤第三方依赖版本号,且违反铁律)。
+
+**PR 前必跑**:
+- `cargo check -p euv -p euv-core -p euv-engine -p euv-ui -p euv-example --target wasm32-unknown-unknown`(17s)
+- `euv fmt`(workspace clean;会顺手改无关注释缩进,带上)
+- `wasm-pack build example` + headless chromium 浏览器验证版本号实际渲染到页面
+
+详细版规见 `project-memory` skill 的 Version policy 节。
