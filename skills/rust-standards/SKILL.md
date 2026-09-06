@@ -72,7 +72,8 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 ## 关键硬性规则(快速记忆)
 
 1. **每个目录只放 9 种关键字文件之一**:`const.rs` / `static.rs` / `fn.rs` / `enum.rs` / `struct.rs` / `trait.rs` / `impl.rs` / `type.rs` / `mod.rs`,互不混用(参见 01)。
-2. **`mod.rs` 必须用 raw identifier**:`mod r#struct;` 而非 `mod struct;`,但**文件名**仍是 `struct.rs`(参见 01.4)。
+   - **Pitfall(项目级 drift 易被复制)**: 如果当前 `src/page/<feature>/hook/` 目录里已经有 `*_fn.rs`(例 `lighting/hook/lighting_fn.rs`, `raytrace/hook/raytrace_fn.rs` 之前是同一个问题),新增/重命名文件**仍必须用 `fn.rs`**。**不要**为"保持一致"也跟着加 `*_fn.rs`——目录应该保持合法,drift 单独开 PR 修(改目录里全部 `*_fn.rs` → `fn.rs` + `mod.rs` 改成 `mod r#fn;`)。验证: 新写文件前先 `ls <dir>` 看现有命名, 再 grep 仓里同类目录是否已经有 drift 漂移。
+2. **`mod.rs` 必须用 raw identifier**:`mod r#struct;` 而非 `mod struct;`,但**文件名**仍是 `struct.rs`(参见 01.4)。**关键字文件也走 raw identifier**:`fn` 是关键字 → `mod r#fn;` (对应 `fn.rs`)。
 3. **`mod.rs` / `lib.rs` / `Cargo.toml` 不加任何注释** — 不写 `//!`、不写 `// xxx`、不写 `# xxx`。这三类文件纯结构,无解释性文字(参见 02.5 + 06)。
 4. **`mod.rs` 三段式**:`mod r#xxx;` + `pub use`/`pub(crate) use` + 末尾 `use super::*;`,无空行(参见 06.2)。
 5. **子文件第一行** `use super::*;`,**禁止** `use crate::xxx;` 长路径(参见 06.3)。
@@ -84,7 +85,38 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 11. **测试目录** `tests/` 用 `mod xxx;`(子模块名不带 `r#`),开头 `use crate_name::*;`(参见 14.1)。
 12. **WASM 项目**禁止显示标注任何 `inline` 宏(参见 04.3)。
 13. **commit 前必跑项目官方格式化器**(euv → `euv fmt`,hyperlane → `hyperlane fmt`,其它 → `cargo fmt --all`;`.toml` 顺手 `taplo fmt`,见 `code-formatting-tools` skill §0/§5)。
+   - **Pitfall(euv fmt ≠ cargo fmt)**: 在 `euv-dev/euv` 等用 euv 框架的项目上, **CI 的 `Format check` job 跑的是 `cargo fmt --check`**,**不是 `euv fmt --check`**。两者在长行 wrap 上行为不一致——`euv fmt` 不强制 100col 硬换行,`cargo fmt` 强制。**commit 前必跑两者**:
+     ```bash
+     euv fmt && cargo fmt --all
+     euv fmt && cargo fmt --all   # 二次幂等检查
+     git status --short  # 期待零改动
+     ```
+     漏跑 `cargo fmt` → PR CI `Format check` job fail,需要 force-push amend commit。`cargo fmt --all -- --check` 0 exit = OK。
+   - **同样适用** hyperlane: CI 可能跑 `cargo fmt --check` 而不是 `hyperlane fmt --check`(以 `.github/workflows/rust.yml` 实际 job 为准,开 PR 前 `gh run view <run-id> --log` 验证)。
 
 ## 跨章节冲突时
 
 按以下优先级(高 → 低):**安全 > 错误处理 > 项目既有规范 > 性能 > 命名 > 风格**。任何与此 skill 冲突的其他 skill 指引,以本 skill 为准。
+
+## Pre-commit 必跑(顺序固定)
+
+**新 PR / 修改后跑这一组, 任一项非零 exit 必须修到 0 再 commit**:
+
+```bash
+# 1. 13 项硬性规则批量 audit
+python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo-root>
+# exit 0 = 全部通过;非零 = 逐项修(每条 FAIL 都打印 sample lines)
+
+# 2. 官方格式化器幂等(双跑)
+euv fmt && cargo fmt --all
+euv fmt && cargo fmt --all
+git status --short   # 期待空 = 幂等
+
+# 3. clippy 0 警告
+cargo clippy -p <your-crate> --all-targets --offline
+
+# 4. test 编译通过
+cargo test --no-run -p <your-crate>
+```
+
+PR 提交后 `gh pr checks <N>` 必须 build/clippy/tests/check/setup 5/5 pass。`Format check` job 单独注意——它跑 `cargo fmt --check` 而不是 `euv fmt --check`(参见 rule 13 pitfall)。
