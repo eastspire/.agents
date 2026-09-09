@@ -180,8 +180,8 @@ for fn_file in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null |
   # For each declared fn in fn.rs, find ones whose first param is &Type or &mut Type
   # for one of those types. Print "<file>:<line>: <fn> takes &(mut )<Type>".
   awk -v types="$types_in_dir" -v file="$fn_file" '
-    BEGIN { n = split(types, arr, "\n"); for (i = 1; i <= n; i++) known[arr[i]] = 1 }
-    /^\s*pub(?:\([^)]*\))?\s+(async\s+|const\s+|unsafe\s+)*fn\s+[a-zA-Z_]\w*\s*[<(]/ {
+    BEGIN {{ n = split(types, arr, "\n"); for (i = 1; i <= n; i++) known[arr[i]] = 1 }}
+    /^\s*pub(?:\([^)]*\))?\s+(async\s+|const\s+|unsafe\s+)*fn\s+[a-zA-Z_]\w*\s*[<(]/ {{
       line = $0
       # Extract fn name
       m = match(line, /fn ([a-zA-Z_][a-zA-Z0-9_]*)/, arr); if (!m) next
@@ -194,12 +194,12 @@ for fn_file in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null |
       depth = 0; in_parens = 0
       start = index(rest, "(")
       i2 = start + 1; depth = 1
-      while (i2 <= length(rest) && depth > 0) {
+      while (i2 <= length(rest) && depth > 0) {{
         c = substr(rest, i2, 1)
         if (c == "(") depth++
         else if (c == ")") depth--
         i2++
-      }
+      }}
       params = substr(rest, start + 1, i2 - start - 2)
       # First parameter token (before comma)
       p1 = params
@@ -212,11 +212,11 @@ for fn_file in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null |
       # cur is the type token (may include generics — strip <...>)
       sub(/<.*$/, "", cur)
       gsub(/[[:space:]]/, "", cur)
-      if (cur in known) {
-        printf("%s:%d: %s takes &%s — should be `impl %s { fn %s(&self) ... }` in impl.rs per §1.3.1\n",
+      if (cur in known) {{
+        printf("%s:%d: %s takes &%s — should be `impl %s {{ fn %s(&self) ... }}` in impl.rs per §1.3.1\n",
                file, NR, fn_name, cur, cur, fn_name)
-      }
-    }
+      }}
+    }}
   ' "$fn_file"
 done
 '''),
