@@ -498,6 +498,15 @@ cd /root/projects/euv && euv fmt
 
 ## 17. 版本升级规则(用户说「升级版本」时)
 
+**euv 提交铁律(user 指令 2026-09-11)**: 任何 euv 框架改动(修复/功能/重构)提交时严格按以下顺序执行,不可跳步:
+
+1. **修复/改动完成**(代码 + 本地验证: cargo check wasm / clippy / audit_rust_standards.py / cargo test --no-run)
+2. **升级小版本** — 「小版本」= patch bump(如 0.21.4 → 0.21.5),只改根 `Cargo.toml` `[package] version` 一行;子 crate 与 workspace path-dep 一律不动,CI `sync_workspace_version` 自动 propagate
+3. **`euv fmt`** — 必须跑到 0 files changed(或带上其结果)
+4. **commit / push / PR**
+
+查 master 当前版本号必用 `git show master:Cargo.toml | grep '^version'`(`git log --grep` 会混入分支独有 commit,曾导致差点 bump 到已占用版本号)。
+
 euv 仓的 release bump **只改 1 个文件**(verified PR #101 + 2026-09-05 PR #148→#149/#150/#151 re-verified by user):
 **根 `Cargo.toml` 第 3 行 `[package] version = "X.Y.Z"`**。**只改一行**。
 
@@ -532,6 +541,30 @@ git diff --stat
 - `gh api repos/euv-dev/euv/contents/Cargo.toml --jq .content | base64 -d | grep '^version'`
 - 7 个 crate 都是 `X.Y.Z` (根 + 6 子)
 - master 出现 `chore: sync all package versions to X.Y.Z` 自动 commit
+
+**CI job 行为(PR #171 实测, 2026-09-07)**:`sync_workspace_version` 在 PR 上 `status: skipping`,**只在 master push** 上跑;`publish` / `release` 在 PR 上同样 skip。`gh pr checks N --watch` 等 build/check/clippy/tests 4 项 pass 后再 merge。
+
+**sync_workspace_version 触发但可能写错 (2026-09-11 实测, PR #196 / #197)**: 在某些情况下 sync job 跑完后写回 master 的不是新版本而是**旧版本**——具体观察: PR #196 把 root `Cargo.toml` bump 到 0.21.2、merge 后, sync job 跑了并写了 `chore: sync all package versions to 0.21.1` (即把 root 从 0.21.2 又 sync 回 0.21.1)。看起来是 sync 读了 stale 的 root Cargo.toml 内容(可能是从 merge commit 触发时读到的还是 pre-bump 状态)或 sync job 自己逻辑有 bug。**修复**: 如果 merge PR #196 后 master 没有出现 `chore: sync all package versions to 0.21.2`, 就手工 commit:
+```bash
+cd /root/github/euv-dev/euv
+sed -i 's/^version = "0.21.1"$/version = "0.21.2"/' Cargo.toml cli/Cargo.toml core/Cargo.toml engine/Cargo.toml example/Cargo.toml macros/Cargo.toml ui/Cargo.toml
+# workspace.dependencies 部分 (Cargo.toml 内的 6 个 path-dep) 用 sed 替换时要避开 'compare_version = "2.0.14"' 这种非 path-dep 行 — 用 grep 锁定 path-dep 段
+git diff --stat   # 期望: 7 files changed, 14 insertions(+), 14 deletions(-) — 每个文件 +1/-1
+git commit -m "chore: bump version to 0.21.2 (fix sync regression)"
+git push origin master
+```
+CI 这次会再次 sync 一次, 写一个空的 `chore: sync all package versions to 0.21.2` 上去确认 7 个文件一致。
+
+**Bump + PR + Merge 完整序列(PR #171 验证)**:
+1. bump commit: `sed -i 's/^version = "0.20.0"$/version = "0.20.1"/' Cargo.toml` → `git diff --stat` 期望 `1 file +1/-1` → `git add Cargo.toml && git commit -m "chore: bump version to 0.20.1"`
+2. push: `git push origin fix/<branch>`
+3. PR: `gh pr create --repo euv-dev/euv --head eastspire:fix/<branch> --base master --title "..." --body-file body.md`(body 用 `--body-file` 别 `--body`,反引号被 gh 转义)
+4. 等 CI: `gh pr checks N --watch`(build/check/clippy/tests 4 项全 pass 才 merge)
+5. Merge: `gh pr merge N --squash --delete-branch --admin`
+6. 验证 sync: `git fetch euv-dev master && git log --oneline euv-dev/master -3` 应看到自己的 squash commit + 自动追加的 `chore: sync all package versions to X.Y.Z`
+7. 收尾: `git checkout --` 任何 euv fmt 误改的无关 file(常见 `ui/src/style/class/fn.rs` 注释缩进被自动改),别让 PR diff 膨胀
+
+**用户语义核对(反复踩过的坑)**:用户说「升级小版本了吗?提交 pr」时,**可能**只指 PR 而不要 bump,也可能要 bump+PR+merge。euv 项目里这两条路径互斥:**bump 后 CI 才能动 6 个子 crate;不 bump 就 PR = 子 crate 不动,违反 §17 铁律第 1 句**。在没有澄清时,默认执行「最严格」(bump+PR+merge),理由:用户已掌握 euv §17 知识,通常是有意要求全流程。
 
 **若 release PR 误改了 7 个文件**(历史教训,2026-09-05 PR #148):
 1. revert PR: `git revert -m 1 <merge_sha>` 在新分支 → PR → merge
