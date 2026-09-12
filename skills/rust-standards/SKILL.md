@@ -1,9 +1,50 @@
 ---
 name: rust-standards
-description: 'Rust 开发规范(最高优先级,与其他 skill 冲突时以此为准)。**任何涉及 Rust、Rust 代码、cargo、crate、impl、trait、derive、Result、所有权、借用、生命周期、mod.rs、lib.rs、关键字文件、raw identifier、lombok、过程宏、proc-macro、euv、hyperlane、html!、class!、ServerHook、Signal<T>、tokio、http server、wasm-pack、WebAssembly、UI framework 的任务,必须先调用 skill_view("rust-standards"),不靠 description 软触发**。互锁 skill:euv 任务必同时加载 euv-standards + euv-ui-standards;hyperlane 任务必同时加载 hyperlane-standards。适用于:新项目脚手架、现有 Rust 代码维护、PR 审查、重构、模块划分、命名、错误处理、性能优化、依赖管理、测试策略。'
+description: 'Rust 开发规范(最高优先级,与任何 skill 冲突时以此为准)。**任何写 / 改 / 审查 Rust 代码、`.rs` 文件、`Cargo.toml`、cargo 命令、euv / hyperlane / wasm / proc-macro / ServerHook / Signal 的任务,在写第一行代码 / 第一次回答之前必须 `skill_view("rust-standards")` —— 不靠 description 软触发。不加载本 skill 写出的 Rust 代码会被开发者 review 直接驳回,不得 commit / push / 提 PR**。互锁:euv 任务必同时加载 `euv-standards` + `euv-ui-standards`;hyperlane 任务必同时加载 `hyperlane-standards`。适用于:新项目脚手架、现有 Rust 代码维护、PR 审查、重构、模块划分、命名、错误处理、性能优化、依赖管理、测试策略。涵盖硬性规则:9 种关键字文件纯净 / raw identifier / mod.rs 三段式 / lib.rs 集中导入 / 显式类型 / 泛型 where / WASM 禁 inline / fmt 双幂等 / 测试放 tests/。'
 ---
 
 # Rust 开发规范
+
+## ⚠️ 强制加载声明(本节每次会话必须读)
+
+**本 skill 是 Rust 代码开发的硬性 gate。** 不读本 skill 直接写 Rust 代码 = 开发者 review 直接驳回,PR 不得合并。
+
+### 为什么这是强制的
+
+1. **9 种关键字文件纯净性**(§1.3a)、`lib.rs` 集中导入(§6.1/§6.4)、`mod.rs` 三段式(§1/§6)、泛型 `where`(§9.2)、WASM 禁 `inline`(§4.3)、fmt 双幂等(§13)—— 这些是**只有读完本 skill 才能知道**的项目级约定,**没有第二个信号源**。
+2. **漏一项就被驳回**。已实证案例:euv 仓 PR #202 全程 5 次违规被用户纠正才合入;`engine/src/renderer/impl.rs` 因 `fn cached_method_name` in `impl.rs` 触发 §1.3a review reject;fn 内 `use std::xxx;` 触发 §6.4 + clippy `unused_imports`;fn 体空行触发 §9.5。
+3. **本 skill 是 eastspire/.agents 项目的 living spec**。其他 skill 不替代。
+
+### 触发条件(满足任一即必须加载)
+
+| 任务场景 | 必须加载 |
+|---------|---------|
+| 用户说"写 Rust 代码"、"改 Cargo.toml"、"修 .rs 文件" | ✅ |
+| 用户提到 cargo / rustc / clippy / cargo fmt / cargo test | ✅ |
+| 用户提到 euv / hyperlane / html! / class! / ServerHook / Signal | ✅(互锁 `euv-standards` + `euv-ui-standards` / `hyperlane-standards`) |
+| 用户提到 wasm / wasm-pack / WebAssembly / wasm32 | ✅ |
+| 用户提到 proc-macro / 过程宏 / `#[proc_macro_derive]` / `#[proc_macro_attribute]` | ✅ |
+| 用户给一段 Rust 代码让你 review / 改 / 优化 / 重构 | ✅ |
+| 用户让你 clone / fork 一个 Rust 项目 | ✅ |
+| 你发现自己在 terminal 准备跑 `cargo ...` | ✅ |
+| **不确定是否相关** | ✅(错的代价是几 KB context,不加载的代价是 PR 被驳回) |
+
+### 加载顺序(每次新会话第一件事)
+
+1. `skill_view('rust-standards')` 加载本文件(必)
+2. 写 Rust 代码前通读 `## 关键硬性规则`(13 条)
+3. 写 Rust 代码前读对应子章节(目录结构 / mod.rs 三段式 / lib.rs 导入 / 测试位置 ...)
+4. 写完后跑 `## Pre-commit 必跑`(audit + fmt 双幂等 + clippy + test 编译)
+5. **跑完 14/14 audit + clippy 0 警告 + fmt 幂等 + 测试通过** → 才能 commit / push / 提 PR
+
+### 违反本 skill 的后果(实证)
+
+- ❌ **review reject**: maintainer / 开发者 review 时发现违规 → 打回 + 要求 fix + 重审 → 拖延 PR 合并数小时到数天
+- ❌ **clippy 红**: 漏 §6.1/§6.4 → clippy `unused_imports`;漏 §9.5 → audit 红
+- ❌ **CI fail**: 漏 fmt 双幂等 → `Format check` job fail
+- ❌ **历史教训**: euv PR #202 因未先加载本 skill,5 次违规被纠正才入仓;rust PR #148-#151 因小版本 bump 铁律未加载 spec,被 revert 重做;PR #21 fn 命名违规导致 review 拖延
+
+**结论**: 任何写 Rust 代码之前**必须**加载本 skill。**没读 = 不能写**。
 
 ## 调用时机(强制规则)
 
@@ -71,6 +112,8 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 
 ## 关键硬性规则(快速记忆)
 
+> **⚠️ 任何一条违反 = 开发者 review 驳回**。下面是 13 条项目级 hard rule,违反任一条 PR 必被打回。完整定义在 `references/` 子文件,本表是 cheat-sheet。
+
 1. **每个目录只放 9 种关键字文件之一**:`const.rs` / `static.rs` / `fn.rs` / `enum.rs` / `struct.rs` / `trait.rs` / `impl.rs` / `type.rs` / `mod.rs`,互不混用(参见 01)。
    - **Pitfall(项目级 drift 易被复制)**: 如果当前 `src/page/<feature>/hook/` 目录里已经有 `*_fn.rs`(例 `lighting/hook/lighting_fn.rs`, `raytrace/hook/raytrace_fn.rs` 之前是同一个问题),新增/重命名文件**仍必须用 `fn.rs`**。**不要**为"保持一致"也跟着加 `*_fn.rs`——目录应该保持合法,drift 单独开 PR 修(改目录里全部 `*_fn.rs` → `fn.rs` + `mod.rs` 改成 `mod r#fn;`)。验证: 新写文件前先 `ls <dir>` 看现有命名, 再 grep 仓里同类目录是否已经有 drift 漂移。
    - **Pitfall(`fn.rs` 内禁止 `type` / `enum` / `struct` / `impl` 声明)**: 新写 `compute_child_ops_plan` 时如果顺手定义 `pub(crate) enum ChildOpPlan` 在 `fn.rs` 里,违反 §1.3 关键字文件纯净性。新 enum 必须放 `enum.rs` 并通过 `mod r#enum;` + `pub use r#enum::*;` 暴露,函数文件本身只能含 `fn` 与 `pub fn`。验证:`grep -nE '^(pub |pub\(crate\) )?(struct|type|enum|trait|impl)' <file>` 应只命中注释或 doc string,代码本体 0 行。**例外**:`#[cfg(test)] mod tests { ... }` 块内的 helper `type` 别名(测试专用,不污染 production purity)不算 violation。
@@ -103,6 +146,8 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 按以下优先级(高 → 低):**安全 > 错误处理 > 项目既有规范 > 性能 > 命名 > 风格**。任何与此 skill 冲突的其他 skill 指引,以本 skill 为准。
 
 ## Pre-commit 必跑(顺序固定)
+
+**这 4 步任一非零 exit = 不得 commit / push / 提 PR。开发者 review 时必看,缺一项驳回。**
 
 **新 PR / 修改后跑这一组, 任一项非零 exit 必须修到 0 再 commit**:
 

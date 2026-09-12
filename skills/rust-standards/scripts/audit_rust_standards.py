@@ -225,6 +225,64 @@ for fn_file in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null |
   ' "$fn_file"
 done
 '''),
+    ('column-0 decl type mismatch in keyword files (R1.3a, raw-string-aware)', r'''
+cd {target}
+# For each keyword file modified by the PR, check that no column-0 decl of the
+# WRONG type lives in it (R1.3a keyword file purity).
+# Excludes WGSL shader code inside raw string literals (audit-pitfalls §18).
+for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -vE '/tests/' | grep -vE '/target/'); do
+  [ -f "$f" ] || continue
+  bn=$(basename "$f")
+  case "$bn" in
+    const.rs)   forbidden='^(pub |pub\(crate\) )?(fn |struct |enum |trait |impl |type )' ;;
+    static.rs)  forbidden='^(pub |pub\(crate\) )?(fn |struct |enum |trait |impl |type )' ;;
+    fn.rs)      forbidden='^(pub |pub\(crate\) )?(struct |enum |trait |impl |type )' ;;
+    enum.rs)    forbidden='^(pub |pub\(crate\) )?(struct |fn |impl |trait |type )' ;;
+    struct.rs)  forbidden='^(pub |pub\(crate\) )?(enum |fn |impl |trait |type )' ;;
+    trait.rs)   forbidden='^(pub |pub\(crate\) )?(struct |enum |fn |impl |type )' ;;
+    impl.rs)    forbidden='^(pub |pub\(crate\) )?(struct |enum |fn |trait |type )' ;;
+    type.rs)    forbidden='^(pub |pub\(crate\) )?(struct |enum |fn |impl |trait )' ;;
+    *) continue ;;
+  esac
+  python3 -c '
+import sys, re
+f, forbidden = sys.argv[1], sys.argv[2]
+text = open(f).read()
+lines = text.split("\n")
+in_raw = False
+delim = ""
+for i, line in enumerate(lines, 1):
+    if in_raw:
+        close_marker = chr(34) + delim
+        if close_marker in line:
+            pos = line.find(close_marker)
+            after = line[pos + len(close_marker):]
+            in_raw = False
+            delim = ""
+            if re.match(forbidden, after):
+                print("%s:%d: %s (forbidden in keyword file, after raw-string close)" % (f, i, after[:80]))
+        continue
+    m = re.search(r"r(#+)\"", line)
+    if m:
+        delim = m.group(1)
+        rest = line[m.end():]
+        close_marker = chr(34) + delim
+        cpos = rest.find(close_marker)
+        if cpos == -1:
+            in_raw = True
+        else:
+            after = rest[cpos + len(close_marker):]
+            if re.match(forbidden, after):
+                print("%s:%d: %s (forbidden in keyword file, after raw-string close on same line)" % (f, i, after[:80]))
+        pre = line[:m.start()]
+        if re.match(forbidden, pre):
+            print("%s:%d: %s (forbidden in keyword file, before raw-string)" % (f, i, pre[:80]))
+        continue
+    if re.match(forbidden, line):
+        print("%s:%d: %s (forbidden in keyword file)" % (f, i, line[:80]))
+' "$f" "$forbidden"
+done
+'''),
 ]
 
 

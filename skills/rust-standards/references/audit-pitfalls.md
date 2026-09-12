@@ -1087,3 +1087,37 @@ The lint false positive does not affect the actual compilation.
 **When the lint IS real** (e.g. genuinely missing edition upgrade or
 real syntax error): the lint output ALSO shows up in `cargo check`
 stderr. If `cargo check` exits 0, the file is fine.
+
+
+## 30. audit rule 8 (#[cfg(test)] detection) broken regex — fixed 2026-09-12
+
+**Symptom**: audit script rule 8 `grep -E "^\\+.*#\\[(test|cfg\\(test\\)\\)"` (Python format → shell escape → grep ERE) failed because `\\(` in ERE is invalid syntax. `grep` emitted `Unmatched ( or \(` to stderr and stdout was empty, so the rule always reported PASS — **false-positive PASS** even when `#[cfg(test)] mod tests` truly exists in production code.
+
+**Detection**:
+- Run audit in isolation: `python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo>`.
+- If rule 8 reports PASS but you KNOW your PR has `#[cfg(test)] mod tests` inline, audit rule 8 is broken.
+
+**Action**: rewritten rule 8 to use `grep -F "#[cfg(test)]"` (fixed string match) plus master-exception check (lines containing `// These tests live inline` explanation comment are skipped — see §14.4 master pattern).
+
+**Verified**: rule 8 now correctly reports FAIL when a new file adds inline `#[cfg(test)] mod tests` without master-exception comment.
+
+## 31. audit rule 15 (R1.3a raw-string-aware keyword purity) — added 2026-09-12
+
+**Why**: rule 1 only checks for non-keyword basename (e.g. `foo.rs` outside the 8 keyword-file names). It did NOT catch column-0 decl mismatches WITHIN keyword files (e.g. `pub(crate) enum X` declared in `struct.rs`, which is forbidden).
+
+**Detection**: rule 15 walks each keyword file modified by the PR, parses column-0 decl lines, and flags any decl whose keyword type does not match the file's allowed type. Example:
+- `fn.rs` should only contain `fn` decls → `pub(crate) enum Foo` in `fn.rs` is FAIL.
+- `struct.rs` should only contain `struct` decls → `pub(crate) enum Bar` in `struct.rs` is FAIL.
+
+**Raw-string aware**: when a column-0 `struct BallData { ... }` line appears INSIDE a `pub(crate) const GAME_2D_WEBGPU_SHADER: &str = r#"..."#;` raw string, it is a WGSL shader code, NOT a Rust decl → not flagged.
+
+**Action**: any FAIL of rule 15 in your PR means you declared a wrong-type item in a keyword file. Move the decl to the correct keyword file per §1.3a:
+- `enum Foo` → `enum.rs`
+- `struct Bar` → `struct.rs`
+- `fn baz()` → `fn.rs`
+- `impl X { ... }` → `impl.rs`
+- `trait T { ... }` → `trait.rs`
+- `type Alias = ...` → `type.rs`
+- `const FOO` / `static BAR` → `const.rs` / `static.rs`
+
+**Verified**: rule 15 catches all column-0 decl mismatches that rule 1 missed, including the historical euv master violations (PR #202 cleanup) and WGSL shader code in raw strings (correctly excluded).
