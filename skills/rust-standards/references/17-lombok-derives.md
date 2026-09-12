@@ -68,3 +68,73 @@ lombok-macros 会**额外**生成 `try_get_field` 系列方法(仅字段类型�
 - 项目优先复用**已经在依赖图中**的 `lombok-macros` 版本,避免引入多版本
 - 优先使用 `Debug`,如果某些字段无法 `Debug`, 再换成 `CustomDebug` 来替代标准 `#[derive(Debug)]`,没有实现 `Debug` 的字段需要标注 `#[debug(skip)]`
 - **不要**重复 `#[derive(Debug)]`(否则产生冲突 impl)
+
+## 17.6 Lombok 生成 setter 的两个真实陷阱(2026-09-12 euv PR #209 实测)
+
+把 `self.x = value` 改成 `self.set_x(value)` 看似一行替换,**实际有两个坑会触发编译错误**。修复它们之后 setter 路径才真能用。
+
+### 陷阱 A — setter 接收的是 Lombok 推导出的字段类型,不是调用方期望的转换类型
+
+```rust
+// SsaaCanvas.width: u32   (#[get(type(copy))])
+// Lombok 生成:
+//   pub(crate) fn set_width(&mut self, value: u32) { self.width = value }
+//
+// ❌ 错误: 把 u32 转成 f64 想"贴合字段类型外的 API"
+self.set_width(physical_width as f64);
+// → E0308: expected `u32`, found `f64`
+
+// ✅ 正确: 保持传入类型与字段声明一致,u32 直传
+self.set_width(physical_width);   // physical_width: u32
+```
+
+**根因**: Lombok 的 `set_field` 签名由字段类型 `T` 直接推导出 `fn set_field(&mut self, value: T)`,**不接受隐式转换**(虽然 Rust 允许 `as` cast,但 setter 签名是字段类型本身,cast 出的不同类型就是"expected T, found Other")。如果调用方需要不同类型,**在调用方**转换,而非 setter 内部。
+
+**例外 — `#[set(pub, type(AsRef<str>))]` / `#[set(pub, type(Into<String>))]` 这类字段注解**: Lombok 会用注解里的 `type(...)` 改 setter 接收类型。**只有字段声明上有这种注解时**,setter 才"接受另一种类型"。代码里没看到对应 `type(...)` 注解,就按字段原类型传。
+
+### 陷阱 B — `&mut self` setter 不能在同一表达式嵌套 `self.method()`
+
+```rust
+// ❌ 错误: 编译 E0499 cannot borrow *self as mutable more than once
+self.set_render_pass_descriptor_cache(Some(self.build_render_pass_descriptor(
+    &color_view, ..., depth,
+)));
+// Lombok 生成:
+//   pub fn set_render_pass_descriptor_cache(&mut self, value: Option<RenderPassDescriptorCache>)
+//
+// 问题: outer &mut self (setter) vs inner &self (build_render_pass_descriptor) 撞借用检查器
+```
+
+**✅ 正确 — 先 bind 到 local 再传 setter**:
+
+```rust
+let descriptor = self.build_render_pass_descriptor(
+    &color_view, resolve_view.as_ref(), color.clear_value,
+    effective_load_op, effective_store_op, depth,
+);
+self.set_render_pass_descriptor_cache(Some(descriptor));
+```
+
+**根因**: Lombok 的 `set_field` 是 `&mut self` 取借用,**任何在同一表达式里又对 `self` 取借用或可变借用的内嵌调用都会撞 borrow checker**(rust 2018+ NLL 也没解开)。如果 `build_*` 是 `&self` 方法,先临时变量绑定结果再传 setter 是唯一干净解。
+
+**判断准则**: 改写前先 grep Lombok 在该字段生成的 setter 签名
+```bash
+# Lombok 在 struct 字段旁插入 derive 后,生成的 set_xxx 方法会出现在同一编译单元
+grep -nE 'fn set_<field>' target/wasm32-unknown-unknown/debug/deps/*.rmeta 2>/dev/null || \
+  cargo doc --no-deps --target wasm32-unknown-unknown -p <crate>  # 找 generated docs
+```
+**实际更可靠的方式**:直接看 `impl Self { fn set_<field>(...) }` 的 `cargo check` 输出。Rust 编译器对 setter 签名有错时会把它打到 note 行,跟一遍就清楚。
+
+### 跳过 Lombok setter 的合法理由
+
+`Self::field` 是 `pub(crate)` 但 Lombok 未 derive(典型场景: generic 字段上 Lombok derive 推不出 `T: Default` 类 bound,如 euv 的 `Tween<T: Interpolable + Copy>`):
+```rust
+/// Lombok's `Data` derive is intentionally **not** applied here for the same
+/// reason as [`EngineCell`]: the derive does not propagate generic bounds, ...
+/// The accessor pairs below follow the same naming contract as the Lombok-
+/// generated ones (`get_*` / `set_*`).
+pub struct Tween<T: Interpolable + Copy> { ... }
+```
+
+这种 struct 文档会**显式说明**为何不 derive Lombok,需保留手写 accessor。在仓库里 grep `Lombok-shaped counterpart` 或 `not deriving \`Data\`` 找这种例外,不要强改 setter。
+

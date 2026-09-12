@@ -97,6 +97,7 @@ cargo fmt --all
 **关键差异**:
 - euv `html! { ... }` 内 child 缩进、`class! { ... }` 嵌套、`vars! { ... }` 缩进,`cargo fmt` 不管 —— **必须用 `euv fmt`**(真的会展开 macro)。
 - `hyperlane fmt` **只是 `cargo fmt` 的 wrapper**(hyperlane-cli v0.1.25 实测),不做 macro 展开 —— 等同直接跑 `cargo fmt`。走 `hyperlane fmt` 只是为了"用项目官方入口"这一契约,不期待 macro 内特殊行为。macro 内部要做严格对齐,需要 nightly rustfmt + `rustfmt.toml`,或手调。
+- **`hyperlane fmt` 不只对 hyperlane 框架项目生效** —— 它是 `cargo fmt --all` 的 wrapper,对**任何** Cargo 仓(包含 `crates-dev/*` 这种非 hyperlane 框架的普通 crate)都能跑。已实测 `crates-dev/lombok-macros` 仓: `hyperlane fmt` 等价 `cargo fmt`,输出"Properly formatted / N files unchanged"。如果本机装了 `hyperlane-cli`,跨框架项目**顺手用 `hyperlane fmt`** 比 `cargo fmt --all` 更省事(无需切路径),不依赖仓类型。
 - 通用 Rust 没有 macro 折行需求的项目,直接 `cargo fmt --all` 即可,不必装 euv-cli / hyperlane-cli。
 
 ## 6. 流程（commit / PR 前）

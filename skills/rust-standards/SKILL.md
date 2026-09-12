@@ -100,7 +100,8 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | 安全 / 输入验证 / 加密 | [15-security.md](references/15-security.md) |
 | 写 proc-macro crate 的额外约束 | [16-proc-macro.md](references/16-proc-macro.md) |
 | `#[derive]` 列表、lombok-macros 派生宏、字段访问 | [17-lombok-derives.md](references/17-lombok-derives.md) |
-| 裸指针字段 derive (`*mut T` / `*mut dyn Trait`)、`'static` 边界陷阱 | [17-lombok-derives.md §17.6](references/17-lombok-derives.md) |
+| Lombok 生成 setter 的两个真实陷阱(字段类型推导 / `&mut self` 借用冲突) | [17-lombok-derives.md §17.6](references/17-lombok-derives.md) |
+| 裸指针字段 derive (`*mut T` / `*mut dyn Trait`)、`'static` 边界陷阱 | [17-lombok-derives.md §17.7](references/17-lombok-derives.md) |
 
 ## 可复用模板
 

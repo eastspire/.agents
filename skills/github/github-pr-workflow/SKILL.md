@@ -1,7 +1,7 @@
 ---
 name: github-pr-workflow
 description: "GitHub PR lifecycle: branch, commit, open, CI, merge. NEVER auto-merge — agent must wait for the user to merge when downstream work depends on it. Includes fork-first path for no-write targets and tarball-to-PR recovery when only api.github.com works."
-version: 1.5.0
+version: 1.6.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -692,3 +692,97 @@ The build product repo has `*.html` only — no markdown sources, no `package.js
 - The source repo is private and you only have read access on it: same Contents-API-without-clone recipe applies (next section). You don't need clone access if the repo is small enough to PUT file-by-file.
 - The repo really is single-repo (no source sibling) but still auto-deployed: it must be a static site generator with `*.md` IN the same repo as the build output. Look for `vuepress build src` in scripts — the `src/` directory is the source, the rest is generated.
 - The repo is hand-maintained HTML with no auto-deploy (an old GitHub Pages setup): treat it like a normal repo and edit the HTML.
+
+## 7. GitHub Discussions (create / comment / close)
+
+Discussions are a separate GraphQL API surface from issues and PRs. The same `gh` + curl patterns work, but Discussions have **stricter token requirements** that trip up classic PATs even when the same token can write issues and PR comments fine.
+
+### Reading Discussions (low permission, works with classic PAT `repo` scope)
+
+```bash
+gh api graphql -f query='{repository(owner:"X",name:"Y"){discussions(first:10){nodes{number title id author{login}}}}}' | jq
+gh api graphql -f query='{repository(owner:"X",name:"Y"){discussionCategories(first:10){nodes{id name slug}}}}' | jq
+```
+
+`discussionCategories` is the canonical way to get a category ID — every returned node gives you `{id, name, slug}`. Discussion IDs (24-char `D_kwDO...` form) and category IDs (20-char `DIC_kwDO...` form) look different on purpose.
+
+### Creating a Discussion (requires `write:discussion` on the token)
+
+```bash
+# 1. Get the IDs you need
+REPO_ID=$(gh api graphql -f query='{repository(owner:"X",name:"Y"){id}}' | jq -r '.data.repository.id')
+CAT_ID=$(gh api graphql -f query='{repository(owner:"X",name:"Y"){discussionCategories(first:10){nodes{id name}}}}' | jq -r '.data.repository.discussionCategories.nodes[] | select(.name=="Show and tell") | .id')
+
+# 2. Build the mutation payload
+cat > /tmp/gql-create-discussion.json <<EOF
+{"query":"mutation(\$input: CreateDiscussionInput!) { createDiscussion(input: \$input) { discussion { id number url } } }","variables":{"input":{"repositoryId":"$REPO_ID","categoryId":"$CAT_ID","title":"My title","body":"My body"}}}
+EOF
+
+# 3. Run
+gh api graphql --input /tmp/gql-create-discussion.json
+```
+
+`gh discussion` subcommand does NOT exist — `gh discussion create` will error with "unknown command". GraphQL is the only way for the create path (the legacy REST `POST /repos/{owner}/{repo}/discussions` endpoint has been removed). The mutation schema (`CreateDiscussionInput`) requires `repositoryId`, `categoryId`, `title`, `body` — all `ID!` / `String!`.
+
+### Pitfall: classic PAT `repo` scope is NOT enough for `createDiscussion`
+
+The misleading error you'll see if you have `repo` but NOT `write:discussion`:
+
+```
+{"data":{"createDiscussion":null},
+ "errors":[{"type":"NOT_FOUND","path":["createDiscussion"],
+            "message":"Could not resolve to a node with the global id of 'DIC_...ctxQj'"}]}
+```
+
+**DO NOT interpret this as a wrong ID.** `discussionCategories` returning the same ID proves it's the right ID — the error message is GitHub's generic "you don't have permission to act on this node" response for Discussion writes. Three ways to confirm it's a scope problem and not an ID problem:
+
+1. `gh api graphql -f query='{node(id:"DIC_xxx"){... on DiscussionCategory{name}}}'` returns the **same** `NOT_FOUND` even on a pure read — so this does NOT distinguish scope from ID.
+2. `addDiscussionComment` (write) with a real 24-char discussion ID **succeeds** with the same token — so the token CAN write Discussion data, just not the `createDiscussion` mutation specifically. This is GitHub's known asymmetry: comment writes inherit from `repo` scope, but `createDiscussion` requires an additional scope.
+3. `curl -sI -H "Authorization: token $GH_TOKEN" https://api.github.com/user | grep x-oauth-scopes` shows the classic PAT scopes (e.g. `notifications, repo, workflow`). The fix is **`write:discussion`** (classic PAT) or **Discussions: Read and Write** permission (fine-grained PAT).
+
+### How to fix when you hit this
+
+```bash
+# Option A: refresh gh CLI credentials (works only if gh is using its OWN store, not an env var)
+gh auth refresh --hostname github.com --scopes write:discussion,repo,workflow
+
+# Option B: the token is set via GH_TOKEN env var — gh auth refresh refuses:
+#   "The value of the GH_TOKEN environment variable is being used for authentication.
+#    To refresh credentials stored in GitHub CLI, first clear the value from the environment."
+# → you cannot fix this from inside the agent. The user must regenerate the token at
+#   https://github.com/settings/tokens (classic) or settings/tokens?type=beta (fine-grained),
+#   then update the GH_TOKEN in this shell's environment.
+
+# Option C (last resort): tell the user to paste the body themselves. The GraphQL call is
+# the only programmatic path — there is no REST fallback. Save the body to
+# /tmp/discussion-body.md and link to https://github.com/{owner}/{repo}/discussions/new?category={slug}
+```
+
+### Commenting on an existing Discussion (lower permission than create)
+
+```bash
+# 24-char Discussion ID, e.g. "D_kwDONgmGf84Ajxf7"
+gh api graphql -f query='mutation($i: AddDiscussionCommentInput!) {
+  addDiscussionComment(input: $i) { comment { id } }
+}' -f i[discussionId]=D_kwDONgmGf84Ajxf7 -f i[body]="comment text"
+```
+
+This works with classic PAT `repo` scope alone (proven 2026-09-12 against hyperlane-dev/hyperlane).
+
+### Closing / re-opening Discussions
+
+```bash
+gh api graphql -f query='mutation($i: CloseDiscussionInput!) {
+  closeDiscussion(input: $i) { discussion { id } }
+}' -f i[discussionId]=D_kwDONgmGf84Ajxf7 -f i[reason]=RESOLVED
+
+gh api graphql -f query='mutation($i: ReopenDiscussionInput!) {
+  reopenDiscussion(input: $i) { discussion { id } }
+}' -f i[discussionId]=D_kwDONgmGf84Ajxf7
+```
+
+`reason` enum values: `RESOLVED`, `OUTDATED`, `DUPLICATE`.
+
+### When to use Discussions vs Issues
+
+Discussions are for **conversations** — announcements, Q&A, show-and-tell, ideas, polls. Issues are for **work** — bugs, feature requests with concrete acceptance criteria. A benchmark-result post, a roadmap announcement, a "how do I do X" question = Discussion. A reproducible crash with steps = Issue. Don't file benchmark scores as issues; don't file bugs as discussions.
