@@ -100,6 +100,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | 安全 / 输入验证 / 加密 | [15-security.md](references/15-security.md) |
 | 写 proc-macro crate 的额外约束 | [16-proc-macro.md](references/16-proc-macro.md) |
 | `#[derive]` 列表、lombok-macros 派生宏、字段访问 | [17-lombok-derives.md](references/17-lombok-derives.md) |
+| 裸指针字段 derive (`*mut T` / `*mut dyn Trait`)、`'static` 边界陷阱 | [17-lombok-derives.md §17.6](references/17-lombok-derives.md) |
 
 ## 可复用模板
 
@@ -109,6 +110,13 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | [templates/mod-rs.md](templates/mod-rs.md) | `mod.rs` 三段式(标准 / 简化 / 私有 / 测试 四种) |
 | [templates/sub-file.md](templates/sub-file.md) | `struct.rs` / `impl.rs` / `fn.rs` / `enum.rs` / `trait.rs` / `type.rs` / `const.rs` 七种 |
 | [templates/cargo-toml.md](templates/cargo-toml.md) | `Cargo.toml` 完整配置(lib / proc-macro / bin 三种) |
+
+## 可复用脚本
+
+| 脚本 | 用途 |
+|------|------|
+| [scripts/verify_tests_layout.sh](scripts/verify_tests_layout.sh) | 验证 §14.4 (无 inline tests) + §14.5 (无测试注释) + top-level mod.rs 无 `use super::*;`。`bash <path>/verify_tests_layout.sh <repo_root>` 即可全检。 |
+| [scripts/audit_rust_standards.py](scripts/audit_rust_standards.py) | 完整 16 条 audit 规则(覆盖 §1 / §2 / §5 / §6 / §9 / §11 / §14 / §17)。**False-positive 列表**见 `references/audit-pitfalls.md`(§1-§16 当前 17 条,新增的 §17 是 `debug/` dev-scratch subdir 的 known-noise,2026-09-12 lombok PR 实测)。 |
 
 ## 关键硬性规则(快速记忆)
 
@@ -131,6 +139,8 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 11. **测试目录** `tests/` 用 `mod xxx;`(子模块名不带 `r#`),开头 `use crate_name::*;`(参见 14.1)。**绝对禁止为测试改 API visibility**(2026-09-12 user 原话:"没有暴露的api的单测")——`pub(crate)` item = 没有测试,整块 `#[cfg(test)] mod tests` 删除,**不保留 inline**(2026-09-12 user 第二轮原话:"src里所有单测删除...如果不是pub那就忽略")。`pub` item 的测试 = 移到 `<crate>/tests/<feature>/fn.rs`,不能改 visibility 让 tests/ 看得到(详见 14.4)。**测试文件禁止任何注释**(2026-09-12 user 第三轮原话:"单测不需要任何注释")——文件头 `//!` / 每 fn `///` / fn 体内 inline `//` 一律删除,测试 fn 名字即文档(详见 14.5)。
    - **Pitfall**:`use super::*;` 与 `use crate::xxx;` 的 `super::*` / `crate::xxx` 子文件访问必须来自父模块的 `pub use` glob(sub-file 第一行 `use super::*;` 继承整个 glob),因此**禁止**子文件内部**显式 `use crate::xxx;` 或函数体内 `use std::xxx;`**,所有依赖都已在 `lib.rs` 的 `pub use std::{...}` / `pub use other_crate::xxx;` 中 re-export。**重复 import 触发 clippy `unused_imports` 警告且表明作者未掌握 lib.rs 集中导入契约**。验证:写新依赖前 `grep -E '^pub use ' <crate>/src/lib.rs` 看是否已 re-export;写新 crate-level `use` 前 `grep -rn 'use crate_name::xxx' <crate>/src/` 确认是否真无人用过。
    - **Pitfall(2026-09-12 新加,第二轮推翻):把 `pub(crate)` 改成 `pub` 让 tests/ 看得到** = review reject。`pub(crate)` = "全 crate 内可见但不出 crate",integration test 是独立 crate,本来就看不到 → **看不到 = 删掉测试,不是改 visibility,不是加 inline `#[cfg(test)] mod tests`**。user 第二轮明确"src里所有单测删除...如果不是pub那就忽略",所以 `pub(crate)` item 没有任何单元测试。算法正确性只能通过 `pub` API 的 end-to-end 测试间接覆盖。euv PR #203 实测:core/src/renderer/render/fn.rs 922 行 inline tests + engine 三个 inline tests 都已删除/迁移,迁移过程中调用 `pub(crate)` getter/const 的 3 个测试也直接删除。
+   - **Pitfall(2026-09-12 第三轮,§14.5):单测禁止任何注释**。文件头 `//!` / per-fn `///` / fn 体内 inline `//` 一律删除。**Test fn name 就是文档**,assertion message 表达预期行为。euv PR #203 实测:physics/lighting/raytracing 三个新 tests/ 文件删掉 67 行注释。audit rule 16 (`comments in test files (R14.5)`) 用 grep `^\s*//[^/]` 检测。**注意**: regex `[^/]` 表示 `//` 后下一字符不是 `/`,所以 `///` `//!` 不会命中——它们由 §14.4 (无文件头 `//!`) 和 §14.1 (无 per-fn doc) 的更早规则覆盖。详细 false-positive 列表见 `references/audit-pitfalls.md §37`。
+   - **Pitfall(2026-09-12 第三轮,user 迭代模式):`tests/` 规则被 user 三轮逐级收紧**——`没有暴露的api的单测` → `src里所有单测删除` → `单测不需要任何注释`。未来若 user 再提一轮(例如"测试 fn 不要用 snake_case" / "测试不需要 #[test]"),不要直接 patch 本轮规则,先想清楚是覆盖、推翻还是新增。**默认覆盖**:把上一轮规则的范围严格收紧,前面规则继续生效。**推翻**:把上一轮规则整体作废,新增替代。记录到 `references/audit-pitfalls.md §37` 给未来 session 看全三轮 evolution。
 12. **WASM 项目**禁止显示标注任何 `inline` 宏(参见 04.3)。
 13. **commit 前必跑项目官方格式化器**(euv → `euv fmt`,hyperlane → `hyperlane fmt`,其它 → `cargo fmt --all`;`.toml` 顺手 `taplo fmt`,见 `code-formatting-tools` skill §0/§5)。
    - **Pitfall(euv fmt ≠ cargo fmt)**: 在 `euv-dev/euv` 等用 euv 框架的项目上, **CI 的 `Format check` job 跑的是 `cargo fmt --check`**,**不是 `euv fmt --check`**。两者在长行 wrap 上行为不一致——`euv fmt` 不强制 100col 硬换行,`cargo fmt` 强制。**commit 前必跑两者**:

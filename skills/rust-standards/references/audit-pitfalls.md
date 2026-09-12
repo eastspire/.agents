@@ -1120,3 +1120,131 @@ stderr. If `cargo check` exits 0, the file is fine.
 - `const FOO` / `static BAR` → `const.rs` / `static.rs`
 
 **Verified**: rule 15 catches all column-0 decl mismatches that rule 1 missed, including the historical euv master violations (PR #202 cleanup) and WGSL shader code in raw strings (correctly excluded).
+
+## 37. `tests/` comment rules — user iteration pattern + audit rule 16 false-positive traps
+
+User went through three rounds of corrections on the same `tests/` topic, each round strictly tightening the rule. Future sessions debugging "why does audit rule 16 fire?" need to know the exact scope and the false-positive traps:
+
+### Round 1 (2026-09-12): §14.4 — no visibility widening for tests
+
+User 原话:
+> "你不应该修改模块可见性,你应该使用已有可见的api去在tests里做单测,通过已有的api覆盖,没有暴露的api的单测"
+
+So `pub(crate)` items have no tests — `#[cfg(test)] mod tests` blocks testing them must be **deleted entirely**, not moved.
+
+### Round 2 (2026-09-12): §14.4 — no inline `mod tests` at all
+
+User 原话:
+> "src里所有单测删除,有tests目录是单测的,如果单测的功能不是pub那就忽略,如果是pub就加到tests里"
+
+This nuked the prior "master-exception" exemption (§14.4 master pattern `// These tests live inline` comment as a marker). ALL inline `#[cfg(test)] mod tests` blocks are forbidden across the whole codebase. Tests for `pub` items move to `<crate>/tests/<feature>/fn.rs`; tests for `pub(crate)` items are deleted.
+
+### Round 3 (2026-09-12): §14.5 — no comments in tests
+
+User 原话:
+> "单测不需要任何注释,删除所有单测注释"
+
+Tests have zero comments — no file-level `//!`, no per-fn `///`, no fn-body inline `//`. Test fn name = documentation; assertion messages = expected behavior.
+
+### Audit rule 16 implementation + false-positive traps
+
+```bash
+# Real implementation in audit_rust_standards.py (rule 16):
+for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/tests/.*\\.rs$"); do
+  hits=$(grep -nE "^\s*//[^/]" "$f" 2>/dev/null)
+  if [ -n "$hits" ]; then
+    echo "FAIL: $f has comments:"
+    echo "$hits" | head -3
+  fi
+done
+```
+
+The regex `^\s*//[^/]` matches:
+- `// normal comment` — FAIL (correct)
+- `//path/with/slashes` — FAIL (false positive — a `//` URL fragment in a comment or string would also match, but tests shouldn't contain URL fragments anyway)
+- `/// doc comment` — does NOT match (good — the regex requires `[^/]` after `//`, so `///` becomes `//` + `/` = second char is `/`, doesn't match)
+
+Note: rule 16 does NOT separately detect `///` or `//!` — they fall under the same rule because the pattern requires the next char after `//` to NOT be `/`. So `///` and `//!` are excluded (good — they're handled separately by rule 5/§14.4).
+
+If rule 16 fires on a test file, the action is: **delete every comment line**. There are NO exemptions. Reformat test fn names if they're ambiguous; add `.clone()` to `assert_eq!` calls instead of explaining "we compare owned values". Use the assertion message parameter for any necessary clarification:
+
+```rust
+// ❌ Forbidden (any context in tests/)
+// Comment explaining the test
+#[test]
+fn foo() {
+    // inline comment
+    assert!(x);
+}
+
+// ✅ Correct: bare test, self-documenting
+#[test]
+fn foo_returns_true_when_input_is_positive() {
+    let x = compute();
+    assert!(x, "compute() must return true for positive input");
+}
+```
+
+### Top-level integration-test mod.rs `use super::*;` is invalid Rust
+
+`engine/tests/mod.rs` / `ui/tests/mod.rs` / `core/tests/mod.rs` are at the integration-test crate root — `super::*` would be "too many leading super keywords" (E0433). Rule 6 already excludes these from the trailing-`use super::*;` check. Engine / ui top-level mod.rs end with `use wasm_bindgen::JsValue;` (after any `use std::{...};`); core top-level mod.rs ends with `use std::{...};` or similar. Do not try to add `use super::*;` here.
+
+**Verified**: euv PR #203 final state, audit rule 16 PASSES with 30/30 engine tests + 0 core inline tests, all comment-stripped.
+
+## 38. CI `cargo fmt --check` is stricter than local `cargo fmt` (version skew pitfall)
+
+2026-09-12 PR #203: local `cargo fmt --all` ran idempotent (0 changed), but CI's `cargo fmt -- --check` failed on `engine/tests/mod.rs:7` because CI had a trailing blank line that local rustfmt (1.9.0-stable) didn't normalize but CI rustfmt (1.98.1) did.
+
+**Symptoms**: local idempotent, CI fails with a small diff like:
+```
+Diff in <path>/mod.rs:7:
+ use euv_engine::*;
+ 
+ use wasm_bindgen::JsValue;
+-
+ ##[error]Process completed with exit code 1.
+```
+
+**Fix**: when local `cargo fmt --all` is idempotent but CI fails, run `cargo fmt -- --check` locally (uses the same binary but the `--check` flag forces stricter comparison). If still failing in CI only, the issue is the rustfmt version skew between local stable (1.9.0-stable as of 2026-07) and CI stable (1.98.1 as of 2026-09-01).
+
+**Action**: after local `cargo fmt` is idempotent, also run `euv fmt` (if euv project) then re-check. If they diverge, manually fix the discrepancy and re-commit. PR #203 commit `d0ab4ae5` was exactly this fix — a single line removal.
+
+This is environment-dependent (rustfmt version skew) but the **workflow lesson** is durable: when local is idempotent and CI fails on fmt, don't just re-run `cargo fmt` — manually inspect the diff CI reports and apply it directly.
+
+## 17. `debug/` or other dev-scratch subdir in crate root — NOT a violation
+
+Some crates (lombok-macros is the canonical example) keep a manual
+test scratch crate in a sibling subdir like `debug/` whose contents
+include a `src/main.rs` with `fn main()` full of `assert!()` calls
+exercising new derive features. This subdir is **explicitly excluded**
+from the parent crate's `Cargo.toml`:
+
+```toml
+exclude = ["target", "Cargo.lock", "sh", ".github", "debug"]
+```
+
+It is **not** a workspace member (no `[workspace]` entry in
+`debug/Cargo.toml`'s parent). The audit script does NOT know about
+the `exclude` list and will flag it as:
+
+- **Check #1** "non-keyword prod files" — `debug/src/main.rs` is
+  reported as a production keyword-file violation.
+- **Check #7** "sub-file first line not `use super::*`" — `debug/src/main.rs:1`
+  starts with `use lombok_macros::*;` (or equivalent), but `debug/` is
+  a **standalone binary crate** with its own `[package]`, so there is
+  no `super` module to import from.
+
+Both are false positives. The fix is **not** to add `use super::*;`
+or move the file — `debug/` is a legitimate dev-only scratch crate
+that must stay outside the production compile path. When audit
+returns these two checks as FAIL and **only** these two, and a
+sibling subdir like `debug/` exists with its own `Cargo.toml`,
+verify the subdir is excluded from the parent and treat as
+informational, not as a violation to fix.
+
+Verified against `crates-dev/lombok-macros` (2026-09-12): `debug/`
+ships 7 raw-pointer test structs (`GenericPtr<T>`, `DstPtr`,
+`ConstPtr`, `OptPtr`, `OptDstPtr`, `CopyPtr`, `TuplePtr`) in
+`debug/src/main.rs`, all gated by `fn main()` assertions, run via
+`cargo run -p debug` from the subdir. Audit reports 14/16 PASS
+with these two checks as the only failures.
