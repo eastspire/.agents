@@ -73,16 +73,20 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 
 1. **每个目录只放 9 种关键字文件之一**:`const.rs` / `static.rs` / `fn.rs` / `enum.rs` / `struct.rs` / `trait.rs` / `impl.rs` / `type.rs` / `mod.rs`,互不混用(参见 01)。
    - **Pitfall(项目级 drift 易被复制)**: 如果当前 `src/page/<feature>/hook/` 目录里已经有 `*_fn.rs`(例 `lighting/hook/lighting_fn.rs`, `raytrace/hook/raytrace_fn.rs` 之前是同一个问题),新增/重命名文件**仍必须用 `fn.rs`**。**不要**为"保持一致"也跟着加 `*_fn.rs`——目录应该保持合法,drift 单独开 PR 修(改目录里全部 `*_fn.rs` → `fn.rs` + `mod.rs` 改成 `mod r#fn;`)。验证: 新写文件前先 `ls <dir>` 看现有命名, 再 grep 仓里同类目录是否已经有 drift 漂移。
+   - **Pitfall(`fn.rs` 内禁止 `type` / `enum` / `struct` / `impl` 声明)**: 新写 `compute_child_ops_plan` 时如果顺手定义 `pub(crate) enum ChildOpPlan` 在 `fn.rs` 里,违反 §1.3 关键字文件纯净性。新 enum 必须放 `enum.rs` 并通过 `mod r#enum;` + `pub use r#enum::*;` 暴露,函数文件本身只能含 `fn` 与 `pub fn`。验证:`grep -nE '^(pub |pub\(crate\) )?(struct|type|enum|trait|impl)' <file>` 应只命中注释或 doc string,代码本体 0 行。**例外**:`#[cfg(test)] mod tests { ... }` 块内的 helper `type` 别名(测试专用,不污染 production purity)不算 violation。
 2. **`mod.rs` 必须用 raw identifier**:`mod r#struct;` 而非 `mod struct;`,但**文件名**仍是 `struct.rs`(参见 01.4)。**关键字文件也走 raw identifier**:`fn` 是关键字 → `mod r#fn;` (对应 `fn.rs`)。
 3. **`mod.rs` / `lib.rs` / `Cargo.toml` 不加任何注释** — 不写 `//!`、不写 `// xxx`、不写 `# xxx`。这三类文件纯结构,无解释性文字(参见 02.5 + 06)。
 4. **`mod.rs` 三段式**:`mod r#xxx;` + `pub use`/`pub(crate) use` + 末尾 `use super::*;`,无空行(参见 06.2)。
 5. **子文件第一行** `use super::*;`,**禁止** `use crate::xxx;` 长路径(参见 06.3)。
+   - **Pitfall(lib.rs 统一导入 vs 子文件重复 import)**: 子文件已经通过 `use super::*;` 拿到父模块 `pub use std::{...}` block re-export 的所有符号,函数体内**禁止再次写 `use std::xxx::yyy;`**——`std` / 标准库集合类型(`HashMap` / `HashSet` / `Vec` / `VecDeque` / `Cow` / `Rc` 等)已在 lib.rs `pub use std::{...}` 集中导入,sub-file 直接写 `HashMap` / `HashSet` 不需要前缀。验证:写新 fn 时先 `grep -E '^pub use ' <crate>/src/lib.rs | head` 看 lib.rs 已 re-export 什么,再决定是否需要 fn 内 use。如果 fn 内仍然 `use std::xxx;` → clippy `unused_imports`(因为已经被 super::* 引入),review reject。
 6. **所有变量 / 参数 / 返回值必须显式类型**,禁止 `let items = Vec::new();`(参见 05.1)。
 7. **泛型约束必须用 `where`**,不允许 `fn f<T: Bound>()` 直接写(参见 09.2)。
+   - **Pitfall(fn 体禁止空行)**: 项目约定(§9.1 第10项)函数体内不允许出现空行(代码之间紧贴)。section break 通过注释(`// Phase 1: ...`)而非空行表达,每个独立语句紧贴上一行。例外:`#[cfg(test)] mod tests { ... }` 块内 `#[test] fn xxx` 之间的 1 行空行作为 test 分隔保留(无注释、test 紧邻时方便阅读)。**euv fmt / cargo fmt 不会自动删除 fn 内空行**,这是 manual review 项。验证:`awk '/^    fn <test_name>/{f=1} f && /^    }$/{f=0; print "---"; next} f' <file>` 看每个 fn 内是否真无空行;或写新 fn 后 `cargo fmt --check` 看是否 diff。
 8. **struct / enum 优先用 lombok-macros 派生** `Data` + `New` + `CustomDebug`,禁止手写 getter(参见 17)。
 9. **不引入新第三方依赖**优先于 `Cargo.toml` 整洁度(参见 13.1)。
 10. **proc-macro crate 必须** `[lib] proc-macro = true;`,且 `#[proc_macro_attribute]` 全在 `lib.rs` 中实现(参见 16.1)。
 11. **测试目录** `tests/` 用 `mod xxx;`(子模块名不带 `r#`),开头 `use crate_name::*;`(参见 14.1)。
+   - **Pitfall**：`use super::*;` 与 `use crate::xxx;` 的 `super::*` / `crate::xxx` 子文件访问必须来自父模块的 `pub use` glob（sub-file 第一行 `use super::*;` 继承整个 glob），因此**禁止**子文件内部**显式 `use crate::xxx;` 或函数体内 `use std::xxx;`**，所有依赖都已在 `lib.rs` 的 `pub use std::{...}` / `pub use other_crate::xxx;` 中 re-export。**重复 import 触发 clippy `unused_imports` 警告且表明作者未掌握 lib.rs 集中导入契约**。验证：写新依赖前 `grep -E '^pub use ' <crate>/src/lib.rs` 看是否已 re-export；写新 crate-level `use` 前 `grep -rn 'use crate_name::xxx' <crate>/src/` 确认是否真无人用过。
 12. **WASM 项目**禁止显示标注任何 `inline` 宏(参见 04.3)。
 13. **commit 前必跑项目官方格式化器**(euv → `euv fmt`,hyperlane → `hyperlane fmt`,其它 → `cargo fmt --all`;`.toml` 顺手 `taplo fmt`,见 `code-formatting-tools` skill §0/§5)。
    - **Pitfall(euv fmt ≠ cargo fmt)**: 在 `euv-dev/euv` 等用 euv 框架的项目上, **CI 的 `Format check` job 跑的是 `cargo fmt --check`**,**不是 `euv fmt --check`**。两者在长行 wrap 上行为不一致——`euv fmt` 不强制 100col 硬换行,`cargo fmt` 强制。**commit 前必跑两者**:
