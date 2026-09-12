@@ -117,6 +117,53 @@ cargo clippy --workspace --all-targets -- -D warnings
   - 确认是自己的改动引入的 → 修
   - 确认是预存 → **停下报告**,不要试图修
 
+### 3.4a `git stash` 干净 worktree 对照 — 万能归因工具 (2026-09-12 教训)
+
+**症状**: audit 报告 `8 FAILED` tests / `5 clippy warnings` / `3 audit rule violations`,你想知道"哪些是我引入的,哪些是 upstream/master pre-existing"。
+
+**错误的归因方式**:
+- ❌ 凭记忆:"这个 warning 看着像我代码里的" → 反复修改自己的代码 → 浪费时间
+- ❌ "master 应该也有吧"假设 → 不验证 → 改完 push 后 maintainer 说"这是 pre-existing, 请 revert"
+- ❌ 对比 `git diff origin/master HEAD` 看 warning 行号 → 但 warning 行号不一定在你的 diff 里
+
+**正确操作 — `git stash` + 干净 worktree 重测**:
+
+```bash
+# 1. 暂存你的所有改动(包括 untracked 文件),worktree 回到 master 顶端
+git stash --include-untracked
+# (此时 cargo test / cargo clippy / audit_rust_standards.py 跑的是干净的 master)
+
+# 2. 跑那个失败的命令,记录 pre-existing baseline
+cargo test --workspace 2>&1 | tee /tmp/baseline_test.log
+python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py . 2>&1 | tee /tmp/baseline_audit.log
+
+# 3. 恢复你的改动
+git stash pop
+
+# 4. 跑同一个命令,记录 your-changes result
+cargo test --workspace 2>&1 | tee /tmp/yours_test.log
+python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py . 2>&1 | tee /tmp/yours_audit.log
+
+# 5. diff 两份 log,精确数你的改动引入几个新 fail/warning
+diff /tmp/baseline_test.log /tmp/yours_test.log | head -30
+diff /tmp/baseline_audit.log /tmp/yours_audit.log | head -30
+```
+
+**判定规则**:
+- baseline 已 fail + yours 也 fail → **pre-existing,不是你的错** → 报告时标注 "pre-existing on master,verified by stash+retest" → 不要试图修
+- baseline pass + yours fail → **你的改动引入** → 必修
+- baseline fail + yours pass → 不可能(你的改动修了 pre-existing),sanity check
+
+**适用场景**(全部实测有效):
+- `cargo test --workspace` 跑出 N fails,你想知道几个是你的 → stash+retest 对比 baseline
+- `audit_rust_standards.py` 报 5 rule violations,你想知道是不是引入的 → 同上
+- `cargo clippy` 报 8 warnings,你想知道哪个是 pre-existing → 同上
+- `cargo check --workspace` 报 E0425 ambiguous glob,你想知道是不是引入的 → 同上
+
+**变体**:如果只想测某一个 file 的影响(不想 stash 全部),用 `git stash push -- <file>` 或 `git restore <file>`。但**全 stash 最可靠**,因为 PR 里多 file 改动可能互相掩盖问题。
+
+**踩坑**:stash pop 后如果有 conflict(例如你改的文件 master 上别人也改过),解决 conflict 后**重新跑完整测试套**,不要假设 stash 前后状态等价。**stash 不是原子事务**。
+
 ### 3.5 验证完成后 — Regression test (重要)
 
 ⚠️ **serde 调研的坑**: regression test 加了 `#[test]` 但用 `automod::dir!` 模式,test 函数没匹中,等于没测。
@@ -381,3 +428,80 @@ done
 ```
 
 **关键**: `qrcode` 这种第三方 line 必须用更严格的 anchor(如 `path = "<dir>"`),或手工 skip。**永远不要**在 root Cargo.toml 上做 `s/version = "OLD"/version = "NEW"/g` 全局替换。
+
+---
+
+### 10.6 CI 触发器 — 检查 `on.pull_request` 是否开启,以及 `always()` 的 gotcha
+
+> 2026-08-31 verified on euv PR #70 + PR #73。任何 Rust 项目在 fork PR 之前,先看 `.github/workflows/*.yml` 的 `on:` 段。**只配 `push: branches: [master]` 的 workflow,fork PR 不会跑 CI**——maintainer 在 merge 后才知道红绿,merge 错合就只能 revert 重开。
+
+#### 10.6.1 项目里 `pull_request` 缺失时的处理
+
+**诊断命令**:
+
+```bash
+gh pr checks N --repo owner/repo         # 0 check = PR 没触发 CI
+gh api repos/owner/repo/contents/.github/workflows/rust.yml | python3 -c "import sys, base64; print(base64.b64decode(json.load(sys.stdin)['content']).decode())" | head -20
+```
+
+**两条路径**:
+
+1. **不修 CI,merge 盲合**:对 patch bump / typo 这种低风险 PR 可接受;但用户(2026-08-31)明确说"注意github 流水线触发分支也需要改",所以**默认应该是路径 2**。
+2. **同一 PR 把 `pull_request: branches: [master]` 加进 workflow**:标准 PR change 的延伸,reviewer 看到的是 workflow + code 一起 review,后续所有 fork PR 都能跑 CI。
+
+#### 10.6.2 加 `pull_request` 后下游 job 的 `if:` 必须 `always() &&`
+
+```yaml
+# 错误示范(2026-08-31 PR #70 第一版踩坑)
+on:
+  push: { branches: [master] }
+  pull_request: { branches: [master] }
+jobs:
+  sync_workspace_version:
+    if: github.event_name == 'push' && github.ref_name == 'master'  # PR 上被 skip
+  check:
+    needs: sync_workspace_version
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && needs.sync_workspace_version.result == 'success')
+    # ↑ 缺 always(),导致 PR 上 sync_workspace_version 被 skip → needs:success() 默认
+    # 语义把 check 也 skip 掉,CI 完全不跑
+```
+
+**问题**: `needs: sync_workspace_version` 默认是 `needs: success()`。当 sync 在 PR 上被 skip 时,它的 result 是 `"skipped"`,**不满足 success**,check 也跟着被 skip——加了 `pull_request` 但 CI 还是不跑。
+
+**正确模式**:
+
+```yaml
+  check:
+    needs: sync_workspace_version
+    if: always() && (github.event_name == 'pull_request' || (github.event_name == 'push' && needs.sync_workspace_version.result == 'success'))
+    # ↑ always() 让 if: 在 upstream 不论什么结果都先评估
+    #   OR 后再决定跑不跑:
+    #   - PR: sync skipped,always() 让 check 评估 → PR 命中 → 跑
+    #   - push master: sync success → 命中 → 跑
+    #   - push master + sync fail: 'success' 不命中 → 不跑(同默认行为)
+```
+
+**推广**:任何下游 job 的 `needs:` 链里有按 `event` 条件 skip 的上游,下游的 `if:` 都必须 `always() &&`。`publish` / `release` 这种依赖 secrets 的 job 同理——它们的 `if:` 也得 `always() && push && master && all-upstream.success`。
+
+#### 10.6.3 `sync_workspace_version` 这种"push 后续 commit"的 job 的自触发边界
+
+> euv `.github/workflows/rust.yml` 的 `sync_workspace_version` job 跑 `git push` 提交一个 `chore: sync all package versions to <new>` 的 follow-up commit。如果无脑 push,这个 commit 会再触发 workflow,workflow 又跑 sync → 又 commit → 死循环。
+
+**正确做法**:job 内部用 `git diff --cached --quiet ||` 短路:
+
+```bash
+git diff --cached --quiet || git commit -m "chore: sync all package versions to ${{ needs.setup.outputs.version }}"
+git push
+```
+
+- workspace 已经一致(无需 commit)→ `git diff --cached --quiet` exit 0 → `||` 短路 → 不 commit → 不 push → 不再触发
+- workspace 不一致(需 commit)→ commit + push → 触发 run #2 → run #2 又跑 sync → 这次 diff 干净 → 不 commit → 循环止步
+
+**审计 checklist**(加 `pull_request` 之前必跑):
+
+- [ ] `on.pull_request` 存在且 `branches: [master]`
+- [ ] 任何按 event 条件 skip 的 job(典型:`sync_workspace_version` / `publish` / `release`)的所有下游 `if:` 都加 `always() &&`
+- [ ] 跑 commit-and-push 的 job 用 `git diff --cached --quiet ||` 边界
+- [ ] secrets-requiring job(`CARGO_REGISTRY_TOKEN` / `packages: write`)的 `if:` 包含 `github.event_name == 'push' && github.ref_name == 'master'`
+- [ ] 用本次 PR 自己的 push 验证一遍——open PR → 看 check runs 是否出现 → 期望 check / tests / clippy / build 4 个,publish/release 2 个 skipped
+

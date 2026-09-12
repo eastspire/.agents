@@ -61,6 +61,63 @@ grep -nE '^(pub |pub\(crate\) )?(struct|enum|trait|impl|type)' \
 # 期望: 零行(或仅注释/doc string 中的引用)
 ```
 
+### 1.3b raw-string-aware 检测 — WGSL shader 内 decl 是 false positive (2026-09-12 教训)
+
+**陷阱**:`const.rs` 经常包含 WGSL shader raw string literal:
+
+```rust
+pub(crate) const GAME_2D_WEBGPU_SHADER: &str = r#"
+struct BallData { pos_radius: vec4<f32>, color: vec4<f32>, };
+struct BallsUniforms { ... };
+fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput { ... }
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> { ... }
+"#;
+```
+
+naive grep `grep -nE '^(pub )?(struct|enum|trait|impl|type)' const.rs` 会报 **38 false positives** — 那些 `struct BallData { ... }` 是 WGSL shader code 不是 Rust 声明。
+
+**正确检测必须 raw-string aware**:
+- 跟踪 `r#"..."#` / `r##"..."##` open / close markers
+- 当 parser 在 raw string 内,**完全跳过** 关键字检测
+- parser 退出 raw string 后再恢复检测
+
+**实现模式**(Python + awk 模板,参考 `audit_rust_standards.py` 第 15 rule):
+```python
+in_raw = False
+delim = ""
+for i, line in enumerate(lines, 1):
+    if in_raw:
+        close_marker = '"' + delim
+        if close_marker in line:
+            pos = line.find(close_marker)
+            after = line[pos + len(close_marker):]
+            in_raw = False
+            delim = ""
+            # process remainder (after raw-string close)
+            if re.match(forbidden_pattern, after):
+                print(f"{f}:{i}: {after[:80]}")
+        continue
+    m = re.search(r'r(#+)"', line)
+    if m:
+        delim = m.group(1)
+        rest = line[m.end():]
+        close_marker = '"' + delim
+        cpos = rest.find(close_marker)
+        if cpos == -1:
+            in_raw = True  # multi-line raw string
+        # process pre-raw-portion for forbidden decls (in case decls are before raw string)
+        pre = line[:m.start()]
+        if re.match(forbidden_pattern, pre):
+            print(f"{f}:{i}: {pre[:80]}")
+        continue
+    if re.match(forbidden_pattern, line):
+        print(f"{f}:{i}: {line[:80]}")
+```
+
+**适用项目**:euv / hyperlane / 其他把 WGSL / GLSL / HLSL shader 嵌入 `pub(crate) const *_SHADER: &str = r#"..."#;` 的 Rust 项目。**所有 raw-string literal 内的非 Rust 代码都需要 raw-string-aware 检测**,否则 naive grep 会爆 false positive。
+
+**踩坑**:audit script rule 15 (R1.3a raw-string-aware) 实测 38 false positives → 0 false positives 后 PASS。验证方法:临时插一个 `pub(crate) struct INVALID_TEST { ... }` 到非 `struct.rs` 文件,看 audit 是否 FAIL。
+
 ## 1.4 raw identifier 命名(关键!)
 
 由于 `enum` / `impl` / `const` / `static` / `struct` / `trait` / `type` / `fn` 是 Rust 关键字,直接写 `mod enum;` 会编译失败。所有关键字文件必须在 `mod.rs` 中以 **raw identifier**(`r#xxx`)形式声明:
