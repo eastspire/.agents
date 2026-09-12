@@ -85,6 +85,20 @@ pub(crate) fn patch_children_keyed(...) {
 
 **`euv fmt` / `cargo fmt` 不会自动删除 fn 内空行**——这两个 formatter 只重排 token 间空白,不主动移除 inter-statement 空行。**review 时必须手动检查**。
 
+**⚠️ cargo fmt 反向陷阱 (2026-09-12 实测, euv PR #203):cargo fmt 有时会在 fn 体内插入空行,必须 review reject**。具体场景:rustfmt 在某些 let-pattern 后(常见于 `world.add_body(body);` 或 `body.apply_torque(...)` 之后)会自动插入一个 blank line 作 visual separator。`cargo fmt -- --check` 不会因此失败——它只检查 idempotency,只要再跑一遍结果一致就 PASS。所以 PR 在 CI 里"check 通过"不等于"符合 §9.5"。
+
+**手动校验(每个 PR commit 前必跑)**:
+```bash
+awk '
+  /pub fn |pub\(crate\) fn |^fn / && !in_fn { in_fn=1; start=NR; blanks=0; next }
+  in_fn && /^}$/ { if (blanks > 0) print FILENAME ":" start "-" NR ": " blanks " blank line(s)"; in_fn=0; next }
+  in_fn && /^$/ { blanks++ }
+  in_fn && /^[[:space:]]*\/\// { next }  # 注释行不算 break
+' $(git diff --name-only origin/master HEAD -- "*.rs" | xargs grep -lE "^(pub )?fn " | head -20)
+```
+
+任何命中都必须手动删除 blank line 后再 `cargo fmt -- --check` + commit。**不要相信 `cargo fmt -- --check` PASS = §9.5 PASS**——必须跑 awk。
+
 **检测方法**(每个 PR 改动的 fn):
 ```bash
 awk '
