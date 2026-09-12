@@ -748,26 +748,25 @@ If the rule keeps PASSing despite visible violations, check
 `r.stderr` from `subprocess.run([...])` for `grep: ...` errors — that's
 the symptom of a broken ERE.
 
-**Master-exception exemption pattern**:
+**Master-exception exemption REMOVED (2026-09-12 user 第二轮)**:
 
-Rule 8 has a built-in exemption for the inline-test master pattern
-(see `engine/src/physics/impl.rs:971` and §14.4):
+user 原话:
 
-```python
-# After fixing the grep, add the exemption check:
-git diff -U0 origin/master HEAD -- "*.rs" 2>/dev/null | grep -F "#[cfg(test)]" | grep -v "^[+][+][+] b/" | grep "^[+]" | while read line; do
-  file=$(echo "$line" | grep -oE "b/[^:]+")
-  if grep -q "// These tests live inline" "$file" 2>/dev/null; then
-    continue
-  fi
-  echo "$line"
-done | head -20
-```
+> "src里所有单测删除,有tests目录是单测的,如果单测的功能不是pub那就忽略"
 
-The marker `// These tests live inline` is the explicit signal that
-the inline placement is intentional (per §14.4) and not a violation.
-Reviewers should verify the comment actually exists at the call site
-before relying on the exemption.
+这条把 §14.4 的"master 例外 pattern"(允许 `pub(crate)` item 用 `#[cfg(test)] mod tests { ... }` + `// These tests live inline` 注释保留 inline 测试)**完全推翻**。现在的规则:
+
+- 任何 inline `#[cfg(test)] mod tests { ... }` 块 = violation,不管有没有 `// These tests live inline` 注释。
+- `pub(crate)` item 没有单元测试——算法正确性必须通过 `pub` API 的 end-to-end 测试间接覆盖。
+- `pub` item 的测试必须搬到 `<crate>/tests/<feature>/fn.rs`,不能改 visibility。
+
+**audit script rule 8 修改**:删掉 `// These tests live inline` 注释的 exemption,任何 `+#[cfg(test)]` 行都 FAIL。**euv PR #203 实测**:core/src/renderer/render/fn.rs 922 行 inline tests + engine 三个 inline tests + master 注释全部删除/迁移。
+
+**迁移目标**:
+- `pub(crate)` fn 关联的 inline 测试 → **整块删除**(不带任何注释保留)。
+- `pub` fn 关联的 inline 测试 → 搬到 `<crate>/tests/<feature>/fn.rs`,开头 `use euv_engine::*;` / `use euv_core::*;`(该 crate 的 `pub use` re-export 链)。
+
+**§14.4 文档同步**:`references/14-testing.md` 已更新,删掉"master 例外 pattern"小节,改为"`pub(crate)` item 的测试怎么办 — DELETE,不保留 inline"。
 
 ## 31. audit rule + SKILL.md rule consistency — single source of truth
 

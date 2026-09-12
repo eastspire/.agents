@@ -120,12 +120,7 @@ done
 '''),
     ('#[cfg(test)] in production', '''
 cd {target}
-git diff -U0 origin/master HEAD -- "*.rs" 2>/dev/null | grep -F "#[cfg(test)]" | grep -v "^[+][+][+] b/" | grep "^[+]" | while read line; do
-  if [[ "$line" == *"\"// These tests live inline"* ]] || grep -q "// These tests live inline" $(echo "$line" | grep -oE "b/[^:]+"); then
-    continue
-  fi
-  echo "$line"
-done | head -20
+git diff -U0 origin/master HEAD -- "*.rs" 2>/dev/null | grep -F "#[cfg(test)]" | grep -v "^[+][+][+] b/" | grep "^[+]" | grep -v "^\\+[/!]" | grep -v "^\\+\\s*\\*\\s*#\\[cfg" | head -20
 '''),
     ('long-path use crate::xxx in sub-files', '''
 cd {target}
@@ -165,6 +160,25 @@ for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep 
   [ -f "$f" ] || continue
   if grep -q "^#!\\[cfg(test)\\]" "$f"; then
     echo "$f"
+  fi
+done
+'''),
+    ('comments in test files (R14.5)', '''
+cd {target}
+# Per rust-standards §14.5 (2026-09-12 user clarification):
+# tests/ files MUST have zero comments. The test fn name is the
+# documentation; assertion messages express the expected behavior.
+# This applies to:
+#   - file-level //! headers
+#   - per-fn /// doc comments
+#   - fn-body inline // comments
+# Blank lines between #[test] fns are fine; only //-prefixed lines fail.
+for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/tests/.*\\.rs$"); do
+  [ -f "$f" ] || continue
+  hits=$(grep -nE "^\s*//[^/]" "$f" 2>/dev/null)
+  if [ -n "$hits" ]; then
+    echo "FAIL: $f has comments:"
+    echo "$hits" | head -3
   fi
 done
 '''),

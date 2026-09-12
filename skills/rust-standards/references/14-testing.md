@@ -16,7 +16,9 @@
 
 `#[derive]` 样板字段统一通过项目内的派生宏(参见 references/16-lombok-derives.md)生成 getter/setter / Debug / Display,不要手写 `impl Server { pub fn get_field(&self) -> &Field { &self.field } }`。
 
-## 14.4 单测必须在 `tests/` 目录里;不允许为测试改 API 可见性
+## 14.4 单测必须在 `tests/` 目录里;**绝对禁止**为测试改 API 可见性
+
+### 默认形态:integration test under `tests/`
 
 **硬性规则**:**所有单测文件必须放在 `<crate>/tests/` 目录下**(子目录按职责命名,如 `tests/renderer/`, `tests/vdom/`),**禁止**以下写法:
 
@@ -35,52 +37,172 @@ mod tests {
 }
 ```
 
-**禁止理由**:
+**默认理由**:
 - `tests/` 目录是独立的 test crate,**编译单元独立**,**运行速度更快**(只 rebuild tests crate 时不必 rebuild lib crate 的 test artifacts)。
 - `tests/<sub>/` 是项目惯例,**新加入的 contributor 知道去哪里找测试**。
 - `#[cfg(test)] mod tests { ... }` 把测试和 production 混在同一个 file 里,大型 fn file 会膨胀到 1000+ 行,**review diff 难以读**。
 - 项目目录的"production/test"边界靠 file path 体现,**不能依赖 `#[cfg(test)]` 编译器 attribute** 作为 boundary marker。
 
-**API 可见性铁律**:**不允许为测试改 API 可见性**。具体含义:
+### API 可见性铁律(2026-09-12 user 明确):**绝对禁止为测试改 visibility**
+
+具体含义:
 
 ```rust
 // ❌ 禁止:为了 integration test 能调到,把 pub(crate) 改成 pub
 pub fn compute_plan() -> Vec<Plan> { ... }  // 原本是 pub(crate)
 
-// ❌ 禁止:为了测试,把 private fn 升级成 pub(crate)
+// ❌ 禁止:为了 tests/ 能 import,在 lib.rs 加 pub use re-export
+pub use renderer::render::compute_plan;     // 原本没有这条
+
+// ❌ 禁止:为了测试,把 private fn 升级成 pub(crate) 或 pub
 pub(crate) fn internal_helper() { ... }  // 原本是 fn
 ```
 
-**理由**:
-- 项目公共 API 是**对外契约**,**测试是内部 consumer**。改可见性让生产 API 表面积变大,**外部用户可能调用到不该调的内部 helper**,破坏封装。
-- `pub(crate)` 已经包含整个 crate 的可见性,如果连 crate 内 integration test 都看不到 → 那说明**应该把这个 fn 也搬到 lib.rs 的 `pub use {r#xxx::*}`** 暴露链上,而不是把 visibility 改成 `pub`。
-- 私有 helper(默认 `fn`)如果需要被测试访问,正确做法是**让它通过正常的 public API 间接触达**,或者在 production code 增加一个**真正的 public wrapper** 而不是简单改 visibility。
+**user 原话(2026-09-12)**:
+> "你不应该修改模块可见性, 你应该使用已有可见的api去在tests里做单测, 通过已有的api覆盖, **没有暴露的api的单测**。"
 
-**唯一例外**(master 现有 pattern,记录在 `engine/src/physics/impl.rs:971-975` 注释里):
+**推理**:
+- 项目公共 API 是**对外契约**,**测试是内部 consumer**。改 visibility 让生产 API 表面积变大,**外部用户可能调用到不该调的内部 helper**,破坏封装。
+- `pub(crate)` 已经包含整个 crate 的可见性,如果连 crate 内 integration test 都看不到 → 那说明**这个 fn 本来就不该被测试**(它是 implementation detail,不是 stable contract),**正确做法是删掉这个测试,而不是改 visibility**。
+- 没有暴露的 API = 没有针对它的单测(测试 = 通过已暴露 API 验证行为,不是 direct white-box inspection)。
 
-> "These tests live inline (rather than under `engine/tests/`) because the `physics` module does not yet `pub use r#impl`, so external tests cannot reach methods like `step()` or `apply_torque()`. Once the module is reorganised to expose impls publicly, these can move to an integration test target alongside `input/fn.rs` and `webgpu/fn.rs`."
+### `pub(crate)` item 的测试怎么办 — **DELETE,不保留 inline**(2026-09-12 user 终极规则)
 
-如果 `tests/<sub>/fn.rs` 内的测试**当前无法访问**任何 `pub(crate)` items(因为所在 module 未 `pub use r#xxx`),**可以临时**用 `#[cfg(test)] mod tests { ... }` inline 在 production file 顶部,但**必须**加这个 master 风格的注释解释"为何暂未搬" + 给出 future refactor 计划。
+user 原话(2026-09-12 第二轮明确):
 
-**新加的 PR 不允许 inline `#[cfg(test)] mod tests`**:必须先通过 `lib.rs` 的 `pub use {r#xxx::*}` 暴露 module,然后写 `tests/<sub>/fn.rs`。
+> "src里所有单测删除,有tests目录是单测的,如果单测的功能不是pub那就忽略,如果是pub就加到tests 里严格遵守规范"
 
-**检测**(每个 PR 改动的 sub-file):
+具体含义:
+
+```rust
+// ❌ 禁止:为 pub(crate) item 保留 inline #[cfg(test)] mod tests
+pub(crate) fn compute_plan() -> Vec<Plan> { ... }
+
+#[cfg(test)]
+mod tests {
+    // 即便加了 master 风格注释解释"为何不能搬到 tests/",
+    // 这块 inline 测试也必须删除,不能保留
+}
+```
+
+**最终规则**:
+- `pub(crate)` fn / enum / struct 的测试 → **删掉整个 `#[cfg(test)] mod tests { ... }` 块**,不留任何 inline 测试。
+- `pub` fn / enum / struct 的测试 → 移到 `<crate>/tests/<feature>/fn.rs` + `<crate>/tests/<feature>/mod.rs`(`use euv_engine::*;` / `use euv_core::*;`),不能改 visibility 让 inline test 看得见。
+- 即便某个 `pub(crate)` 算法非常关键、值得 unit test → **也不能加 inline 测试**,**算法正确性必须通过 `pub` API 的 end-to-end 测试间接验证**。
+
+**euv PR #203 实测(2026-09-12)**:
+- `core/src/renderer/render/fn.rs` 整块 922 行 inline 测试(测 `compute_child_ops_plan` + `lis_indices`,都是 `pub(crate)`)→ **整块删除**。
+- `engine/src/physics/impl.rs` 5 个 inline tests → 4 个 pub-only 测试移到 `engine/tests/physics/fn.rs`,1 个调用 `pub(crate)` getter `get_inverse_inertia` 的测试 → **删除**(没改 visibility)。
+- `engine/src/lighting/impl.rs` 6 个 inline tests → 5 个全部移到 `engine/tests/lighting/fn.rs`(全 pub),1 个调用 `pub(crate)` const 的测试 → **删除**。
+- `engine/src/raytracing/impl.rs` 5 个 inline tests → 4 个移到 `engine/tests/raytracing/fn.rs`,1 个调用 `pub(crate)` const `RAYTRACE_DEFAULT_MAX_BOUNCES` 的测试 → **删除**。
+
+**原"master 例外 pattern"已被 user 推翻**:14.4 之前文档说"可以保留 inline + master 风格注释",**user 现在不允许这个例外**。任何 inline `#[cfg(test)] mod tests` 块 = review reject,不管有没有注释。
+
+**检测脚本**(`scripts/audit_rust_standards.py` rule 8 + 新加的 rule 15):
+
+### 检测(每个 PR 改动的 sub-file)
+
 ```bash
 # 任何 + 行包含 #[cfg(test)] mod tests { 是 violation
 git diff -U0 origin/master HEAD -- '*.rs' | grep -E "^\+.*#\[cfg\(test\)\]"
 # 期望: 零行(注释 / 文档里的引用不算)
 
+# visibility 收紧变更检测(2026-09-12 加)
+# 反向:PR 是否把 fn/enum/struct 的 visibility 从 private 升级到 pub(crate)/pub
+# 或在 lib.rs / mod.rs 加了 pub use re-export 用于 tests/ 集成测试?
+git diff -U0 origin/master HEAD -- '*.rs' | grep -E "^\+.*pub fn |^\+.*pub\(crate\) fn |^\+.*pub enum |^\+.*pub\(crate\) enum |^\+.*pub use " | grep -v "^\+.*pub use std::" | grep -v "^\+.*pub use crate::"
+# 然后人工 review:每条都必须是 production API surface 调整,**禁止**为测试调整
+
 # master 例外 pattern (inline tests with explanatory comment):
 git grep -B 3 "fn .*() {" -- '*.rs' | grep "tests live inline"
-# 期望: 0..N 行(master 已有 4 处,新 PR 不应再加)
+# 期望: 0..N 行(master 已有 N 处,新 PR 加 inline 必须 append 一条)
 ```
 
-**Master 当前 inline `mod tests` 列表**(2026-09-12 检查):
-- `engine/src/physics/impl.rs:971` — 解释"physics module 未 pub use r#impl"
-- `engine/src/lighting/impl.rs` — 同样模式
-- `engine/src/raytracing/impl.rs` — 同样模式
-- `core/src/renderer/render/fn.rs` (PR #202 新加) — **没有解释注释**(违规)
+### Master 当前 inline `mod tests` 列表(2026-09-12 PR #203 后)
 
-**新 PR 要么**:
-1. 把测试搬到 `<crate>/tests/<sub>/fn.rs` + 在 lib.rs 加 `pub use r#xxx::*;` 让 module 暴露(推荐路径)。
-2. 如果 (1) 不可行(其他约束),用 inline `#[cfg(test)] mod tests` 但**必须**加 master 风格注释解释 + 写明 future refactor 路径。
+所有 inline `#[cfg(test)] mod tests` 都已删除或迁移到 `tests/`:
+
+- `engine/src/physics/impl.rs:971` — inline tests 已迁到 `engine/tests/physics/fn.rs`(2026-09-12 PR #203)
+- `engine/src/lighting/impl.rs` — inline tests 已迁到 `engine/tests/lighting/fn.rs`(2026-09-12 PR #203)
+- `engine/src/raytracing/impl.rs` — inline tests 已迁到 `engine/tests/raytracing/fn.rs`(2026-09-12 PR #203)
+- `core/src/renderer/render/fn.rs` (PR #202 + PR #203 inline) — inline tests 已删除(测 pub(crate),按 §14.4 不保留,2026-09-12 PR #203)
+
+## 14.5 单测不需要注释(2026-09-12 user 明确)
+
+### 铁律:测试 fn 内禁止任何 `///` / `//!` / `//` 注释
+
+测试文件的代码全部裸写,不需要任何文档或内联解释。**Test fn name 就是文档**,assertion 表达意图。任何注释都是冗余:
+
+```rust
+// ❌ 禁止:文件头 //! 注释
+//! Integration tests for the 3D physics step pipeline.
+//!
+//! Moved from `engine/src/physics/impl.rs` per rust-standards §14.4.
+//! These tests exercise only `pub` items reachable via `use euv_engine::*;`.
+
+// ❌ 禁止:per-fn /// 注释
+/// Regression test for the bug where `RigidBody3D::apply_torque`
+/// accumulated torque into `torque_accumulator` but
+/// `PhysicsWorld3D::step()` only zeroed it without ever converting it
+/// into angular velocity.
+#[test]
+fn step_applies_torque_to_3d_angular_velocity() { ... }
+
+// ❌ 禁止:fn 体内 inline `//` 注释
+#[test]
+fn step_applies_torque_to_3d_angular_velocity() {
+    let mut body = ...;
+    // Default inertia = mass (1.0) so inverse_inertia == 1.0;
+    // applying torque (0, 0, 2) for a 1 s step should give omega == (0, 0, 2).
+    body.apply_torque(...);
+}
+```
+
+### ✅ 正确:裸测试
+
+```rust
+use euv_engine::*;
+
+const EPSILON: f64 = 1e-9;
+
+#[test]
+fn step_applies_torque_to_3d_angular_velocity() {
+    let mut world: PhysicsWorld3D = PhysicsWorld3D::default();
+    let mut body: RigidBody3D = RigidBody3D::new_dynamic(1, Vector3D::new(0.0, 0.0, 0.0));
+    body.apply_torque(Vector3D::new(0.0, 0.0, 2.0));
+    world.add_body(body);
+    world.step(1.0);
+    let omega: Vector3D = world.get_body(1).unwrap().get_angular_velocity();
+    assert!(omega.get_x().abs() < EPSILON);
+    assert!(omega.get_y().abs() < EPSILON);
+    assert!((omega.get_z() - 2.0).abs() < EPSILON);
+    world.step(1.0);
+    let omega_after: Vector3D = world.get_body(1).unwrap().get_angular_velocity();
+    assert!((omega_after.get_z() - 2.0).abs() < EPSILON);
+}
+```
+
+### 适用范围
+
+- **文件头 `//!` 模块注释**:禁止(包括解释 §14.4 迁移来源的注释)
+- **每个测试 fn 的 `///` doc comment**:禁止(包括解释 regression 原因的注释)
+- **fn 体内 inline `//` 注释**:禁止(包括解释测试逻辑或计算来源的注释)
+- **空白行做 section 分隔**:允许(`#[test]` 之间用空行分组)
+
+### 检测
+
+pre-commit 跑下面的 grep,任何命中都不通过:
+
+```bash
+# 检查所有 tests/*.rs 文件 + tests/**/*.rs 内是否有注释
+git diff origin/master HEAD -- "*.rs" | grep -E "^\+.*tests/" | grep -E "^\+.*//" | grep -v "^\+.*//.*//.*//"
+# 更直接的方式:
+for f in $(git diff --name-only origin/master HEAD -- "*.rs" | grep -E "/tests/.*\\.rs$"); do
+  # 检查文件内是否有注释行(以 // 开头的行,排除 use 行)
+  if grep -nE "^\s*//[^/]" "$f" 2>/dev/null | grep -v "^\s*//!" | grep -v "^\s*/// " | grep -v "^\s*use "; then
+    echo "FAIL: test file has inline // comments: $f"
+  fi
+done
+```
+
+更简单的等价规则:**测试文件中任何 `//` 开头的行都不允许**(除了上面 sample 中 fn 体内展示的禁止用例——也就是全部禁止)。`///` `//!` 文件级 doc 全部禁止,fn 体内 inline 全部禁止。
