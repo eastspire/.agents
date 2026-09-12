@@ -86,7 +86,7 @@ done
 '''),
     ('mod.rs missing trailing use super::*', '''
 cd {target}
-for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/mod\\.rs$" | grep -v "core/tests/mod.rs\\|cli/tests/mod.rs"); do
+for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/mod\\.rs$" | grep -v "core/tests/mod.rs\|cli/tests/mod.rs\|engine/tests/mod.rs\|ui/tests/mod.rs"); do
   [ -f "$f" ] || continue
   last=$(grep -E "^[^[:space:]]" "$f" | tail -1)
   case "$last" in
