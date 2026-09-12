@@ -121,6 +121,8 @@ The app runs **edge-to-edge immersive** (do NOT disable it — the page genuinel
 
 **Rule: the page never trusts `env()` directly; only hosts that know they are immersive declare it.**
 
+**Inset dispatch pitfall (2026-09-12, PR #6)**: 在 WebView 上 `setOnApplyWindowInsetsListener` 会**替换** Chromium 自己的 `onApplyWindowInsets`（该实现负责把系统栏 inset 喂给页面 CSS `env(safe-area-inset-*)`）。listener 里直接 `return insets` = 页面 env() 全变 0 → 所有 safe-area 探针测出 0 → mobile header 吸顶。**必须 call-through**：listener 末尾 `webView.onApplyWindowInsets(insets)` 返回其结果（观察的同时不阻断分发）。同理，发给页面 JS 的 inset 值要除 `displayMetrics.density`（Android inset 是物理像素，CSS var 是 CSS px），WebView layoutParams 的 margin 才用物理像素。
+
 ## Log (`src-tauri/src/log/`)
 
 Thin wrapper over `tauri-plugin-log` with custom macros (`log/macros.rs`). Call sites use:
