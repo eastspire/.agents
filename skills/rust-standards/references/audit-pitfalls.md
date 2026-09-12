@@ -563,3 +563,117 @@ audit to the PR being reviewed, not the entire branch.
 - Build the project baseline from `git show master:<file>` samples.
 - Report findings with the project's actual prefix conventions,
   not generic Rust style rules.
+
+## 27. fn-body `use std::xxx;` re-importing symbols already in lib.rs `pub use std::{...}` — REAL violation
+
+Sub-files inherit `use super::*;` which globs every symbol re-exported
+by the parent `mod.rs` (which in turn re-exports from `lib.rs`'s `pub
+use std::{...}` block). If a sub-file's function body adds a redundant
+`use std::collections::{HashMap, HashSet};` (or any std / project
+symbol already exposed via the chain), rustc emits a compile error
+(unambiguous glob) **or** clippy fires `unused_imports` — both are
+review-blocking.
+
+**Concrete pattern (PR #202, euv keyed-diff planner)**:
+- Before: `fn.rs::compute_child_ops_plan` opened with
+  `use std::collections::{HashMap, HashSet};` even though `lib.rs` line
+  18 has `pub use std::collections::{HashMap, HashSet, VecDeque};`.
+- After: remove the in-fn `use`; sub-file accesses `HashMap` /
+  `HashSet` directly via the `use super::*;` chain.
+
+**Detection rule**:
+- Before committing a sub-file, grep the file body for any `use` line
+  that re-imports a symbol already in `lib.rs`'s `pub use` block:
+  ```bash
+  grep -nE '^    use |^        use ' <crate>/src/<sub>/fn.rs | grep std
+  ```
+  Every hit is a candidate for removal.
+- Audit script cannot statically detect this (it doesn't model which
+  symbols lib.rs re-exports); review manually.
+
+**NOT a violation**:
+- `use std::collections::HashMap;` in `lib.rs` itself (the entry point
+  — no super::* above).
+- `use std::path::PathBuf;` in a `fn.rs` if `PathBuf` is **not** in
+  lib.rs's `pub use std::{...}` block.
+- `#[cfg(test)] mod tests { use super::*; use std::time::Instant; }`
+  if the test needs `Instant` and lib.rs doesn't re-export it.
+
+## 28. `pub(crate) enum` / `pub(crate) type` declared inside `fn.rs` — REAL violation (§1.3 keyword purity)
+
+`fn.rs` is one of the 9 keyword-only files (§1.3). It accepts only
+`fn` declarations + free functions. New types (`pub(crate) enum
+ChildOpPlan`, `pub(crate) struct FooBar`, `pub(crate) type MyAlias =
+...`, `impl X for Y`) declared directly inside `fn.rs` violate §1.3
+purity and the audit script's category 1 (`non-keyword prod files`)
+won't catch it because the file basename **is** `fn.rs`.
+
+**Concrete pattern (PR #202)**:
+- Before: `core/src/renderer/render/fn.rs` contained
+  `pub(crate) enum ChildOpPlan { ... }` inline with `lis_indices` and
+  `compute_child_ops_plan`.
+- After: move `ChildOpPlan` to a new `core/src/renderer/render/enum.rs`
+  (first line `use super::*;`), declare it in `mod.rs` as
+  `mod r#enum;` + `pub(crate) use {r#enum::*};` (§6.2 strict three-
+  segment).
+
+**Detection rule**:
+- Before declaring any new type / impl / trait in a sub-file, check
+  the file's keyword by basename:
+  `const.rs` → only const; `static.rs` → only static; `fn.rs` → only
+  fn; `enum.rs` → only enum; `struct.rs` → only struct; `trait.rs` →
+  only trait; `impl.rs` → only impl; `type.rs` → only type alias.
+- `grep -nE '^(pub |pub\(crate\) )?(struct|type|enum|trait|impl)' <file>`
+  should return zero matches (comments / doc strings excepted).
+- `fn.rs` and `struct.rs` are the most common offenders because they
+  get used as "grab-bag" files; resist the temptation.
+
+**NOT a violation**:
+- `type TestKeyList = Vec<Option<&'static str>>;` inside
+  `#[cfg(test)] mod tests { ... }` — test-module-only type alias
+  doesn't pollute the file's production purity.
+- Any keyword file that contains only its declared keyword (e.g.
+  `enum.rs` containing only `pub(crate) enum Foo { ... }`).
+
+## 29. Blank lines inside fn bodies — REAL violation (§9.1 item 10)
+
+`rust-standards/references/09-follow-existing.md` §9.1 item 10
+explicitly forbids blank lines inside function bodies. Section
+breaks are expressed by comment lines (`// Phase 1: ...`,
+`// Pass 3: emit Remove for ...`), not by blank lines. The previous
+implementation style of "blank line then comment header then code"
+does not match this project's master convention.
+
+**Concrete pattern (PR #202)**:
+- Before: comment blocks inside `patch_children_keyed` were separated
+  by single blank lines (line 718 was the only true blank inside the
+  fn body — between comment block and code).
+- After: blank line removed; `// OPT 16: ...` comment sits flush
+  against the previous code line.
+
+**Detection rule**:
+- For every `pub fn` / `pub(crate) fn` / `fn` body in a PR's diff,
+  walk from the `)` opening brace to the matching `}` and count blank
+  lines (`^$`). Each blank is a §9.1 violation.
+- A quick awk one-liner:
+  ```bash
+  awk '
+    /pub fn |pub\(crate\) fn |^fn / && !in_fn { in_fn=1; start=NR; blanks=0; next }
+    in_fn && /^}$/ { if (blanks > 0) print FILENAME ":" start "-" NR ": " blanks " blank line(s) in fn body"; in_fn=0; next }
+    in_fn && /^$/ { blanks++ }
+    in_fn && /^\s*\/\// { next }  # comment lines don't count as breaks
+  ' <file>
+  ```
+- `euv fmt` and `cargo fmt` do **not** auto-remove fn-body blanks
+  (they only format whitespace around tokens, not inter-statement
+  spacing inside a block). Review manually.
+
+**NOT a violation**:
+- Blank lines **between** `#[test] fn a() { ... }` and `#[test] fn b() { ... }`
+  inside `#[cfg(test)] mod tests { ... }` — test separators are
+  idiomatic.
+- Blank lines **between** free functions at file scope (after the
+  closing `}` of fn A and before the doc comment of fn B) — that
+  space separates top-level items, not fn bodies.
+- Blank lines inside struct / enum literals (e.g. between struct
+  fields with explicit visual grouping).
