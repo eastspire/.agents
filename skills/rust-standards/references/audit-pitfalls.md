@@ -677,3 +677,139 @@ does not match this project's master convention.
   space separates top-level items, not fn bodies.
 - Blank lines inside struct / enum literals (e.g. between struct
   fields with explicit visual grouping).
+
+## 30. audit script rule 8 broken regex — silent false-positive (audit-pitfalls #10's hidden bug)
+
+`audit_rust_standards.py` rule 8 ("`#[cfg(test)]` in production", R14.5)
+historically had a broken ERE regex that made the rule silently PASS
+even when real inline `#[cfg(test)] mod tests { ... }` violations
+existed in the diff.
+
+**The bug** (pre-2026-09-12):
+
+```python
+('#[cfg(test)] in production', '''
+cd {target}
+git diff -U0 origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "^\\+.*#\\[(test|cfg\\(test\\)\\)" | head -20
+'''),
+```
+
+The Python triple-quoted string is fed through `.format(target=target)`
+(which preserves backslashes literally) and then handed to bash via
+`subprocess.run(['bash', '-c', cmd])`. After both escape layers, grep
+saw a malformed ERE with unmatched parentheses and printed
+`grep: Unmatched ( or \\(` to stderr while r.stdout stayed empty — the
+rule printed "PASS: 8. #[cfg(test)] in production" because the script
+counts `r.stdout` lines, not stderr.
+
+**Why this matters**:
+
+- The rule was supposed to catch inline `#[cfg(test)] mod tests` per
+  §14.4 (single-tests must live in `tests/` directory, not inline).
+- Anyone reading "14/14 PASS" thought their inline tests were
+  compliant when in fact the audit was failing silently.
+- Rule 4 ("#[test] in production", separate grep) had the same
+  escape-layer bug for a different regex — fixed in the same pass.
+
+**The fix** (2026-09-12):
+
+Replace `grep -E <regex>` with `grep -F <literal>` whenever the rule
+needs to match a fixed Rust token:
+
+```python
+('#[cfg(test)] in production', '''
+cd {target}
+git diff -U0 origin/master HEAD -- "*.rs" 2>/dev/null | grep -F "#[cfg(test)]" | grep -v "^[+][+][+] b/" | grep "^[+]" | head -20
+'''),
+```
+
+`grep -F` interprets the pattern literally — no ERE parsing, no
+parentheses/backslash collision. The `grep -v "^[+][+][+] b/"` strips
+the diff "+++ b/path" header lines so only actual `+` content lines
+remain.
+
+**Detection when adding a new audit rule**:
+
+When you write a new `CHECKS.append((name, shell_template))` block,
+before committing:
+
+1. Run the rule directly in a shell with the same template format to
+   verify it actually emits output when a violation exists:
+   ```bash
+   cd <repo-root>
+   <paste the shell_template body, replacing {target} with the path>
+   ```
+2. Verify the rule FAILS (prints hits) when the diff contains a
+   violation, and PASSES when the diff is clean.
+3. **Never** trust "PASS" until you have manually confirmed a known
+   violation triggers "FAIL".
+
+If the rule keeps PASSing despite visible violations, check
+`r.stderr` from `subprocess.run([...])` for `grep: ...` errors — that's
+the symptom of a broken ERE.
+
+**Master-exception exemption pattern**:
+
+Rule 8 has a built-in exemption for the inline-test master pattern
+(see `engine/src/physics/impl.rs:971` and §14.4):
+
+```python
+# After fixing the grep, add the exemption check:
+git diff -U0 origin/master HEAD -- "*.rs" 2>/dev/null | grep -F "#[cfg(test)]" | grep -v "^[+][+][+] b/" | grep "^[+]" | while read line; do
+  file=$(echo "$line" | grep -oE "b/[^:]+")
+  if grep -q "// These tests live inline" "$file" 2>/dev/null; then
+    continue
+  fi
+  echo "$line"
+done | head -20
+```
+
+The marker `// These tests live inline` is the explicit signal that
+the inline placement is intentional (per §14.4) and not a violation.
+Reviewers should verify the comment actually exists at the call site
+before relying on the exemption.
+
+## 31. audit rule + SKILL.md rule consistency — single source of truth
+
+Adding a new rust-standards rule requires updating FOUR places
+consistently:
+
+1. **SKILL.md** (`key-rules` pitfall callout) — the rule itself.
+2. **references/<topic>.md** — the long-form justification + examples.
+3. **references/audit-pitfalls.md** — false-positive / false-negative
+   catalog if applicable.
+4. **scripts/audit_rust_standards.py** — mechanical enforcement
+   (when a regex/static check can express it).
+
+**Skipping any of the four** creates a knowledge gap that bites future
+sessions. Concrete example from this session:
+
+- §14.4 "single-tests in tests/ only" was added to `references/14-testing.md`
+  AND rule 8 of audit script was fixed to actually catch it.
+- §6.4 "no fn-body `use std::xxx;` re-imports" was added to
+  `references/06-module-imports.md` AND audit-pitfalls #27 cataloged
+  the violation pattern (audit script can't statically detect it
+  because it doesn't model lib.rs's `pub use` chain, so manual review
+  is the only enforcement).
+- §1.3a "keyword file purity enforcement" was added to
+  `references/01-directory-structure.md` AND audit-pitfalls #28
+  cataloged it.
+
+**Checklist when adding a new rule**:
+
+1. Write the rule prose in the most specific references file (where
+   the topic naturally belongs).
+2. If it can be statically checked: add a CHECKS entry to
+   `audit_rust_standards.py` and **verify** the rule with a known
+   violation (see §30 detection steps above).
+3. If it can't be statically checked: add an audit-pitfalls entry
+   cataloging the false-positive catalog (#N above) so the next
+   session knows it's a manual-review item.
+4. Update SKILL.md's "key rules" section with a one-line callout
+   linking to the references file.
+5. Mention in commit message which of the four you updated.
+
+**Sign of missing step 4** — when you read SKILL.md's "key rules"
+section and a documented rule has no callout, future agents loading
+the skill for the first time won't know it exists. Always cross-link
+SKILL.md ↔ references ↔ audit script.
