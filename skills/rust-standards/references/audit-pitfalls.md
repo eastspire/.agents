@@ -813,3 +813,277 @@ sessions. Concrete example from this session:
 section and a documented rule has no callout, future agents loading
 the skill for the first time won't know it exists. Always cross-link
 SKILL.md ↔ references ↔ audit script.
+
+## 32. WGSL shader raw strings in `const.rs` — re-scan with raw-string-aware parser (refines §18)
+
+`audit-pitfalls #18` documents that `struct` / `fn` at column 0 inside
+WGSL shader raw strings are **not** violations. But the §18 entry only
+names the **symptom** (false positive in column-0 keyword scans) — it
+does not give a **re-scan recipe** for a future session that hits it.
+
+This session (2026-09-12, euv PR #202 + master §1.3a audit) found that
+**master has 38 such false positives** in
+`example/src/page/{game_2d,game_3d,lighting,raytrace}/hook/const.rs` —
+all `pub(crate) const *_WEBGPU_SHADER: &str = r#" ... "#;` blocks
+containing WGSL `struct BallData { ... }` / `fn vs_main(...)` etc. at
+column 0.
+
+**The raw-string-aware re-scan recipe** (Python; runnable as a
+`while`-loop replacement for the broken scan):
+
+```python
+import os, re
+
+# per-file state
+in_raw_string = False
+raw_delim = None  # "#" / "##" / etc.
+
+for line in file:
+    # skip line/block comments (audit-pitfalls #10)
+    ...
+    if in_raw_string:
+        close_marker = f'"{raw_delim}'
+        if close_marker in line:
+            pos = line.find(close_marker)
+            after = line[pos + len(close_marker):]
+            in_raw_string = False
+            # process `after` as code (re-enter the brace / keyword loop)
+            ...
+        continue  # line fully consumed by raw-string contents
+    # detect raw-string start
+    m = re.search(r'r(#+)["\']', line)
+    if m:
+        delim = m.group(1)
+        close_marker = f'"{delim}'
+        pos_start = line.find(m.group(0))
+        pre = line[:pos_start]
+        # process `pre` as code
+        ...
+        rest = line[pos_start + len(m.group(0)):]
+        if close_marker in rest:
+            pos_close = rest.find(close_marker)
+            after = rest[pos_close + len(close_marker):]
+            # process `after` as code
+            ...
+            continue
+        in_raw_string = True
+        raw_delim = delim
+        continue
+    # normal code line — apply the keyword scan
+    ...
+```
+
+**Three invariants this scanner must preserve** to be correct:
+
+1. **Block-comment / line-comment skip** before raw-string detection
+   (comments can contain `r#"..."#` literally; if you don't skip them,
+   the state machine mis-flips).
+2. **Pre-raw-string code (`pre`)** — anything before the `r#"..."#` token
+   on the same line still needs to be scanned as code (e.g. the `pub(crate) const NAME: &str =` prefix on line 1 of the shader const).
+3. **Post-raw-string code (`after`)** — anything after the closing `r#"..."#` on the same line is also code (rare in master, but possible if a shader const is on the same line as a `;` or other code).
+
+**Master occurrences to ignore** (re-scan post-filter):
+- `example/src/page/game_2d/hook/const.rs` — `GAME_2D_WEBGPU_SHADER` r#"..."#
+- `example/src/page/game_3d/hook/const.rs` — `GAME_3D_WEBGPU_SHADER` r#"..."#
+- `example/src/page/lighting/hook/const.rs` — `LIGHTING_WEBGPU_SHADER` r#"..."#
+- `example/src/page/raytrace/hook/const.rs` — `RAYTRACE_WEBGPU_SHADER` r#"..."#
+
+After applying the raw-string-aware scan, the count drops from 38 to 0
+true violations — all were shader code.
+
+## 33. Brace-tracking scanner for §9.5 (fn-body blank lines) — false-positive traps
+
+The naïve "track global brace depth, treat every `{` as fn-body start"
+scanner produces **40+ false positives** in master (verified this
+session, 2026-09-12). Three classes of false positive that the naive
+scanner must special-case:
+
+1. **`use std::{ ... }` blocks** (blank lines inside the use list, e.g.
+   `cli/src/lib.rs:24`) — these are NOT inside a fn body even though
+   brace depth > 0.
+2. **`pub trait Foo { fn method_a(&self); fn method_b(&self); }`** — blank
+   lines between trait method signatures are idiomatic Rust; not a §9.5
+   violation.
+3. **`pub const A: ...; ... pub const B: ...;` blocks** inside `const.rs` —
+   blank lines between const items are not inside a fn body.
+
+**The fix**: classify the brace-opening context, not just count braces.
+Before pushing onto the brace stack, look at the text up to and
+including the `{`:
+
+```python
+import re
+
+def is_fn_open(prefix: str) -> bool:
+    """prefix is the text up to and including the opening brace.
+    Returns True iff this brace opens a function body."""
+    s = prefix.rstrip().rstrip("{").rstrip()
+    # Last word sequence before the brace must be a fn keyword:
+    #   fn foo() -> ...
+    #   pub fn foo() -> ...
+    #   pub(crate) async unsafe const fn foo() -> ...
+    return bool(re.search(
+        r'\b(fn|async\s+fn|const\s+fn|unsafe\s+fn|pub(\([^)]*\))?\s+fn)\b\s*$',
+        s,
+    ))
+```
+
+The naïve regex `^(pub(\([^)]*\))?\s\w+\s+\w)` (matches `pub trait Collider`
+because "trait" is `\w+`) **fails** because it doesn't require the
+keyword to be `fn`. The fix above requires the last word(s) before `{`
+to be `fn` / `async fn` / etc. — false-positive rate drops from 42 hits
+to 0 hits on master.
+
+**Other context flags to push instead of "fn"**:
+- `mod tests { ... }` preceded by `#[cfg(test)]` attribute → push `test`
+  (the scanner checks the preceding ~4 lines for `cfg(test)`).
+- `use { ... }` / `const { ... }` / `static { ... }` / `trait { ... }` /
+  `impl { ... }` / `mod { ... }` → push `other`.
+
+Then in the blank-line check, only count as a §9.5 violation when the
+topmost "fn" frame on the stack is **not** under a "test" frame (i.e.
+production fn body, not test fn body).
+
+**Master confirmed-false-positive sites** (after fix, scanner reports 0
+hits at these locations):
+- `core/src/renderer/dom/trait.rs:21` (trait method separator)
+- `engine/src/collider/trait.rs:11,18,29` (trait method separators)
+- `engine/src/entity/trait.rs:32` (trait method separator)
+- `engine/src/renderer/trait.rs:22-...` (trait method separators)
+- `engine/src/scene/trait.rs:10` (trait method separator)
+- `engine/src/scheduler/trait.rs:12` (trait method separator)
+- `cli/src/fmt/const.rs:53` (const item separator)
+- `core/src/vdom/attribute/const.rs:23,50` (const item separators)
+- `macros/src/class/const.rs:57` (const item separator)
+- `macros/src/lib.rs:21` (`use std::{...}` block separator)
+- `ui/src/lib.rs:11` (`use std::{...}` block separator)
+
+## 34. `fn` in `fn.rs` is **crate-private** by default — needs `pub(crate)` for sibling `impl.rs` use
+
+When moving a free function from `impl.rs` to `fn.rs` (per §1.3 keyword
+purity), the function is now in a different sibling file. The
+mod.rs `pub(crate) use r#fn::*` glob re-exports only **public +
+pub(crate)** symbols. A plain `fn name(...)` (no `pub`) is **private**
+to the fn.rs file itself; the sibling `impl.rs` cannot see it via
+`use super::*;` even though the mod.rs glob re-exports `r#fn::*`.
+
+**Concrete failure (this session, euv PR #202 + style cleanup)**:
+
+After moving `cached_method_name` from `impl.rs` to `fn.rs`, cargo
+emits `error[E0425]: cannot find function 'cached_method_name' in
+this scope` at every callsite in `impl.rs`. Fix:
+
+```rust
+// engine/src/renderer/fn.rs
+- fn cached_method_name(name: &'static str) -> JsValue {
++ pub(crate) fn cached_method_name(name: &'static str) -> JsValue {
+```
+
+Same pattern for `messages_lock` (i18n), `cached_method`,
+`cached_method_call`, `fmt_lit_str` (macros) — all needed `pub(crate)`
+after the §1.3 move.
+
+**Detection**:
+- Before moving a `fn` between sibling sub-files, grep the source crate
+  for the function name: `git grep -nE 'fn name\(' -- '*.rs'`.
+- After the move + first compile, if cargo emits E0425 at callsites
+  outside the fn.rs file, add `pub(crate)`.
+
+**NOT applicable**:
+- `pub fn` is already public; sibling files see it via the glob.
+- Free functions that are **only called from within fn.rs itself** stay
+  plain `fn` (no `pub(crate)` needed).
+- Methods inside `impl X { fn ... }` blocks are governed by the impl
+  block's visibility, not the file-level `pub(crate)` requirement.
+
+## 35. `audit_rust_standards.py` regex escape double-layer (Python `format()` + bash + grep ERE) — verification protocol
+
+This session found that `audit_rust_standards.py` rule 8 had a broken
+ERE regex (see §30) that PASSED silently despite real violations.
+The root cause is **double-layer escaping**: the regex lives inside a
+Python triple-quoted string that is fed through `.format(target=target)`
+(preserves backslashes literally) and then handed to bash via
+`subprocess.run(['bash', '-c', cmd])` (one more shell parse), and
+finally to `grep -E` (one more ERE parse).
+
+Three backslash layers, three chances for the regex to break. Every
+existing audit rule that uses `grep -E` should be re-verified by:
+
+1. **Run the rule manually in a shell** with a known violation:
+   ```bash
+   cd /root/github/<owner>/<repo>
+   git diff -U0 origin/master HEAD -- "*.rs" 2>/dev/null | \
+     grep -E "<exact-pattern-from-script>" | head -20
+   ```
+   The output should NOT be empty; if it is, the regex is broken.
+
+2. **Verify `r.stderr` is clean** — broken ERE produces
+   `grep: Unmatched ( or \\(` on stderr. If you see this, the rule is
+   silently broken regardless of what `r.stdout` says.
+
+3. **Check `subprocess.run(..., capture_output=True)` exit code** —
+   `grep` returns 1 when no match is found. If the rule shell template
+   ends with `head -20`, the pipeline exit code is `head`'s (always 0),
+   masking the `grep` failure.
+
+**Prefer `grep -F <literal>` over `grep -E <regex>`** for fixed Rust
+tokens (rule 8's `#[cfg(test)]`, rule 4's `#[test]`, rule 3's
+`panic!`, etc.). `grep -F` interprets the pattern literally — no
+parentheses/backslash collision possible. Use `grep -E` only when the
+pattern genuinely needs alternation or quantifiers.
+
+**Rules in this audit script that should be re-verified with a known
+violation**:
+
+| Rule | Pattern | Risk | Fix |
+|------|---------|------|-----|
+| 3 | `panic!(\|\.expect\(\|\.unwrap\(\)` (in shell template) | backslash collision | `grep -F` "panic!" + separate `grep -F` ".expect(" + "grep -F" ".unwrap("; OR `grep -E` verified |
+| 4 | `^#[test]` | low | OK |
+| 8 | `^\\+.*#\\[(test\|cfg\\(test\\)\\)\\]` | **HIGH — was broken** | `grep -F "#[cfg(test)]"` (fixed 2026-09-12) |
+| 11 | `mod r#<keyword>` | low (literal `r#` prefix) | OK |
+| 13 | `^#!\[cfg\(test\)\]` | medium — backslash collision | `grep -F "#![cfg(test)]"` |
+| 14 | `^pub(crate) fn .*\(self\)` | low | OK |
+
+**Add a `verify_audit_rules.py` script** under `scripts/` (per the
+"§31 single source of truth" checklist) that walks every `CHECKS.append`
+rule, injects a synthetic violation into a temp file, runs the rule,
+and confirms `r.stdout` is non-empty. Skip if the rule has no
+synthesizable violation (e.g. file-level scans that need real `.rs` files).
+
+## 36. `rust-analyzer` lint false positive on Rust 2024 `let chains` and `async fn` — don't trust editor lints blindly
+
+This session moved several declarations across files. After every move,
+`patch` and `read_file` reported lint errors like:
+
+```
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> engine/src/engine/impl.rs:44:9
+   |
+44 |     pub async fn run(config: EngineConfig, handler: TickHandlerRc) -> EngineHandle {
+   |         ^^^^^ to use `async fn`, switch to Rust 2018 or later
+```
+
+`let chains` similarly:
+```
+error: let chains are only allowed in Rust 2024 or later
+   --> macros/src/html/fn.rs:334:12
+```
+
+Both were **false positives** because:
+- The repo's `core/Cargo.toml`, `engine/Cargo.toml`, etc. all set `edition = "2024"`.
+- The patch tool's lint runs **rust-analyzer in standalone mode** without picking up the workspace's `Cargo.toml`, so it defaults to Rust 2015/2018 syntax checking.
+
+**Detection**:
+- When `patch` or `read_file` reports a lint error AFTER a successful
+  `cargo check`/`cargo build`, the lint is almost certainly a
+  rust-analyzer false positive.
+- The error message is the giveaway: `Rust 2015` / `Rust 2018` when
+  the workspace edition is `2024`.
+
+**Action**: trust `cargo check` exit code (or `cargo build --tests`),
+not the lint output. Continue with the move + commit + push workflow.
+The lint false positive does not affect the actual compilation.
+
+**When the lint IS real** (e.g. genuinely missing edition upgrade or
+real syntax error): the lint output ALSO shows up in `cargo check`
+stderr. If `cargo check` exits 0, the file is fine.
