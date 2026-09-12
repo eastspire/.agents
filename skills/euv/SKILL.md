@@ -230,10 +230,9 @@ where
     pub fn create(value: T) -> Self                          // direct, no HookContext
     pub fn get(&self) -> T                                   // auto-tracks current DynamicNode id
     pub fn set(&self, value: T)                              // no-op when value == current
-    pub fn subscribe<F>(&self, callback: F)                  // appends a listener
+    pub fn subscribe<F>(&self, callback: F) -> u64               // returns subscription id (0.22+)
         where F: FnMut() + 'static;
-    pub(crate) fn replace_listener<F>(&self, callback: F)    // clear-and-set
-    pub(crate) fn deactivate(&self)                          // mark alive=false (for stale closures)
+    pub fn unsubscribe(&self, id: u64)                            // detach one listener by id (0.22+)
 }
 
 impl<T> SignalCell<T>
