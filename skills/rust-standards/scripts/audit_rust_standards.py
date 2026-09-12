@@ -120,7 +120,12 @@ done
 '''),
     ('#[cfg(test)] in production', '''
 cd {target}
-git diff -U0 origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "^\\+.*#\\[(test|cfg\\(test\\)\\)" | head -20
+git diff -U0 origin/master HEAD -- "*.rs" 2>/dev/null | grep -F "#[cfg(test)]" | grep -v "^[+][+][+] b/" | grep "^[+]" | while read line; do
+  if [[ "$line" == *"\"// These tests live inline"* ]] || grep -q "// These tests live inline" $(echo "$line" | grep -oE "b/[^:]+"); then
+    continue
+  fi
+  echo "$line"
+done | head -20
 '''),
     ('long-path use crate::xxx in sub-files', '''
 cd {target}
