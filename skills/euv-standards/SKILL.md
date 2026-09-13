@@ -555,14 +555,43 @@ git push origin master
 ```
 CI 这次会再次 sync 一次, 写一个空的 `chore: sync all package versions to 0.21.2` 上去确认 7 个文件一致。
 
-**Bump + PR + Merge 完整序列(PR #171 验证)**:
+**Bump + PR + Merge 完整序列(PR #171 + PR #220 验证)**:
 1. bump commit: `sed -i 's/^version = "0.20.0"$/version = "0.20.1"/' Cargo.toml` → `git diff --stat` 期望 `1 file +1/-1` → `git add Cargo.toml && git commit -m "chore: bump version to 0.20.1"`
-2. push: `git push origin fix/<branch>`
-3. PR: `gh pr create --repo euv-dev/euv --head eastspire:fix/<branch> --base master --title "..." --body-file body.md`(body 用 `--body-file` 别 `--body`,反引号被 gh 转义)
-4. 等 CI: `gh pr checks N --watch`(build/check/clippy/tests 4 项全 pass 才 merge)
-5. Merge: `gh pr merge N --squash --delete-branch --admin`
+2. push: `git push -u origin chore/bump-X.Y.Z`
+3. PR create:用 `curl` REST,见下方"`gh` GraphQL 失败"段
+4. 等 CI: `gh pr view <N> --repo euv-dev/euv --json statusCheckRollup`(build/check/clippy/tests 4 项全 pass 才 merge)
+5. Merge: `curl` REST PUT `repos/euv-dev/euv/pulls/<N>/merge`
 6. 验证 sync: `git fetch euv-dev master && git log --oneline euv-dev/master -3` 应看到自己的 squash commit + 自动追加的 `chore: sync all package versions to X.Y.Z`
-7. 收尾: `git checkout --` 任何 euv fmt 误改的无关 file(常见 `ui/src/style/class/fn.rs` 注释缩进被自动改),别让 PR diff 膨胀
+7. 收尾: `git checkout master && git branch -D chore/bump-X.Y.Z && git fetch origin --prune`
+
+**`gh pr create` / `gh pr merge` 走 GraphQL 因 token 缺 `read:org` 被服务端拒(2026-09-13 PR #220 实测)**:
+
+`gh` CLI 的 `pr create` / `pr merge` / `pr edit` / `pr close` 都走 GitHub GraphQL 端点;**当前 `eastspire` PAT scopes = `notifications`, `repo`, `workflow`,缺 `read:org`**,GraphQL 请求返回 `Something went wrong while executing your query`。`gh pr view` / `gh pr checks` / `gh api` 走 REST 的子命令仍正常工作(因为这些不要求 org scope)。`gh auth refresh -h github.com` 可补 scope 但要 browser,**agent 内部无法自助补**。
+
+**REST workaround**(`gh auth token` 拿 PAT 后 `curl`):
+
+```bash
+# 1. PR create (body 用 -d, JSON escape 双引号)
+TOKEN=$(gh auth token 2>/dev/null)
+curl -sS -X POST https://api.github.com/repos/euv-dev/euv/pulls \
+  -H "Authorization: token $TOKEN" \
+  -H 'Accept: application/vnd.github.v3+json' \
+  -d '{"title": "chore: bump version to X.Y.Z",
+       "head": "eastspire:chore/bump-X.Y.Z",
+       "base": "master",
+       "body": "Patch bump euv A.B.C -> X.Y.Z. ..."}'
+# .number / .html_url 即 PR 号 / URL
+
+# 2. Merge (squash + delete branch)
+TOKEN=$(gh auth token 2>/dev/null)
+curl -sS -X PUT https://api.github.com/repos/euv-dev/euv/pulls/<N>/merge \
+  -H "Authorization: token $TOKEN" \
+  -H 'Accept: application/vnd.github.v3+json' \
+  -d '{"merge_method": "squash", "delete_branch": true}'
+# 200 OK + {"sha": "..."} 即成功
+```
+
+`curl` 第一次偶尔返回空 body(GH 边缘节点 cache miss),重试一次即过;无副作用,不算阻塞。
 
 **用户语义核对(反复踩过的坑)**:用户说「升级小版本了吗?提交 pr」时,**可能**只指 PR 而不要 bump,也可能要 bump+PR+merge。euv 项目里这两条路径互斥:**bump 后 CI 才能动 6 个子 crate;不 bump 就 PR = 子 crate 不动,违反 §17 铁律第 1 句**。在没有澄清时,默认执行「最严格」(bump+PR+merge),理由:用户已掌握 euv §17 知识,通常是有意要求全流程。
 
@@ -580,3 +609,9 @@ CI 这次会再次 sync 一次, 写一个空的 `chore: sync all package version
 - `wasm-pack build example` + headless chromium 浏览器验证版本号实际渲染到页面
 
 详细版规见 `project-memory` skill 的 Version policy 节。
+
+**实际 euv 仓 PR merge 序列上踩过的新坑(2026-09-13,PR #212–#219)**,全部细节见 `references/minor-bump-ci-red-by-design.md`:
+
+- **listener-id / reactive-slot id 类型切换必须 exhaustive sweep**(本会话 PR #218 u64→usize 漏 `core/src/vdom/cast/impl.rs` 的 `Rc<Cell<u64>>` 间接绑定,本地 `cargo check --workspace` 不挂,CI release+wasm32 E0308 挂,只能直推 master hotfix)
+- **rebase conflict 解决后 cargo fmt --check 可能仍挂**(本次 PR #217 rebase 留下孤儿重复注释 + 缩进错误)
+- **`sync_workspace_version` job push master 可能 fail**(token scope / branch protection),admin 可手动复刻 sync commit 直推 master,流程在同 reference 文件

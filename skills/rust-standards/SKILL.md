@@ -152,6 +152,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
      ```
      漏跑 `cargo fmt` → PR CI `Format check` job fail,需要 force-push amend commit。`cargo fmt --all -- --check` 0 exit = OK。
    - **同样适用** hyperlane: CI 可能跑 `cargo fmt --check` 而不是 `hyperlane fmt --check`(以 `.github/workflows/rust.yml` 实际 job 为准,开 PR 前 `gh run view <run-id> --log` 验证)。
+   - **Pitfall(rebase conflict 解决后 `cargo fmt --check` 仍 fail,euv 仓 2026-09-13 PR #217→#219 实测)**: git rebase 处理 `<<<<<<<` 冲突块时,即使删掉中间内容后 `cargo check` 退出 0,`cargo fmt --check` 仍可能因「孤儿重复注释 / 行缩进错位」挂——`cargo check` 不读注释,`cargo fmt` 读。**预防**:rebase amend 之前先 `cargo fmt --all -- --check`,exit 非零先 `cargo fmt` 修一遍再 amend。
 
 ## 跨章节冲突时
 
