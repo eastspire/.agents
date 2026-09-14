@@ -206,3 +206,41 @@ done
 ```
 
 更简单的等价规则:**测试文件中任何 `//` 开头的行都不允许**(除了上面 sample 中 fn 体内展示的禁止用例——也就是全部禁止)。`///` `//!` 文件级 doc 全部禁止,fn 体内 inline 全部禁止。
+
+
+## 14.6 Practical recipe: adding tests for a NEW pub fn (avoid the inline-mistake)
+
+The pitfall that keeps recurring: when adding tests for a newly-created `pub fn`, the path of least resistance is `#[cfg(test)] mod tests { ... }` at the bottom of the source file. **That path is closed by §14.4.** The correct recipe:
+
+### Step-by-step
+
+1. **Source file:** only the `pub fn` body + `pub use` re-export wiring (if needed). **Zero `#[cfg(test)]` blocks.**
+2. **Test fixture dir:** create `<crate>/tests/<feature>/` with three files:
+   - `mod.rs` — single line `mod r#fn;` (raw identifier is required because `fn` is a keyword; see §1.4)
+   - `fn.rs` — starts with `use std::path::Path;` etc. as needed, then `#[tokio::test]` / `#[test]` functions calling `euv_crate::the_pub_fn(...)` via fully-qualified path
+   - If the test needs a multi-line raw string literal input, **put it in a separate `<crate>/tests/<feature>/<fixture>.txt` and use `include_str!("fixture.txt")`** — keeps `fn.rs` lint-clean and avoids `r#"..."#` ambiguity in code-review tooling
+3. **Register:** add `mod <feature>;` to `<crate>/tests/mod.rs` (between existing entries, no r# prefix on the test module name itself per §14.1)
+4. **Dev-deps:** if `tempfile` / `tokio` macros etc. are needed in tests but not lib, add to `<crate>/Cargo.toml` `[dev-dependencies]` (integration tests use `[dev-dependencies]`, not `[dependencies]`)
+5. **Verify:** `cargo test --tests -p <crate>` (not `--lib`, which would skip integration tests; not bare `cargo test` which would also run any leftover inline tests and silently mask the §14.4 violation)
+
+### Why `euv_crate::xxx` not `super::*`
+
+Even when `<crate>/lib.rs` has `pub use {build::*, ...};` (which re-exports the pub fn at crate root), the safest pattern inside `tests/<feature>/fn.rs` is `euv_crate::pub_fn_name(...)` directly. `use super::*;` from inside `fn.rs` brings nothing useful (test crate has no `super` parent beyond `tests/mod.rs`'s `use euv_crate::*;`, which is global anyway). Belt-and-suspenders: write the full path.
+
+### Anti-pattern I hit in 2026-09-14 (PR #233 first pass)
+
+Wrote `#[cfg(test)] mod minify_inline_js_tests { use std::path::Path; ... }` at the bottom of `cli/src/build/fn.rs` because the helper was new and the natural instinct is to put tests where the function lives. §14.4 forbids it. **Always start from the assumption: this new test goes in `tests/<feature>/`, period.** Only after explicitly verifying there's no `tests/`-compatible path (e.g. testing a `pub(crate)` item, which then means *delete the test*) should you even consider alternatives — and there are none per §14.4.
+
+### Pre-commit self-check
+
+```bash
+# PR diff should add ZERO + lines matching this pattern
+git diff origin/master HEAD -- '*.rs' | grep -E '^\+.*#\[cfg\(test\)\]'
+# Expected: empty
+
+# New tests/ files should exist for every new pub fn tested
+git diff origin/master HEAD --stat -- 'tests/**/*.rs'
+# Expected: non-empty if tests were added
+```
+
+If `#[cfg(test)]` shows up in the diff but no `tests/<feature>/` file was created, the PR is incomplete — fix before push.

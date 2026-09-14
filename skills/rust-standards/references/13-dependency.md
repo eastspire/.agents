@@ -232,4 +232,10 @@ print('OK')
 - PR review 时,如果 dep 块顺序不符合新规则,要求 author 重新排序
 - **euv 项目**:`euv fmt` 不处理 Cargo.toml,需要单独 sort;尚未集成自动化 taplo formatter
 
+**spirit 延伸(const.rs / 关键字文件内部顺序,2026-09-14 PR #233 实测)**:本规则字面只覆盖 Cargo.toml 的 3 个 dep 块,但同样的"短在前 + 字典序 tiebreak"精神适用于同文件内同类声明的顺序。新增 `pub const FOO: T = ...;` 到 `const.rs` 时,按 (key 长度, ASCII 字典序) 找到正确位置插入,而不是 append 到末尾或紧跟在"语义相关的另一个 const"后面。
+
+示例:`const.rs` 新增 `SNIPPETS_DIR_NAME`(长度 17)和 `SNIPPET_FILE_PREFIX`(长度 19) 时,正确位置是 `SRC_DIR_NAME`(12) 之后、`CARGO_TOML_FILE_NAME`(20) 之前——具体来说 `SNIPPETS_DIR_NAME`(17) 在 `GITIGNORE_FILE_NAME`(18) 之前,`SNIPPET_FILE_PREFIX`(19) 在 `GITIGNORE_FILE_NAME` 之后。**按字符长度,不要按"它们在 src 里属于同一 feature 就相邻"**。
+
+`fn.rs` 内部的 `pub fn` 排序在多数项目里保留"调用顺序"(高层 wrapper 在前、底层 helper 在后),不强行套用本规则——但当一个文件里出现多个独立的 `pub fn` 且无明确调用链时(如 `pub fn` 是相互独立的 utility),同样按 `(name length, lex)` 排序更易扫读。
+
 **修订历史**:本规则在 2026-09-14 替代 §13.7 旧版"primary 本地在前 + 三方在后,secondary 长度,tertiary 字典序"。旧版的"本地优先"动机(与 `lib.rs` 的 `pub use` 顺序一致)已被证明不必要 —— 单一可计算规则胜过双规则拼接,且不受 workspace 演化影响。
