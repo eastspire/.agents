@@ -7,13 +7,53 @@
 - 空行分隔不同类型的导入
 - 同类需要聚合(当前 crate / 本地其他 crate / 标准库 / 第三方)
 - 按顺序书写导入:
-  1. `mod` 声明(普通子模块名)
+  1. `mod` 声明(普通子模块名)**—— 这一组内禁止空行**(所有 `mod xxx;` 紧贴,不分段)
   2. `pub use`(子模块 glob)
   3. `pub use`(外部 crate glob)
   4. `pub(crate) use`
   5. `pub(super) use`
   6. `use` 私有导入
 - 每组按 当前 crate / 标准库 / 外部库 顺序排列
+  - **第 6 组(private use)内部还要细分**:
+    - 私有 `use std::{...}`(或 `use current_crate::*;` 如果当前 crate 是 workspace 成员)在前
+    - 私有 `use {external_crate_1::*, external_crate_2::Symbol, ...}` 在后
+    - **单条 `use external_crate::Symbol;` 也要并入 `use {...}` 块**,不要写成独立的 `use ...;` 行后跟 `use {...}` 块。例如 `use log::SetLoggerError;` 应合并进 `use {clap::Parser, log::SetLoggerError, serde::Serialize, ...}`,而不是独占一行放在 `use std::{...}` 之后 / `use {...}` 块之前。
+
+### §6.1 常见违规(2026-09-14 euv PR #235 实测)
+
+1. **private use 写在 pub use 之前**(step 6 必须在 step 2-5 之后)。
+2. **`pub use {sub-modules::*}` 放在 `pub use std` / `pub use external` 之后**(子模块 glob 是 step 2,必须最前)。
+3. **mod 列表中间插入空行**(§6.1 step 1:所有 `mod xxx;` 紧贴)。
+4. **`use current_crate::*;` 夹在 private std 和 private externals 之间**(在 private use 组内部,当前 crate 必须在 std 之前、externals 之后 —— 顺序:当前crate → std → 外部库)。
+5. **单条 `use external_crate::Symbol;` 单独成行,没合并进 `use {...}` 块**。
+6. **`pub use {sub-modules::*}` 但 sub-modules 内的 items 是 `pub(crate)`**(`E0644: glob import doesn't reexport anything with visibility 'pub'`)。**Fix**:改成 `pub(crate) use {sub-modules::*};`,visibility 必须 ≤ glob 内所有 item 的最大 visibility。验证:`grep -h 'pub(\|^pub ' <crate>/src/<sub>/fn.rs <crate>/src/<sub>/struct.rs ...` 看最大可见性。
+
+### §6.1 pitfall-a:`pub use {sub_modules::*}` 的 visibility 匹配(2026-09-14 euv PR #236)
+
+`pub use {a::*, b::*, c::*};` glob re-export 要求**所有 glob 进来的 item 至少有 `pub` visibility**。如果某 sub-module 的 fn / struct / const 是 `pub(crate)`,`pub use` 会编译期 warn:
+
+```
+warning: glob import doesn't reexport anything with visibility `pub` because no imported item is public enough
+  --> src/lib.rs:10
+   |
+10 | pub use {component::*, page::*, style::*};
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: the most public imported item is `pub(crate)`
+```
+
+**正确做法**:**visibility 必须 ≤ glob 内所有 item 的最大 visibility**。三种解法:
+
+| sub-modules 内部 visibility | 推荐 lib.rs 写法 |
+|------------------------------|------------------|
+| 全 `pub` | `pub use {a::*, b::*, c::*};` |
+| 全 `pub(crate)` | `pub(crate) use {a::*, b::*, c::*};` |
+| 混合 | 拆 glob:`pub use {a::*}; pub(crate) use {b::*, c::*};` |
+
+**Step-up 检查**:`pub(crate)` → `pub` 让 sub-modules 公共暴露 = **review reject**(违反最小暴露原则,且对独立测试 crate 必要)。正确方向永远是**降低 lib.rs 端的 visibility**,不要提升 sub-module 端。euv `example/src/lib.rs` 实测:3 个 sub-modules 全部 `pub(crate)` items → 改 lib.rs 为 `pub(crate) use {...};`,0 warning。
+
+### Audit 覆盖范围
+
+`scripts/audit_rust_standards.py` 当前 **不检查** §6.1 的顺序违规(只检查 mod.rs 三段式 + sub-file `use super::*;`)。**lib.rs use/pub use 组顺序是 user-review-only 项** —— review reject 之前 agent 不会自动发现。PR #235 是 user 主动指出后才修。
 
 > 完整模板见 `templates/lib-rs.md`
 
@@ -66,6 +106,45 @@ pub(crate) fn compute_plan() {
 2. `grep -E '^pub use other_crate' <crate>/src/lib.rs` 看 lib.rs 已 re-export 什么外部 crate 符号。
 3. 你需要的符号在以上列表里 → 直接写名字,不需要额外 use。
 4. 不在 → **可能应该加到 lib.rs**(如果 sub-file 也需要),或者换一个已经在 re-export 列表里的等价类型。
+
+
+**Pitfall-b(子文件函数体内全路径调用外部 crate 符号,audit rule 9 不覆盖)**:
+
+§6.4 字面禁止 `use std::xxx::yyy;` 这种 fn 内 import,但**没有显式禁止 fn 体内 `external_crate::Symbol` 全路径调用**。例如 `minify_js::Session::new()` 在 `cli/src/build/fn.rs` 的 fn 体里 — audit rule 9 只 grep `use crate::xxx;` 模式,**不 grep 函数体内的 `external_crate::xxx` 调用**,所以 PASS,但 user review 仍会判 §6.3/§6.4 spirit 违规。
+
+**正确写法**:
+1. 在 lib.rs `pub use external_crate::{SpecificSym1, SpecificSym2, ...};` 集中 re-export 用到的具体符号
+2. 子文件 fn 体内用裸名:`Session::new()` / `minify(...)` / `TopLevelMode::Module`
+
+**易错**:`pub use external_crate;` 只 re-export 整个 crate 的名字(如 `minify_js`),**不能让** `use super::*;` 拿到 crate 内的符号 — 必须 `pub use external_crate::{Symbol1, Symbol2};` 显式列。
+
+```rust
+// ❌ 编译过,但 audit rule 9 抓不到,user review 仍 reject
+let session: minify_js::Session = minify_js::Session::new();
+
+// ✅ lib.rs 集中 re-export
+// pub use minify_js::{Session, TopLevelMode, minify};
+// 子文件 fn 体:
+let session: Session = Session::new();
+```
+
+**detection**(audit script 之外的补充检查,`scripts/check_subfile_external_paths.sh`):
+
+```bash
+# 对 PR diff 内修改的所有 src/ 子文件(fn.rs / impl.rs / struct.rs / enum.rs / trait.rs / type.rs / const.rs),
+# grep 是否有 `external_crate::xxx` 全路径调用(extern = 在 Cargo.toml 显式列出的第三方 dep)
+for f in $(git diff --name-only origin/master HEAD -- '*.rs' | grep -E '^[^/]+/src/[^/]+/[^/]+\.rs$' | grep -vE '/(mod|lib)\.rs$'); do
+  for ext in $(grep -E '^[a-zA-Z0-9_-]+\s*=' Cargo.toml | cut -d'=' -f1 | tr -d ' '); do
+    # 排除 std / core / alloc(允许出现)和 euv-* 本仓 crate
+    case "$ext" in std|core|alloc) continue;; esac
+    if grep -nE "\b${ext}::[A-Za-z]" "$f" >/dev/null 2>&1; then
+      echo "POSSIBLE-VIOLATION: $f uses ${ext}::... in sub-file body"
+    fi
+  done
+done
+```
+
+预 commit 必跑这一检查。euv PR #233 实测:3 处 `minify_js::Session/minify/TopLevelMode` 调用全被这一脚本抓到,audit 原 rule 9 漏掉。
 
 **例外**:
 - `#[cfg(test)] mod tests { use std::time::Instant; }` 如果 `Instant` 没在 lib.rs pub use,且仅测试使用 → OK。
