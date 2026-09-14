@@ -318,7 +318,8 @@ pub struct EuvButtonProps {
 | **reactive `if { cond } { ButtonA } else { ButtonA'` arm-swap 后,新 arm 的 button click handler 不响应(euv 0.24.x 全版本,不只是 example timer page)** | 注册表(`/root/github/euv-dev/euv/core/src/renderer/registry/impl.rs` `dispatch_delegated_event`)通过 `data-euv-id` 在 window delegation 找到 handler slot。arm 切换触发的 re-render 走 `patch_attributes`(`core/src/renderer/render/impl.rs` `patch_attributes`),fast-path `if old_attrs == new_attrs { return; }` 会把 `Event` AttributeValue 当成 equal(因为 `AttributeValue::PartialEq` `impl Eq for AttributeValue` 显式返回 `true`),因此新 arm 派生的 `Rc<dyn Fn(Event)>` handler 永远不会被绑到 slot 里——slot 仍持有首次 mount 的 handler,第一次 click 触发老 handler,之后任何 click 都跑老 handler 而非新 arm 的 handler。**实测现象**:timer page Start 点击有效(button 文本从 Start→Pause,数字从 00:00→00:03),Pause 点击无任何反应(button 文本不变,数字继续涨)。**两种 fix 模式**:(a) **framework 层**——改 `core/src/vdom/attribute/impl.rs` `(Self::Event(_), Self::Event(_)) => true` 为 `=> false`,并把 `patch_attributes` 的 fast-path 改成 `if old_attrs == new_attrs && !new_attrs.iter().any(|a| matches!(a.get_value(), AttributeValue::Event(_)))`(本会话在 `fix/event-attr-partialeq` 分支验证过此改动能跑过 `cargo check` + `cargo clippy`,但实测仍未能修复 bug——wasm-opt 可能 strip 掉日志,根因在 patch_attributes 整个函数在某些 re-render 路径不被调用,值得继续深挖 `attach_event_listener` 为何没被 dispatch);(b) **example 层 workaround**——把 Start/Pause 合并成单一 toggle button,在 hook 层建一个 stable `Rc<dyn Fn(Event)>` toggle handler(read `running` signal 在 click 时决定 start/pause path),button 元素不再被 create/destroy(`onclick` attr identity 跨 render 稳定),label 切换走 reactive `if { !running } { "Start" } else { "Pause" }` text node patch。验证见 `references/euv-event-handler-rerender-pitfall.md`。**最简验证**:wasm build → chromium remote debug → 按钮文本变 (running signal 反转) 但 click 不更新 state,即说明新 arm handler 没绑上。 |
 | **`match { signal }` arm 切换后，旧 tab 的 page-level `Signal<bool>` 状态幸存 → 切回 tab 时 overlay / 状态错位再现** | `match` arm 切换时 `core/src/renderer/render/impl.rs:914` 走 `render_full_replace`（整 arm DOM 子树销毁重建），但**注册在 page-level `HookContext` 里的 `Signal` 不会随之清除**——`hook_context.switch_arm`（`core/src/reactive/hook/impl.rs:24`）只清 per-arm hooks/cleanups。表现：fullscreen tab A 进入全屏 → `canvas_2d_fullscreen.set(true)`（page-level signal）→ 切到 tab B（A arm DOM 被销毁）→ 切回 A（A arm 重建）→ `c_game_container_fullscreen` overlay 重现，因为 `canvas_2d_fullscreen` signal 仍然是 `true`。**修复模式**：tab 切换处理器里**先复位所有 per-tab state signal 再 `tab.set(value)`**。例：`game_2d_on_tab_select(tab, value, fullscreen)` 在闭包最前面 `fullscreen.get_canvas_2d().set(false); fullscreen.get_web_gl().set(false); fullscreen.get_web_gpu().set(false);` 再 `tab.set(value)`。其他跨 arm 持有的 boolean / enum signal（modal-open、form-state、pending-uploads）同理。诊断：复现切 tab 后残留 UI → 在 `register_popstate_guard`/tab handler 加日志确认 signal 没复位。verified PR #104 (0.18.38)。 |
 | **fixed-aspect canvas（800×450 = 16:9）放进全屏容器后，绘制的球/精灵被拉伸成椭圆** | canvas backing buffer 是固定逻辑分辨率（`GAME_2D_CANVAS_WIDTH × GAME_2D_CANVAS_HEIGHT = 800 × 450`）。如果外层 `c_game_container_fullscreen`（`width: 100%; height: 100%; position: fixed`）直接铺满 viewport，再把 `<canvas>` 用 `width: 100%; height: 100%` 嵌进去，浏览器按 viewport 比例（如 1280×800 = 1.6:1）拉伸 16:9 的 bitmap → 球变横向椭圆。**修复：插一层 16:9 letterbox wrapper**——class 必备三件套 `aspect-ratio: "16 / 9"; width: "100%"; max-width: "100%"; max-height: "100%"; height: "auto"; display: "flex"; align-items: "center"; justify-content: "center";`，**外加 `position: "relative"`**（让 `c_game_loading_overlay` 这种 `position: absolute` 的子元素以此为定位锚点，否则会逃逸到 `c_game_container_fullscreen`）。view 里 `<div class: c_letterbox()><canvas class: c_canvas() .../></div>`，原 backing 不变（仍 800×450），浏览器均匀缩放到 letterbox。generic 模式：任何"fixed-aspect bitmap/sprite 嵌入 fluid 容器"都套这个 letterbox 包装。verified PR #104 (0.18.38, euv example game_2d/game_3d 全屏模式)。 |
-| **clickable `<div>` with delegated `onclick` inside scrollable container is silently dead on iOS Safari（影响 `/conditional`、`/game_2d`、`/game_3d`、`/keep_alive` 等所有用 `c_tab_item_*` 的 page）** | iOS WebKit 把 tap 误判为"开始滚动" → 直接 suppress synthetic `click`,`Registry::delegation("click")` 监听 window 但 iOS 根本不派发 click,所以 delegated handler 永远不被调用。Android/PC 没这个手势消歧义逻辑所以正常。`euv_button`(真 `<button>`)不受影响,iOS 把 button 当原生交互元素直接派发 click。**修复:在 `c_tab_item_active` / `c_tab_item_inactive` 加 `touch-action: manipulation` + `user-select: none`(+ `-webkit-` 前缀)**——告诉 iOS 这个元素只响应 tap + 平移,不做双击缩放等待,不做滚动手势消歧,同时关掉 iOS 长按文字选择气泡。作用域只到 tab 类,**不要**写到 `c_app_main` 这种滚动容器上(会让页面无法 pan)。Generic 模式:任何自定义 clickable `<div>`/`<span>`(不是 `<button>`/`<a href>`)且在 scrollable 容器里都需要这两条 CSS。诊断:在 iOS Safari 里 tap 无 console error、无 state 变化,但在 macOS Safari 同 page 正常。完整 repro + 通用化模式 + 修复代码 + 不该做的事见 `references/euv-ios-tab-click-pitfall.md`。verified PR #231 (0.24.5)。 |
+| **clickable `<div>` with delegated `onclick` inside scrollable container OR fixed-position overlay is silently dead on iOS Safari（影响 `/conditional`、`/game_2d`、`/game_3d`、`/keep_alive` 等所有用 `c_tab_item_*` 的 page；以及所有用 `c_modal_overlay` / `c_vconsole_overlay` / `c_euv_drawer_overlay` / `c_mobile_overlay` 的 modal/drawer/vconsole）** | iOS WebKit 把 tap 误判为"开始滚动" → 直接 suppress synthetic `click`,`Registry::delegation("click")` 监听 window 但 iOS 根本不派发 click,所以 delegated handler 永远不被调用。Android/PC 没这个手势消歧义逻辑所以正常。`euv_button`(真 `<button>`)不受影响,iOS 把 button 当原生交互元素直接派发 click。两个变体位置: (a) **scrollable 容器内的 clickable leaf**(如 tab item)— PR #231 加 `touch-action: manipulation` 到 `c_tab_item_active` / `c_tab_item_inactive`;(b) **fixed-position overlay 背景遮罩上的 click-to-close**(如 `c_modal_overlay` 等所有 `c_*_overlay`)— PR #232 加同一对 CSS 到 `c_modal_overlay` / `c_vconsole_overlay` / `c_euv_drawer_overlay` / `c_mobile_overlay`。两个位置都要 `touch-action: manipulation` + `user-select: none`(+ `-webkit-` 前缀)——告诉 iOS 这个元素只响应 tap + 平移,不做双击缩放等待,不做滚动手势消歧,同时关掉 iOS 长按文字选择气泡。**作用域只到 leaf 元素 / overlay 类自身,绝不要写到 `c_app_main` 这种滚动容器上**(会让页面无法 pan)。Generic 模式:任何自定义 clickable `<div>`/`<span>`(不是 `<button>`/`<a href>`)且在 scrollable 容器或 fixed overlay 里都需要这两条 CSS。诊断:iOS Safari 里 tap 无 console error、无 state 变化,但在 macOS Safari 同 page 正常。完整 repro + 通用化模式 + 修复代码 + 不该做的事见 `references/euv-ios-tab-click-pitfall.md`。verified PR #231 (0.24.5, tabs) + PR #232 (0.24.6, overlays)。 |
+| **agent (自动) 在 `class!` / `html!` 宏体里塞"why 解释"块注释,user 会立刻让删 (PR #231/#232 + user 2026-09-14 明确指令)** | agent 反复踩的同一类反模式:为某次 fix 在 `class!` class body 顶部写 5-15 行的"iOS WebKit: ... rationale ..."注释;**这些注释不是文档,user 视其为 unsolicited preamble / 教学**,与对话中"禁止 lecture"同源。**Rule**:`class!` / `html!` 宏体里**只写 CSS 属性和 reactive 控制流,不加解释性注释**。必要的 why 写到 (a) commit message + PR body(那是给 reviewer 看);(b) `references/` 文件(那是给未来 agent 看)。**例外**:`class!` 块外的 `///` doc comment 或函数级 `///` 注释是项目惯例,保留;类体内 `// xxx` inline 注释一律不写。**Pre-commit 自检**:任何 `class!` block 内的 `//` 注释都该是"为什么这条 property 必须这样"的**反直觉**说明(如 `cursor: pointer` 在 `<div>` 上的兼容陷阱),否则删。PR #231 (9 行)+ PR #232 (12 行) agent 注释合计 21 行,user 一个回合清光;后续 euv 修复在 class! 里写注释前先想"如果 user 让我删,我愿意删吗?"。 |
 
 ## 13. 最小可运行模板
 
@@ -604,6 +605,42 @@ curl -sS -X PUT https://api.github.com/repos/euv-dev/euv/pulls/<N>/merge \
 4. CI sync 会自动 propagate 0.X 版本给子 crate
 
 **千万不要全局 sed `version = "X.Y.Z"` 在所有子目录**(会误伤第三方依赖版本号,且违反铁律)。
+
+**Dep 块顺序 amend 进同一 release PR**(2026-09-14 verified PR #233):
+当一个 release PR 同时引入新 dep + 触发了 `rust-standards §13.7` "整体长度 + 字典序"重排,新 PR 的 Cargo.toml diff 应当**只展示 reorder**(`git diff --stat` 无新增 dep 行,只是顺序调整)。如果同一个 PR 里既引入新 dep 又 reorder,**优先 amend reorder 进原 commit**(force push),而不是开新 PR:
+
+```bash
+git add -A  # reorder + 新增 dep 都进同一 commit
+git commit --amend --no-edit
+git push -f origin <branch>
+# 然后在 PR body 末尾追加 "Follow-up: dep block ordering" 段说明 reorder 的范围
+```
+
+理由:euv Track 2 的 dep reorder 是**纯样式变化**(cargo 按 key 名解析,不按位置),maintainer review 看到 "新 dep + 旧 dep 重排"会认为两个变更互不干扰;但拆成两个 PR 会让 sync_workspace_version 在中途把根 Cargo.toml 又 sync 一次,反而引入二次 rebase 复杂度。amend 保留单个 commit 的可读性。
+
+§13.7 PR 提交前自检命令(适用于所有 `[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` 块):
+
+```bash
+python3 -c "
+import re, sys
+path, section = sys.argv[1], sys.argv[2]
+text = open(path).read()
+m = re.search(r'^\\[' + section + r'\\](.*?)(?=^\\[|\\Z)', text, re.S | re.M)
+if not m: sys.exit(0)
+block = m.group(1)
+deps = [re.match(r'^([a-zA-Z0-9_-]+)', l).group(1)
+        for l in block.splitlines()
+        if re.match(r'^[a-zA-Z0-9_-]+ *=', l)]
+expected = sorted(deps, key=lambda s: (len(s), s))
+if deps != expected:
+    for i, (a, b) in enumerate(zip(deps, expected)):
+        if a != b: print(f'  line {i+1}: {a!r} -> should be {b!r}')
+    sys.exit(1)
+print('OK')
+" Cargo.toml dependencies
+```
+
+报错非空 = 需要 reorder;空输出 = 全部 OK。`[workspace.dependencies]` **不适用**(它按 alphabetic 排,与 §13.7 独立)。
 
 **PR 前必跑**:
 - `cargo check -p euv -p euv-core -p euv-engine -p euv-ui -p euv-example --target wasm32-unknown-unknown`(17s)

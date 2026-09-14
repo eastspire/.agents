@@ -1087,6 +1087,71 @@ The lint false positive does not affect the actual compilation.
 real syntax error): the lint output ALSO shows up in `cargo check`
 stderr. If `cargo check` exits 0, the file is fine.
 
+## 29.1 patch tool deletes preceding `///` doc-comment block when old_string starts mid-function — verified 2026-09-14 (euv-cli inline-js minify PR #233)
+
+**Symptom**: A patch with `old_string` of the form
+`<last line of preceding function's body>\n<blank line>\n/// - &Path - ...\n///\n/// - &Path - description.\npub async fn some_fn(...) {`
+silently deletes the preceding function's `///` doc comment (4–8 lines
+above the matched position). Worse, attempting to "re-patch" the deleted
+doc comment back in by adding a fresh `/// Cleans ...\n/// Cleans ...`
+block creates **duplicated `///` lines** that no longer compile-cleanly
+even by lint standards — the duplicate-merge is itself malformed and
+requires a third patch to fully restore.
+
+**Why**: the patch tool's fuzzy match collapses multiple `///` lines
+above the matched anchor into whitespace-equivalent noise, dropping them
+on the assumption that they are decorative comments the user is replacing
+as a unit. The pattern that triggers it: `old_string` ending with
+`<code line>` + `\n` + `<blank line>` + `/// ...` + `pub async fn X()`.
+
+**Detection**:
+- After every multi-line patch that includes `///` doc-comment lines,
+  immediately `git diff <file>` and confirm the actual file structure
+  matches intent (especially doc comments around non-edited functions).
+- `git diff --stat` showing 0 deleted lines but `wc -l <file>` decreased
+  → indicates patch tool deleted content silently.
+
+**Action**: prefer Python `re.sub` over `patch` for any change that
+touches `///` doc-comment blocks around a function signature. The
+replacement string itself stays clear of `///` ambiguity. Specifically:
+
+```python
+import re
+from pathlib import Path
+text = Path("file.rs").read_text()
+new_text = re.sub(r'<single-line anchor pattern>', '<replacement>', text, count=1)
+Path("file.rs").write_text(new_text)
+```
+
+If `patch` is unavoidable, **anchor the old_string on a unique token
+that lives INSIDE the doc comment** (e.g. the function name) rather
+than on the function-signature line, and include the doc-comment lines
+IN the replacement string verbatim to avoid the silent-deletion bug:
+
+```
+old_string:
+/// Cleans the output directory before a fresh build.
+///
+/// Removes all files and subdirectories within the output directory
+/// so that stale artifacts from previous builds do not remain.
+/// The directory itself is preserved (recreated if missing).
+///
+/// # Arguments
+///
+/// - &Path - The output directory to clean.
+pub async fn clean_out_dir(out_dir: &Path) {
+
+new_string:
+/// Cleans the output directory before a fresh build.
+/// ... full new doc ...
+pub async fn clean_out_dir(out_dir: &Path) {
+```
+
+**Recovery**: when the bug fires, `git checkout HEAD -- <file>` and
+retry with a Python script. Don't try to amend the deletion — the
+3-step recovery (delete-clean, recover-via-patch, de-duplicate) costs
+more than the rebuild.
+
 
 ## 30. audit rule 8 (#[cfg(test)] detection) broken regex — fixed 2026-09-12
 
