@@ -161,45 +161,75 @@ cat root/Cargo.toml/src/lib.rs | head -10   # 看 pub use {*, *}
 - 用户偏好:"只改根 Cargo.toml 的 version" / "依赖版本也不改" → §13.6 之前已经写过的"只动根 + 子 crate 由 CI sync"模式
 - dev-dep 这一改(`path = "../"`)是同一个铁律的延伸:**改 Cargo.toml 任何行之前,先看这个改动是不是必须在那个 crate 自己里**——根 `[workspace.dependencies]` 改不到子 crate 的 `[dev-dependencies]`,`[profile.xxx]` 不影响 dev-dep,只有子 crate 自己说了算。
 
-## 13.7 `[dependencies]` 块内顺序:本地 crate 在前,三方在后(2026-08-27 verified euv PR #28)
+## 13.7 `[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` 块内顺序:整体 key 长度从小到大,字典序 tiebreak(2026-09-14 修订,覆盖此前"本地 vs 三方分组"规则)
 
-`[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` 块内的 entry 顺序按以下规则确定:
+`[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` 三个 dep 块内的 entry 顺序按以下规则统一确定(不分本地 / 三方分组):
 
-- **primary**(决定先后两组):workspace 内本地 crate vs 三方 crate。**本地在前,三方在后**。
-- **secondary**(组内排序):key 名称长度,**短的在前**。
-- **tertiary**(同级 tiebreak):字典序 ASCII,**靠前的字母在前**。
+- **primary**:key 字符串总长度,**短在前**(`euv-ui = "..."` 长度 6 排在 `console_error_panic_hook = "..."` 长度 24 之前)。
+- **secondary**(同级 tiebreak):ASCII 字典序,**靠前的字母在前**(`euv-ui` 与 `qrcode` 同长 6,字典序 `euv-ui` < `qrcode`,所以 `euv-ui` 在前;`euv-engine` 与 `serde_json` 同长 10,字典序 `euv-engine` < `serde_json`,所以 `euv-engine` 在前)。
 
-"本地 crate" = workspace member,典型名字以 `euv-` 起头或等于 `euv`,对应 `[workspace.dependencies]` 里的 path-only 那一组。在 `[dependencies]` 里写成 `xxx = { workspace = true }` 就是本地引用。
+**为什么不再按"本地 vs 三方"分组**:本地和三方 crate 的边界会随 workspace 演化、re-export 重组、成员新增 / 删除而变化(`euv` 根 crate 本身是 2 行 `pub use` facade,被视为"本地"还是"三方"取决于上下文),人脑维护成本高于单一可计算规则。统一长度 + 字典序是 stable、tool-friendly(`sort` / `taplo` 可复现)、无歧义的规则,新加 dep 直接按 `(length, name)` 排序插入即可,不需判断"它是本地的吗"。
 
-例(`example/Cargo.toml`,10 个 dep):
+**为什么不是纯 alphabetic**:alphabetic-only 会把 `alloc-no-stdlib`(长度 15)排到 `euv-core`(长度 8)前面 —— 视觉上短名字的 dep 被埋没,人眼扫读"短的在前"是常见阅读习惯(短标识符先出现 = 列表头部 = 视觉重心)。长度优先让常见检查"列表里有什么短名字 dep"一眼可读。
+
+**为什么 `[workspace.dependencies]` 不适用本规则**:`[workspace.dependencies]` 块的语义是"声明 workspace 共享的 dep 版本 source",entry 顺序对 cargo 行为无影响,但**约定俗成地按 alphabetic 排**(不是按长度),因为这块的内容是项目管理层级的"依赖目录",读者按字母查找具体的 dep 名。两套约定并存,不要混。
+
+例(`example/Cargo.toml`,10 个 dep,统一排序后):
 
 ```toml
 [dependencies]
-euv = { workspace = true }              # 本地,长度 3
-euv-ui = { workspace = true }           # 本地,长度 6
-euv-engine = { workspace = true }       # 本地,长度 10
-serde = { workspace = true }            # 三方,长度 5
-qrcode = { workspace = true, ... }      # 三方,长度 6
-serde_json = { workspace = true }       # 三方,长度 10
-lombok-macros = { workspace = true }    # 三方,长度 13
-compare_version = { workspace = true }  # 三方,长度 15
-serde-wasm-bindgen = { workspace = true }# 三方,长度 18
-console_error_panic_hook = { workspace = true }# 三方,长度 24
+euv = { workspace = true }               # 长度 3
+serde = { workspace = true }             # 长度 5
+euv-ui = { workspace = true }            # 长度 6 (字典序在 qrcode 前)
+qrcode = { workspace = true }            # 长度 6
+if-addrs = { workspace = true }          # 长度 8
+hyperlane = { workspace = true }         # 长度 9
+euv-engine = { workspace = true }        # 长度 10 (字典序在 serde_json 前)
+serde_json = { workspace = true }        # 长度 10
+proc-macro2 = { workspace = true }       # 长度 11
+color-output = { workspace = true }      # 长度 12
+hyperlane-cli = { workspace = true }     # 长度 13 (字典序在 lombok-macros 前)
+lombok-macros = { workspace = true }     # 长度 13
+compare_version = { workspace = true }   # 长度 15
+serde-wasm-bindgen = { workspace = true }# 长度 18
+console_error_panic_hook = { workspace = true }# 长度 24
 ```
 
-分组:本地组(`euv` / `euv-ui` / `euv-engine`)→ 三方组(其余 7 个)。
-组内按长度排序;`qrcode` 在三方组里长度 6 是最小,但因为**前面有本地组**,它不会出现在文件最前面。
+排序关键点:
+- `euv-ui`(6) 和 `qrcode`(6) 同长度 → 字典序 `euv-ui` < `qrcode` → `euv-ui` 排前
+- `euv-engine`(10) 和 `serde_json`(10) 同长度 → 字典序 `euv-engine` < `serde_json` → `euv-engine` 排前
+- `hyperlane-cli`(13) 和 `lombok-macros`(13) 同长度 → 字典序 `hyperlane-cli` < `lombok-macros` → `hyperlane-cli` 排前
 
-**为什么本地在前**(与 `use` 语句保持一致):Rust 项目 `lib.rs` / `mod.rs` 里 `pub use` / `use` 顺序约定俗成是**本地模块在上、三方 crate 在下**(例 `euv/src/lib.rs`:`pub use {euv_core::*, euv_macros::*};` 在 `pub use {console_error_panic_hook, js_sys, ...};` 之前;`core/src/lib.rs`:本地 `mod`/`pub use` 在 `pub use std::{...}` 之前)。Cargo.toml dep 块是对外的"imports 等价物",理应遵循同一规则 —— 本地优先,三方排后。
+**PR 提交前自检**(Python 一行 sort 验证,适用于任意 Cargo.toml):
 
-**为什么不是纯 alphabetic**:alphabetic-only 会把 `alloc-no-stdlib`(长度 15)排到 `euv-core`(长度 8)前面 —— 视觉上本地 crate 被埋在三方 crate 海洋里。读者要确认 "这个 workspace 里有多少本地 dep" 时需要扫完整段。长度优先 + 本地在前 让这种常见检查"一眼可读"。
+```bash
+python3 -c "
+import re, sys
+path = sys.argv[1]
+section = sys.argv[2]
+text = open(path).read()
+m = re.search(r'^\\[?' + section + r'\\]?(.*?)(?=^\\[|\\Z)', text, re.S | re.M)
+if not m: sys.exit(0)
+block = m.group(1)
+deps = []
+for line in block.splitlines():
+    mm = re.match(r'^([a-zA-Z0-9_-]+)\s*=', line)
+    if mm: deps.append(mm.group(1))
+expected = sorted(deps, key=lambda s: (len(s), s))
+if deps != expected:
+    print('MISMATCH:')
+    for i, (a, b) in enumerate(zip(deps, expected)):
+        if a != b: print(f'  line {i+1}: {a!r} -> should be {b!r}')
+    sys.exit(1)
+print('OK')
+" Cargo.toml dependencies
+```
 
-**为什么 `[workspace.dependencies]` 不适用本规则**:`[workspace.dependencies]` 块的语义是"声明 workspace 共享的 dep 版本 source",entry 顺序对 cargo 行为无影响,但**约定俗成地按 alphabetic 排**(不是按长度、不是按本地/三方分组),因为这块的内容是项目管理层级的"依赖目录",读者按字母查找具体的 dep 名。两套约定并存,不要混。
+`section` 可换成 `dev-dependencies` / `build-dependencies` 同样适用。
 
 **手工维护**:
+- 新增 dep 时:算 key 长度,按 `(len, key)` 升序找到插入位置,**不要** append 到末尾
+- PR review 时,如果 dep 块顺序不符合新规则,要求 author 重新排序
+- **euv 项目**:`euv fmt` 不处理 Cargo.toml,需要单独 sort;尚未集成自动化 taplo formatter
 
-- PR 提交前跑一次 `cargo sort`-类工具确认(本仓库 euv 项目 `euv fmt` 不处理 Cargo.toml,**需要单独 sort**)
-- 新增 dep 时,先判断本地还是三方 → 插入对应组 → 组内按长度找位置。**不要**随意 append 到末尾
-- PR review 时,如果新增 dep 破坏了顺序,要求 author 重新排序
-
-**配套工具**(尚未自动化):如果未来要工具化,`taplo fmt` + 一段自定义 order_by fn 是最直接的;优先级低于 §13.4 / §13.5 / §13.6,先把这三条吃透再考虑自动化。
+**修订历史**:本规则在 2026-09-14 替代 §13.7 旧版"primary 本地在前 + 三方在后,secondary 长度,tertiary 字典序"。旧版的"本地优先"动机(与 `lib.rs` 的 `pub use` 顺序一致)已被证明不必要 —— 单一可计算规则胜过双规则拼接,且不受 workspace 演化影响。
