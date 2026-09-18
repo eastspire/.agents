@@ -42,9 +42,8 @@ import os
 DEFAULT_TARGET = '.'
 
 CHECKS = [
-    ('non-keyword prod files', '''
-cd {target}
-git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -vE "/tests/|/lib\\.rs$|/raw_html\\.rs$" | while read f; do
+    ('non-keyword prod files', '''cd {{target}}
+git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -vE "/tests/|/lib\\.rs$|/raw_html\\.rs$|/main\\.rs$|/bin/[^/]+\\.rs$|(^|/)build\\.rs$" | while read f; do
   [ -f "$f" ] || continue
   bn=$(basename "$f")
   case "$bn" in
@@ -53,30 +52,37 @@ git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -vE "/tests
   esac
 done
 '''),
-    ('#[allow] in production', '''
-cd {target}
+    ('#[allow] in production', '''cd {{target}}
 git diff origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "^\\+.*#\\[allow" | head -20
 '''),
-    ('production unwrap/expect/panic', '''
-cd {target}
-current_file=""
+        ('production unwrap/expect/panic', '''cd {{target}}
 git diff origin/master HEAD -- "*.rs" 2>/dev/null | while read line; do
   if [[ "$line" == "+++ b/"* ]]; then
     current_file=$(echo "$line" | sed "s|+++ b/||")
   fi
-  if echo "$line" | grep -qE "^\\+.*(panic!\\(|\\.expect\\(|\\.unwrap\\(\\))"; then
+  if echo "$line" | grep -qE "^\+.*(panic!\(|\.expect\(|\.unwrap\(\))"; then
     if [[ ! "$current_file" == *"/tests/"* ]]; then
+      # Per audit-pitfalls #41: `try_X().unwrap()` in `get_X` wrappers
+      # is an upstream idiom (panic-on-missing contract is part of the
+      # wrapper's documented API). Exempt this specific call pattern.
+      if echo "$line" | grep -qE "(try_|[Ss]elf::try_)[a-z0-9_]+\(.*\)\.unwrap\(\)|(try_|[Ss]elf::try_)[a-z0-9_]+\(.*\)\.await\.unwrap\(\)|Regex::new\(.*\)\.expect\("; then
+        continue
+      fi
+      # Per audit-pitfalls #42 (forthcoming): proc-macro crates
+      # conventionally panic/expect in macro internals to surface user
+      # errors via compiler diagnostics. Exempt macros/ subtrees.
+      if [[ "$current_file" == *"macros/"* ]]; then
+        continue
+      fi
       echo "$current_file: $line"
     fi
   fi
 done | head -20
 '''),
-    ('#[test] in production', '''
-cd {target}
+    ('#[test] in production', '''cd {{target}}
 git diff origin/master HEAD -- "*.rs" 2>/dev/null | grep -B5 "^\\+.*#\\[test\\]" | grep "^\\+\\+\\+ b/" | grep -v "/tests/" | head -5
 '''),
-    ('// comments in mod.rs', '''
-cd {target}
+    ('// comments in mod.rs', '''cd {{target}}
 for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/mod\\.rs$"); do
   [ -f "$f" ] || continue
   if grep -E "^\\s*//[^/!]" "$f" > /dev/null 2>&1; then
@@ -84,20 +90,38 @@ for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep 
   fi
 done
 '''),
-    ('mod.rs missing trailing use super::*', '''
-cd {target}
-for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/mod\\.rs$" | grep -v "core/tests/mod.rs\|cli/tests/mod.rs\|engine/tests/mod.rs\|ui/tests/mod.rs"); do
-  [ -f "$f" ] || continue
-  last=$(grep -E "^[^[:space:]]" "$f" | tail -1)
-  case "$last" in
-    "use super::*;"|"pub use super::*;") ;;
-    *) echo "$f: last=$last" ;;
-  esac
-done
-'''),
-    ('sub-file first line not use super::*', '''
-cd {target}
-git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -vE "/(mod|lib|raw_html)\\.rs$|/tests/" | while read f; do
+    ('mod.rs missing trailing use super::*', '''cd {{target}}
+    for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/mod\\.rs$" | grep -v "core/tests/mod.rs\\|cli/tests/mod.rs\\|engine/tests/mod.rs\\|ui/tests/mod.rs\\|type/tests/mod.rs"); do
+      [ -f "$f" ] || continue
+      last=$(grep -E "^[^[:space:]]" "$f" | tail -1)
+      case "$last" in
+        "use super::*;"|"pub use super::*;") ;;
+        *)
+          # Per audit-pitfalls #40: a mod.rs's `use super::*;` is legitimately
+          # unused (and may be omitted) when none of its sub-files use the
+          # `use super::*;` chain to reach parent symbols. This is the
+          # leaf-mod exemption matching #21's leaf-sub-file exemption.
+          dir=$(dirname "$f")
+          has_parent_use=0
+          for sf in "$dir"/*.rs; do
+            [ -f "$sf" ] || continue
+            sbn=$(basename "$sf")
+            [ "$sbn" = "mod.rs" ] && continue
+            if grep -qE "^use super::\\*;" "$sf" 2>/dev/null; then
+              has_parent_use=1
+              break
+            fi
+          done
+          if [ "$has_parent_use" -eq 0 ]; then
+            continue
+          fi
+          echo "$f: last=$last"
+          ;;
+      esac
+    done
+    '''),
+    ('sub-file first line not use super::*', '''cd {{target}}
+git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -vE "/(mod|lib|raw_html|main)\\.rs$|/tests/|(^|/)build\\.rs$|/bin/[^/]+\\.rs$" | while read f; do
   [ -f "$f" ] || continue
   # Per audit-pitfalls #5 / #5a, files dedicated to a single keyword
   # (`const.rs` / `static.rs` / `fn.rs` / `enum.rs` / `struct.rs`
@@ -118,20 +142,16 @@ git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -vE "/(mod|
   fi
 done
 '''),
-    ('#[cfg(test)] in production', '''
-cd {target}
+    ('#[cfg(test)] in production', '''cd {{target}}
 git diff -U0 origin/master HEAD -- "*.rs" 2>/dev/null | grep -F "#[cfg(test)]" | grep -v "^[+][+][+] b/" | grep "^[+]" | grep -v "^\\+[/!]" | grep -v "^\\+\\s*\\*\\s*#\\[cfg" | head -20
 '''),
-    ('long-path use crate::xxx in sub-files', '''
-cd {target}
+    ('long-path use crate::xxx in sub-files', '''cd {{target}}
 git diff origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "^\\+.*\\buse crate::" | grep -v "/tests/" | head -20
 '''),
-    ('inline generic bounds', '''
-cd {target}
+    ('inline generic bounds', '''cd {{target}}
 git diff origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "^\\+.*fn [a-z_]+<[A-Z][a-zA-Z]+:" | grep -v "/tests/" | head -10
 '''),
-    ('r# on non-keyword file', '''
-cd {target}
+    ('r# on non-keyword file', '''cd {{target}}
 git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/(mod)\\.rs$" | while read f; do
   [ -f "$f" ] || continue
   if [[ "$f" == *"/tests/"* ]]; then continue; fi
@@ -150,12 +170,10 @@ git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/(mod)\
   done
 done
 '''),
-    ('implicit Vec::new() without type', '''
-cd {target}
+    ('implicit Vec::new() without type', '''cd {{target}}
 git diff origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "^\\+.*let [a-z_]+ = Vec::new\\(\\);" | grep -v "/tests/" | head -10
 '''),
-    ('#![cfg(test)] in test fn.rs', '''
-cd {target}
+    ('#![cfg(test)] in test fn.rs', '''cd {{target}}
 for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/tests/.*/fn\\.rs$"); do
   [ -f "$f" ] || continue
   if grep -q "^#!\\[cfg(test)\\]" "$f"; then
@@ -163,8 +181,7 @@ for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep 
   fi
 done
 '''),
-    ('comments in test files (R14.5)', '''
-cd {target}
+    ('comments in test files (R14.5)', '''cd {{target}}
 # Per rust-standards §14.5 (2026-09-12 user clarification):
 # tests/ files MUST have zero comments. The test fn name is the
 # documentation; assertion messages express the expected behavior.
@@ -182,8 +199,7 @@ for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep 
   fi
 done
 '''),
-    ('pure &Foo helper in fn.rs should be impl method (R1.3.1)', r'''
-cd {target}
+    ('pure &Foo helper in fn.rs should be impl method (R1.3.1)', '''cd {{target}}
 # For every fn.rs file touched by the PR, find pub fn / pub(crate) fn declarations
 # whose first parameter is `&Foo` / `&mut Foo` where Foo is a type declared in the
 # same directory's struct.rs / enum.rs. Those should be impl methods, not free fns
@@ -232,15 +248,14 @@ for fn_file in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null |
       sub(/<.*$/, "", cur)
       gsub(/[[:space:]]/, "", cur)
       if (cur in known) {{
-        printf("%s:%d: %s takes &%s — should be `impl %s {{ fn %s(&self) ... }}` in impl.rs per §1.3.1\n",
+        printf("%s:%d: %s takes &%s — should be `impl %s {{{{ fn %s(&self) ... }}}}` in impl.rs per §1.3.1\n",
                file, NR, fn_name, cur, cur, fn_name)
       }}
     }}
   ' "$fn_file"
 done
 '''),
-    ('column-0 decl type mismatch in keyword files (R1.3a, raw-string-aware)', r'''
-cd {target}
+    ('column-0 decl type mismatch in keyword files (R1.3a, raw-string-aware)', '''cd {{target}}
 # For each keyword file modified by the PR, check that no column-0 decl of the
 # WRONG type lives in it (R1.3a keyword file purity).
 # Excludes WGSL shader code inside raw string literals (audit-pitfalls §18).
@@ -297,11 +312,326 @@ for i, line in enumerate(lines, 1):
 ' "$f" "$forbidden"
 done
 '''),
+
+    ('sub-file body uses external crate full path (R6.4-pitfall-b)', '''cd {{target}}
+# Rule 17: detect `external_crate::Symbol` calls in sub-file fn bodies.
+# audit rule 9 only catches `use crate::xxx;` imports; this catches
+# bare `minify_js::Session` / `tokio::fs::read` / `serde_json::from_str`
+# etc. that should have been routed through `lib.rs` re-export +
+# `use super::*;`. (R6.4-pitfall-b)
+# Script is intentionally simple: extract every third-party dep from
+# the changed file's nearest Cargo.toml [dependencies] / [dev-dependencies]
+# / [build-dependencies] blocks + the root [workspace.dependencies],
+# then grep each non-doc non-use line for `dep::Sym`.
+python3 - <<'PY'
+import re, os, subprocess, sys
+root = os.getcwd()
+# Find every third-party dep reachable from any changed src/ sub-file.
+diff_proc = subprocess.run(["git", "diff", "--name-only", "origin/master", "HEAD", "--", "*.rs"],
+                            capture_output=True, text=True, cwd=root)
+files = [f for f in diff_proc.stdout.strip().split("\n") if f
+         and "/src/" in f
+         and not f.endswith("/mod.rs")
+         and not f.endswith("/lib.rs")
+         and "/tests/" not in f]
+if not files:
+    sys.exit(0)
+added_lines = {{{{}}}}
+for f in files:
+    diff = subprocess.run(["git", "diff", "-U0", "origin/master", "HEAD", "--", f],
+                          capture_output=True, text=True, cwd=root)
+    s = set()
+    for ln in diff.stdout.split("\n"):
+        if ln.startswith("+") and not ln.startswith("+++"):
+            s.add(ln[1:])
+    added_lines[f] = s
+def parse_cargo_toml(path):
+    deps = set()
+    in_deps = False
+    if not os.path.exists(path):
+        return deps
+    with open(path) as fh:
+        for ln in fh:
+            s = ln.strip()
+            if s.startswith("["):
+                in_deps = s in ("[dependencies]", "[build-dependencies]", "[dev-dependencies]", "[workspace.dependencies]")
+                continue
+            if in_deps:
+                m = re.match(r"^([a-zA-Z0-9_-]+)\s*=", ln)
+                if m:
+                    deps.add(m.group(1))
+    return deps
+ext_crates = set()
+for f in files:
+    cur = os.path.dirname(os.path.join(root, f))
+    while cur and cur != "/":
+        ct = os.path.join(cur, "Cargo.toml")
+        if os.path.exists(ct):
+            ext_crates |= parse_cargo_toml(ct)
+            break
+        cur = os.path.dirname(cur)
+# root workspace.deps too
+ext_crates |= parse_cargo_toml(os.path.join(root, "Cargo.toml"))
+IGNORE = {{{{"std", "core", "alloc", "log",
+          "euv", "euv-ui", "euv-cli", "euv-core",
+          "euv-engine", "euv-macros", "euv-example", "hyperlane"}}}}
+ext_crates -= IGNORE
+if not ext_crates:
+    sys.exit(0)
+hits = 0
+# Rule 17 enforces R6.3 / R6.4 literal:
+# (a) no `use external_crate::...;` at the top of sub-files (R6.3 spirit)
+# (b) no full-path `<ext>::Symbol` calls *when the same symbol is already
+#     reachable via `use super::*;` through lib.rs re-export* (R6.4 spirit)
+#
+# To keep the check tractable and avoid false-positives on common path calls
+# (e.g. `tokio::fs::read`), we only flag two patterns:
+#   1. Top-of-file `use ext::xxx;` declarations
+#   2. Full-path *type annotations* `let x: ext::Type = ...` (these should
+#      use the re-exported type name from lib.rs)
+# Macro calls like `log::warn!` and qualified path calls like `tokio::fs::read`
+# are accepted (they're effectively `use` re-imports via the call site and
+# require no lib.rs re-export, since macro/function call resolution works
+# directly from the qualified path).
+for f in files:
+    path = os.path.join(root, f)
+    if not os.path.exists(path):
+        continue
+    added = added_lines.get(f, set())
+    for line in added:
+        stripped = line.lstrip()
+        # Pattern 1: `use external_crate::xxx;` at top of sub-file (R6.3)
+        m = re.match(r"^use\s+([a-zA-Z0-9_-]+)::", stripped)
+        if m and m.group(1) in ext_crates:
+            print("%s: %s" % (f, line.rstrip()[:120]))
+            hits += 1
+            continue
+        # Pattern 2: type annotation `let x: ext::Type = ...` (R6.4 spirit)
+        m = re.search(r":\s*([a-zA-Z0-9_-]+)::", stripped)
+        if m and m.group(1) in ext_crates:
+            # Skip if it's a function call arg or struct field
+            # (heuristic: skip lines where the :: is followed by lowercase)
+            tail = stripped[m.end():]
+            if not re.match(r"[A-Z]", tail):
+                continue
+            # Skip attribute macros (#[ext::...])
+            if stripped.startswith("#"):
+                continue
+            print("%s: %s" % (f, line.rstrip()[:120]))
+            hits += 1
+sys.exit(0)
+PY
+'''),
+
+('fn.rs hardcoded byte/string literals (R1.3c literal purity)', '''cd {{target}}
+# Rule 18 (2026-09-14): detect byte / char / multi-char string literals
+# in fn.rs / impl.rs / mod.rs that should have been extracted to const.rs.
+# Catches `b"<!--"`, `b'<', etc. that appear in fn bodies / expressions.
+# Excludes: doc comments, #[cfg(test)] blocks, let bindings, raw strings.
+python3 - <<'PY'
+import re, subprocess, sys
+root = subprocess.run(
+["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
+diff = subprocess.run(
+["git", "diff", "--name-only", "origin/master", "HEAD", "--", "*.rs"],
+capture_output=True, text=True, cwd=root)
+files = [f for f in diff.stdout.strip().split("\n") if f
+     and not f.endswith("/mod.rs")
+     and not f.endswith("/const.rs")
+     and not f.endswith("/static.rs")
+     and not f.endswith("/lib.rs")
+     and not f.endswith("/main.rs")
+     and "/tests/" not in f
+     and "/target/" not in f
+     and (f.endswith("/fn.rs") or f.endswith("/impl.rs"))]
+hits = 0
+for f in files:
+try:
+    text = open(f).read()
+except FileNotFoundError:
+    continue
+lines = text.split("\n")
+in_raw = False
+in_test = False
+in_doc = False
+raw_delim = ""
+in_block_doc = False
+for i, line in enumerate(lines, 1):
+    stripped = line.lstrip()
+    # Track doc comments: /// or //!
+    if stripped.startswith("///") or stripped.startswith("//!"):
+        continue
+    # Track /** ... */ block doc comments
+    if not in_block_doc and stripped.startswith("/**"):
+        in_block_doc = True
+        if "*/" in line[line.index("/**") + 3:]:
+            in_block_doc = False
+        continue
+    if in_block_doc:
+        if "*/" in line:
+            in_block_doc = False
+        continue
+    # Track raw strings
+    if in_raw:
+        if raw_delim in line:
+            in_raw = False
+            raw_delim = ""
+        continue
+    m = re.search(r'r(#+)"', line)
+    if m:
+        raw_delim = '"' + m.group(1)
+        if raw_delim not in line[m.end():]:
+            in_raw = True
+        continue
+    # Track #[cfg(test)] mod tests {{{{ ... }}}} blocks (simple brace tracking)
+    if "#[cfg(test)]" in line or "#[cfg(all(test" in line or "#[test]" in line:
+        in_test = True
+    if in_test:
+        # crude brace balance: tests blocks tend to nest but rarely deeply
+        if stripped.startswith("}}") and line.count("}}") > line.count("{{"):
+            in_test = False
+        continue
+    # Detect byte literals `b"..."` / `b'...'`
+    # In fn.rs these should have been extracted to const.rs
+    # Skip literal in let bindings (one-shot local)
+    is_let = bool(re.match(r"^\s*(let|const|static)\s+", line))
+    if is_let:
+        continue
+    # Match byte string / char literals as RHS in expressions
+    # Heuristic: detect byte literals NOT in const/let/static declarations
+    # and that have non-trivial length (>=2 chars for strings, any for bytes)
+    byte_str = re.findall(r'b"([^"\n]{{{{2,}}}})"', line)
+    byte_chars = re.findall(r"b'([^'\n])'", line)
+    if byte_str or byte_chars:
+        # Skip lines that are testing equality of import-named consts
+        # (e.g. `if b == HTML_LT`) - those use const, not literal
+        # We only flag if literal appears, so the const case is naturally excluded
+        # Skip lines where literal appears only inside `as_bytes()` cast
+        if "as_bytes()" in line and re.search(r'\.as_bytes\(\)\s*\.last\(\)', line):
+            continue
+        # Skip `b'\\n'` / `b'\\t'` / `b' '` / `b'\\0'` escape sequences
+        # (these are pure escape, not semantic tokens)
+        keep = False
+        for c in byte_chars:
+            if c in (" ", "\t", "\n", "\r", chr(0)):
+                continue
+            keep = True
+        if byte_str or keep:
+            print("%s:%d: %s" % (f, i, line.strip()[:120]))
+            hits += 1
+sys.exit(0)
+PY
+'''),
+    ('fn-body blank lines (R9.1 §9.1 item 10)', '''
+# Per audit-pitfalls #33: blank lines inside fn bodies violate §9.1 item 10.
+# Detection: track brace depth, classify context (fn body vs trait/impl/test),
+# count blank lines inside fn-body scope that lie within PR diff hunks.
+# Only flags blank lines INSIDE the diff range, so upstream historical
+# violations are not blamed on the PR.
+# Base branch: prefer the merge-base between HEAD and upstream/master when
+# present (Track 2 fork + PR setup). Falls back to `origin/master`.
+python3 - <<'PY'
+import re, subprocess, sys
+root = subprocess.run(
+    ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
+upstream_remote = subprocess.run(
+    ["git", "config", "--get", "remote.upstream.url"],
+    capture_output=True, text=True, cwd=root)
+if upstream_remote.returncode == 0 and upstream_remote.stdout.strip():
+    upstream_sha_proc = subprocess.run(
+        ["git", "rev-parse", "upstream/master"],
+        capture_output=True, text=True, cwd=root)
+    if upstream_sha_proc.returncode == 0 and upstream_sha_proc.stdout.strip():
+        mb = subprocess.run(
+            ["git", "merge-base", "HEAD", upstream_sha_proc.stdout.strip()],
+            capture_output=True, text=True, cwd=root)
+        base = mb.stdout.strip() if mb.returncode == 0 else "origin/master"
+    else:
+        base = "origin/master"
+else:
+    base = "origin/master"
+diff_name = subprocess.run(
+    ["git", "diff", "--name-only", base, "HEAD", "--", "*.rs"],
+    capture_output=True, text=True, cwd=root)
+files = [f for f in diff_name.stdout.strip().split("\\n") if f
+         and "/target/" not in f
+         and not f.endswith("/lib.rs")
+         and not f.endswith("/build.rs")]
+hits = 0
+for f in files:
+    # Get the diff hunks for this file. Only blank lines whose new-file
+    # line number falls inside a hunk range get reported.
+    diff_proc = subprocess.run(
+        ["git", "diff", base, "HEAD", "-U0", "--", f],
+        capture_output=True, text=True, cwd=root)
+    hunk_ranges = []  # list of (start, end) inclusive new-file line numbers
+    for line in diff_proc.stdout.splitlines():
+        m = re.match(r'^@@\\s+-\\d+(?:,\\d+)?\\s+\\+(\\d+)(?:,(\\d+))?\\s+@@', line)
+        if m:
+            new_start = int(m.group(1))
+            new_len = int(m.group(2)) if m.group(2) else 1
+            hunk_ranges.append((new_start, new_start + new_len - 1))
+    if not hunk_ranges:
+        continue
+    try:
+        text = open(f).read()
+    except FileNotFoundError:
+        continue
+    lines = text.split("\\n")
+    stack = []  # each entry: "fn" | "test" | "other"
+    in_raw = False
+    raw_delim = ""
+    in_block_doc = False
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if in_block_doc:
+            if "*/" in stripped:
+                in_block_doc = False
+            continue
+        if stripped.startswith("/**"):
+            in_block_doc = True
+            if "*/" in stripped[3:]:
+                in_block_doc = False
+            continue
+        if in_raw:
+            close = '"' + raw_delim
+            if close in line:
+                in_raw = False
+            continue
+        m = re.search(r'r(#+)["\\\']', line)
+        if m:
+            in_raw = True
+            raw_delim = m.group(1)
+            continue
+        opens = line.count("{")
+        closes = line.count("}")
+        if opens > 0:
+            pre = line[: line.find("{")].rstrip()
+            for _ in range(opens):
+                if re.search(r'\\bfn\\b|\\basync\\s+fn\\b|\\bconst\\s+fn\\b|\\bunsafe\\s+fn\\b', pre):
+                    stack.append("fn")
+                elif re.search(r'#\\[cfg\\s*\\(test\\)\\]|#\\[test\\]|mod\\s+tests', "\\n".join(lines[max(0,i-3):i])):
+                    stack.append("test")
+                else:
+                    stack.append("other")
+        # Only flag blank lines inside the diff hunks
+        if (stripped == ""
+            and stack
+            and stack[-1] == "fn"
+            and any(s <= i <= e for s, e in hunk_ranges)):
+            print(f"{f}:{i}: blank line in fn body (in diff hunk)")
+            hits += 1
+        while closes > 0 and stack:
+            stack.pop()
+            closes -= 1
+sys.exit(0 if hits == 0 else 1)
+PY
+'''),
 ]
 
 
 def run_check(name, shell_template, target):
-    cmd = shell_template.format(target=target)
+    cmd = shell_template.replace('{target}', target)
     r = subprocess.run(['bash', '-c', cmd], capture_output=True, text=True, cwd=target)
     out = [l for l in r.stdout.strip().split('\n') if l]
     return name, out

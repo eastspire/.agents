@@ -1049,6 +1049,118 @@ rule, injects a synthetic violation into a temp file, runs the rule,
 and confirms `r.stdout` is non-empty. Skip if the rule has no
 synthesizable violation (e.g. file-level scans that need real `.rs` files).
 
+
+### 35-B. Python heredoc inside `r'''` shell template — every `{` and `}` must be doubled, even outside `.format()` callsites
+
+When a `CHECKS.append` rule's shell template embeds a `python3 - <<'PY' ... PY`
+heredoc, **every literal `{` and `}` inside the heredoc is interpreted by
+`.format(target=target)` in `run_check`** — not just the `{target}` placeholder.
+Audit check 17 (the new "sub-file body uses external crate full path"
+rule) had three separate unescape bugs that crashed with
+`IndexError: Replacement index 0 out of range for positional args tuple`:
+
+1. `IGNORE = {"std", "core", ...}` — the Python set literal `{...}` was
+   consumed by `.format()`. Fix: `IGNORE = {{"std", "core", ...}}`.
+2. `added_lines = {}` — the empty dict literal. Fix: `added_lines = {{}}`.
+3. Any `{` `}` in regex literals inside the heredoc, e.g.
+   `re.match(r"\{", line)` becomes a malformed pattern after `.format()`
+   passes the single `{` through. Fix: double them too (`{{` `}}`).
+
+**Symptom** is always the same: a rule that worked in isolation crashes
+when the audit script runs `cmd = shell_template.format(target=target)`,
+because `.format()` raises `IndexError` on any unmatched positional
+placeholder (even just `{}`). The traceback is at
+`audit_rust_standards.py:391: cmd = shell_template.format(target=target)`.
+
+**Defense**: after editing any shell template in `CHECKS.append`, run
+
+```python
+import importlib.util
+spec = importlib.util.spec_from_file_location(
+    "a", "/root/.agents/skills/rust-standards/scripts/audit_rust_standards.py")
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+for n, t in m.CHECKS:
+    m.run_check(n, t, "/root/github/euv-dev/euv")
+```
+
+Every rule should produce empty output (no false positives on a clean
+repo); any rule that crashes or hits an `IndexError` has an unescaped
+`{}` somewhere.
+
+### 35-C. `'''` close can be silently missing between adjacent `CHECKS.append` entries — Python sees one long string instead of N
+
+When a `CHECKS.append` rule ends with a multi-line `r'''...''')` and the
+next entry starts on the line after, **the audit script silently
+concatenates them** if the closing `''')` is missing from entry N.
+The first entry looks "fine" because the syntax parses (the open `r'''`
+of entry N+1 closes entry N's string), and entry N+1 picks up where
+entry N's content left off. This causes:
+
+- Entry N's actual close `'''),` is missing → N's content leaks into
+  N+1 → N+1's shell template contains unrelated code.
+- Audit reports fewer rules than expected (the audit prints "N/17 PASS"
+  instead of "16/17 PASS") because two entries merged into one.
+- No syntax error — Python is happy with the merged string.
+
+**Symptom**: `audit_rust_standards.py` reports fewer total checks than
+the `len(CHECKS)` you expect, OR `rule X` shows up named for what should
+be rule Y. Diagnostic:
+
+```python
+import importlib.util
+spec = importlib.util.spec_from_file_location(
+    "a", "/root/.agents/skills/rust-standards/scripts/audit_rust_standards.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(len(m.CHECKS))   # should match the "X/Y PASS" output's Y
+```
+
+**Defense**:
+
+```bash
+grep -nE "^'''\),$|^r'''$" /root/.agents/skills/rust-standards/scripts/audit_rust_standards.py
+```
+
+should print exactly `2 × len(CHECKS)` lines (each entry has one open
+`r'''`/`'''` and one close `'''),`). Mismatch → some entry's close is
+missing.
+
+### 35-D. Check 17 R6.4-pitfall-b — too broad, then over-narrowed; final scope is "top-of-file `use` and type annotations only"
+
+R6.3 / §6.4 spirit says sub-files should reach external symbols via
+`use super::*;` and `lib.rs` re-export, not via qualified full paths.
+But §6.3 *literal* only forbids two patterns:
+
+1. Top-of-file `use external_crate::xxx;` (R6.3)
+2. `let x: external_crate::Type = ...` type annotations (R6.4 spirit)
+
+It does **not** forbid:
+
+- `log::warn!(...)` macro calls
+- `tokio::fs::read(&path)` qualified path calls
+- `clap::Parser` derive macro paths
+- `serde_json::from_str` qualified function calls
+
+An earlier version of check 17 grepped `\b<ext>::[A-Za-z_]` across the
+whole file (not just `+` diff lines) and treated macro calls as
+violations, producing 41 false positives on a single PR (all `log::warn!`,
+plus historical `tokio::fs::*` calls that were already merged). The
+fixed version of check 17 only scans **added lines from
+`git diff -U0 origin/master HEAD -- <file>`**, and only matches the two
+literal patterns above (top-of-file `use`, type-annotation `:`).
+
+**If you change check 17's regex, reproduce both directions**:
+
+- Add a synthetic `use external_crate::xxx;` to a test diff → expect 1 hit
+- Add a synthetic `log::warn!("...")` to a test diff → expect 0 hits
+- Add a synthetic `let x: external_crate::Type = ...;` → expect 1 hit
+- Add a synthetic `tokio::fs::read(...)` call → expect 0 hits
+
+If any of these expectations are wrong, the regex is over- or
+under-matching. Also remember the §35-B escape rule: any `{` or `}` in
+the heredoc must be `{{` / `}}` to survive `.format(target=target)`.
+
+
 ## 36. `rust-analyzer` lint false positive on Rust 2024 `let chains` and `async fn` — don't trust editor lints blindly
 
 This session moved several declarations across files. After every move,
@@ -1313,3 +1425,264 @@ ships 7 raw-pointer test structs (`GenericPtr<T>`, `DstPtr`,
 `debug/src/main.rs`, all gated by `fn main()` assertions, run via
 `cargo run -p debug` from the subdir. Audit reports 14/16 PASS
 with these two checks as the only failures.
+
+
+## 39. `cli/src/main.rs` — NOT a violation of §1.3a (keyword file purity)
+
+`main.rs` is the binary entry point of any `[[bin]]` target in a Cargo
+workspace — it MUST be named `main.rs` (or referenced by
+`[[bin]] path = "..."` in Cargo.toml), because cargo's default `[[bin]]`
+discovery looks for `src/main.rs`. Renaming it to `fn.rs`/`mod.rs` etc.
+to "satisfy" the keyword-purity rule would break the binary build.
+
+Audit category 1 (`non-keyword prod files`) historically missed this
+case — when a PR adds `cli/src/main.rs` (e.g. a `[[bin]]` crate being
+imported into the workspace), the rule reports `NON-KEYWORD: cli/src/main.rs`.
+The fix (2026-09-14): add `/main\.rs$` to the grep -vE exclusion list
+in the rule template, alongside `/lib\.rs$` and `/raw_html\.rs$`.
+
+**NOT a violation**: any `main.rs` (or `bin/<name>.rs` referenced from
+`[[bin]] path`) — these are bin-target entry points, not production
+keyword files.
+
+**Still a violation**: any other non-keyword `*.rs` file under `src/`
+(e.g. `src/foo.rs`, `src/utils.rs`, `src/helpers.rs`) — those should
+be re-organized into keyword subdirectory + `mod.rs`.
+
+Verified during hyperlane monorepo migration (PR #34): audit now PASSes
+on `cli/src/main.rs` after the rule fix.
+
+
+## 39a. `src/bin/<name>.rs` and `build.rs` — NOT violations of §1.3a (keyword file purity)
+
+`src/bin/<name>.rs` is the cargo-discovered binary entry path
+(`[[bin]] path = "src/bin/<name>.rs"` in Cargo.toml), equivalent to
+`src/main.rs` for binary targets. `build.rs` is the cargo build script
+entry point. Both are legitimate cargo conventions that must not be
+re-organised into keyword subdirectory + `mod.rs` — cargo's discovery
+rules require them at the conventional paths.
+
+**Audit fix (2026-09-18)**: add `/bin/[^/]+\.rs$` and `(^|/)build\.rs$` to
+the grep -vE exclusion list in audit rule #1 (non-keyword prod files)
+and rule #7 (sub-file first line not `use super::*`), alongside
+`/main\.rs$`. The `(^|/)` prefix is required because `build.rs` lives
+at the repo root (no leading `/`); the pattern `(^|/)build\.rs$`
+matches `build.rs` and `path/to/build.rs` but not `sub_build.rs`.
+
+Triggered by `eastspire/euv-docs` PR #31 (feat/cli-binary): adding
+`[[bin]] name = "euv-docs"` plus a 14-line env-var block in `build.rs`
+to support a CLI binary. Both files are mandatory cargo conventions.
+
+**NOT a violation**: any `src/bin/<name>.rs` (cargo auto-discovery for
+`[[bin]]`) or `build.rs` (cargo build script entry point). Both files
+must stay at the conventional paths and cannot be re-organised.
+
+**Still a violation**: any other non-keyword `*.rs` file under `src/`
+(e.g. `src/foo.rs`, `src/utils.rs`, `src/helpers.rs`) — those should
+be re-organised into keyword subdirectory + `mod.rs`. The exclusion
+matches only files that satisfy the `bin/<one-segment>.rs` or top-level
+`build.rs` pattern.
+
+
+## 39b. audit script check 19 (R9.1 §9.1 item 10 — fn-body blank lines) — added 2026-09-18
+
+**Why**: §9.1 item 10 forbids blank lines inside function bodies. The
+audit script previously had no check for this (audit-pitfalls #33 gave
+the recipe but no rule was wired in), so a hand-written `pub fn` with
+multiple blank lines between statements would PASS the audit and only
+fail user review.
+
+**Audit fix (2026-09-18)**: check 19 added to `audit_rust_standards.py`.
+Detection algorithm:
+
+1. Classify brace-opening context per audit-pitfalls #33:
+   - text before `{` matches `\b(fn|async\s+fn|const\s+fn|unsafe\s+fn)\b` → push `"fn"`
+   - preceding 3 lines contain `#[cfg(test)]` / `#[test]` / `mod tests` → push `"test"`
+   - else → push `"other"`
+2. Walk lines tracking the stack. When a blank line is seen and the
+   topmost frame is `"fn"`, flag it as a violation.
+3. Skip raw-string contents (WGSL shader code in `r#"..."#`), block
+   doc-comments (`/** ... */`), and line doc-comments (`///` / `//`).
+
+**Diff-hunk scoping** (added in same fix): only flag blank lines whose
+new-file line number falls inside a hunk range from
+`git diff <base> HEAD -U0 -- <file>`. This prevents upstream historical
+violations from being blamed on the PR. Verified against
+`eastspire/euv-docs` PR #31 (feat/cli-binary): build.rs has 25 fn-body
+blank lines upstream-side but **0 in PR diff hunks** — audit correctly
+reports 19/19 PASS for that PR.
+
+**Base branch detection** (added in same fix): prefer the merge-base
+between HEAD and `upstream/master` when a `remote.upstream.url` is
+configured (Track 2 fork + PR setup). Falls back to `origin/master` for
+non-fork repos. Verified against the same PR: `git merge-base HEAD
+upstream/master` = `2e7fbb5`, diff scope = 4 files (the PR's actual
+diff), not 6 (which is what `origin/master..HEAD` would return because
+the local fork master contains 2 commits not yet merged upstream).
+
+**Verified against**: `eastspire/euv-docs` PR #31 with hand-cleaned
+`src/bin/euv-docs.rs` (4 phase comments replace inter-statement blank
+lines) — 19/19 PASS, 0 false positives.
+
+**NOT a violation** (per audit-pitfalls #33):
+- Blank lines between top-level items (after one fn's `}` and before
+  the next fn's doc comment) — these separate items, not inside bodies.
+- Blank lines inside `#[cfg(test)] mod tests { ... }` — test fns are
+  exempt per `tests/` pattern.
+- Blank lines between trait method signatures (`pub trait Foo { fn a();
+  fn b(); }`).
+- Blank lines inside `use { ... }` blocks or const-item lists.
+
+
+## 40. `mod.rs` 末尾 `use super::*;` 在子文件全无 parent symbol 用法时是 unused — auditor should accept absence
+
+Audit category 6 (`mod.rs missing trailing use super::*`) currently
+requires every `mod.rs` to end with `use super::*;` regardless of
+whether the mod.rs itself or any sub-file actually consumes a
+parent-module symbol. When **no sub-file** uses `use super::*;` to
+access parent symbols (i.e. the entire `mod.rs` subtree is self-
+contained — common for leaf enums like `pub enum CommandType { ... }`
+with no methods), adding `use super::*;` triggers `unused_imports` at
+mod.rs level (which propagates to all sub-files via `use super::*;`).
+rustc 2024 edition treats `unused_imports` as a warning by default.
+
+**Concrete case (hyperlane monorepo, PR #34)**: `cli/src/command/mod.rs`
+contains `mod r#enum;` + `pub use r#enum::*;`. The only sub-file
+`cli/src/command/enum.rs` declares a pure `pub enum CommandType`
+without any `use super::*;` chain reference. Adding `use super::*;`
+to `mod.rs` raises `warning: unused import: super::*` because:
+
+- the sub-file `enum.rs` doesn't `use super::*;` (audit-pitfalls #21
+  exemption — leaf enum with no parent symbol references)
+- the `mod.rs` itself doesn't reference any super symbol
+
+**Compounded rule** (extends #21 to the mod.rs level):
+
+1. If a `mod.rs` has any sub-file that uses `use super::*;` (and that
+   chain reaches the parent), `mod.rs` MUST keep `use super::*;` (the
+   super symbol is consumed via the chain).
+2. If **all** sub-files in a `mod.rs` are exempt from `use super::*;`
+   per #21 (i.e. leaf enum / struct / type / fn / const files that
+   reference no parent symbol), the mod.rs's `use super::*;` is
+   legitimately unused and may be omitted.
+3. When in doubt, run `cargo check -p <crate>` and look for
+   `unused_imports: super::*` warnings — if 0 warnings, the omission
+   is consistent.
+
+**Audit script update** (2026-09-14): category 6 should be relaxed to
+"missing `use super::*;` AND at least one sub-file uses parent
+symbols" — if the sub-file analysis shows zero parent-symbol usage,
+the mod.rs's `use super::*;` is exempt. Equivalent check:
+
+```bash
+# Detect: does any sub-file use super::* chain to parent?
+has_parent_use=0
+for f in $(find "$(dirname "$modfile")" -name '*.rs' ! -name 'mod.rs' ! -name 'lib.rs'); do
+  if grep -q "^use super::\*;" "$f" 2>/dev/null; then
+    has_parent_use=1
+    break
+  fi
+done
+if [ "$has_parent_use" -eq 0 ]; then
+  # No sub-file uses parent — mod.rs's use super::* is legitimately unused
+  continue
+fi
+```
+
+Verified during hyperlane monorepo migration (PR #34): `cli/src/command`,
+`cli/src/help`, `cli/src/version`, `type/src/box_leak`, `type/src/lifetime`
+all contain only leaf enum/struct/trait sub-files. `cli/src/logger/mod.rs`
+does need `use super::*;` because it has sub-files (impl.rs) that use
+super symbols.
+
+
+## 41. `try_X().unwrap()` in `get_X()` wrappers — INTENTIONAL upstream pattern
+
+A common Rust idiom for projects with explicit `try_X` (Result-returning)
+and `get_X` (panicking) APIs is:
+
+```rust
+pub fn get_header<K>(&self, key: K) -> String
+where
+    K: AsRef<str>,
+{
+    self.try_get_header(key).unwrap()   // panics if missing
+}
+```
+
+The semantics are explicit: `try_X` returns `Result<T, E>` (caller-
+controlled), `get_X` panics (caller asserts presence). The panic in
+`get_X` is **part of the API contract**, not a defensive unwrap.
+
+**Audit script (category 3)** currently flags any `unwrap()` /
+`expect()` / `panic!()` in `*.rs` files (excluding `/tests/`) as a
+violation, without inspecting the call pattern. This produces false
+positives for the `try_X().unwrap()` wrapper pattern.
+
+**Concrete case (hyperlane monorepo, PR #34)**: 15 occurrences across
+`type/src/request/impl.rs`, `type/src/response/impl.rs`,
+`type/src/stream/impl.rs`, `type/src/websocket_frame/impl.rs` — all of
+them `try_X().unwrap()` inside a `pub fn get_X(...)` wrapper.
+
+**Detection rule** (would require a smarter audit check, not yet
+implemented):
+- A `pub fn get_X` whose body is exactly `self.try_X(args).unwrap()`
+  (or `.expect(msg)`) — by definition, the function's panic-on-missing
+  contract is documented in the surrounding doc comment.
+
+**Currently**: category 3 reports these as violations. PR authors are
+expected to either:
+1. Accept the FAIL (and document it in the PR description as "upstream
+   wrapper pattern — not modified in this PR"), OR
+2. Replace `try_X().unwrap()` with `try_X().expect("descriptive
+   message")` (audit still flags, but the panic message is more
+   useful), OR
+3. Change `get_X` to return `Result<T, E>` and propagate with `?`
+   (BREAKING — out of scope for migration PRs).
+
+Verified during hyperlane monorepo migration (PR #34): all 15
+occurrences follow this pattern. They are upstream code copied from
+http-type (crates-dev) and not introduced by the migration.
+
+
+## 42. Sub-file `external_crate::Type` type annotations in monorepo PR scope — INTENTIONAL upstream carry-over
+
+When merging multiple crates into a monorepo via `mv src core/src`, the
+upstream code's type annotations (e.g. `let x: proc_macro2::TokenStream
+= ...`, `let level: log::Level = ...`, `let err: notify::Error = ...`)
+are preserved as-is. The monorepo PR's scope is "consolidate workspace
+structure", not "rewrite each upstream type annotation to a re-exported
+alias".
+
+Audit category 17 (`sub-file body uses external crate full path`) only
+flags two patterns:
+
+- top-of-file `use external_crate::xxx;` (R6.3 spirit)
+- type annotation `: external_crate::Type` (R6.4 spirit)
+
+But it parses `[workspace.dependencies]` only, NOT each sub-crate's
+`[dependencies]` — so type annotations like `proc_macro2::TokenStream`
+(macros sub-crate), `log::Level` (cli sub-crate), `notify::Error`
+(cli sub-crate) are not detected.
+
+**Concrete case (hyperlane monorepo, PR #34)**:
+
+- `macros/src/common/fn.rs`: `proc_macro2::TokenStream` annotations
+- `cli/src/logger/impl.rs`: `log::Level`, `log::LevelFilter`
+- `cli/src/publish/fn.rs`: `notify::Error`
+- `macros/src/inject/fn.rs`: `syn::Ident`, `syn::Path`, etc.
+
+These are all upstream code style; the monorepo PR does not introduce
+new violations. They are noted for follow-up cleanup (each sub-crate's
+`lib.rs` should `pub use proc_macro2::TokenStream` / `pub use log::Level`
+etc. to satisfy R6.4 fully).
+
+**Detection rule** (audit script enhancement, not yet implemented):
+parse `[dependencies]` from each sub-crate's `Cargo.toml`, not just
+`[workspace.dependencies]` of root. This would catch the
+`proc_macro2::TokenStream`-in-macros and `log::Level`-in-cli cases.
+
+**Migration PR convention**: preserve upstream type annotations in the
+initial monorepo PR; address each sub-crate's lib.rs re-export in
+follow-up PRs scoped to that crate (one PR per crate keeps review
+diff small).
