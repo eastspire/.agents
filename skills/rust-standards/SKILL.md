@@ -27,15 +27,16 @@ description: 'Rust 开发规范(最高优先级,与任何 skill 冲突时以此�
 | 用户给一段 Rust 代码让你 review / 改 / 优化 / 重构 | ✅ |
 | 用户让你 clone / fork 一个 Rust 项目 | ✅ |
 | 你发现自己在 terminal 准备跑 `cargo ...` | ✅ |
+| **你刚把 `use super::*;` 加进子文件,准备写 `external_crate::Sym` 调用** | ✅(先看下 §6.4 pitfall-b,audit 不覆盖这个)|
 | **不确定是否相关** | ✅(错的代价是几 KB context,不加载的代价是 PR 被驳回) |
 
 ### 加载顺序(每次新会话第一件事)
 
 1. `skill_view('rust-standards')` 加载本文件(必)
-2. 写 Rust 代码前通读 `## 关键硬性规则`(13 条)
+2. 写 Rust 代码前通读 `## 关键硬性规则`(15 条)
 3. 写 Rust 代码前读对应子章节(目录结构 / mod.rs 三段式 / lib.rs 导入 / 测试位置 ...)
 4. 写完后跑 `## Pre-commit 必跑`(audit + fmt 双幂等 + clippy + test 编译)
-5. **跑完 14/14 audit + clippy 0 警告 + fmt 幂等 + 测试通过** → 才能 commit / push / 提 PR
+5. **跑完 18/18 audit + clippy 0 警告 + fmt 幂等 + 测试通过** → 才能 commit / push / 提 PR
 
 ### 违反本 skill 的后果(实证)
 
@@ -117,7 +118,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | 脚本 | 用途 |
 |------|------|
 | [scripts/verify_tests_layout.sh](scripts/verify_tests_layout.sh) | 验证 §14.4 (无 inline tests) + §14.5 (无测试注释) + top-level mod.rs 无 `use super::*;`。`bash <path>/verify_tests_layout.sh <repo_root>` 即可全检。 |
-| [scripts/audit_rust_standards.py](scripts/audit_rust_standards.py) | 完整 16 条 audit 规则(覆盖 §1 / §2 / §5 / §6 / §9 / §11 / §14 / §17)。**False-positive 列表**见 `references/audit-pitfalls.md`(§1-§16 当前 17 条,新增的 §17 是 `debug/` dev-scratch subdir 的 known-noise,2026-09-12 lombok PR 实测)。 |
+| [scripts/audit_rust_standards.py](scripts/audit_rust_standards.py) | 完整 19 条 audit 规则(覆盖 §1 / §2 / §5 / §6 / §9 / §11 / §14 / §17 / §R1.3c + check 19 fn-body blank lines)。**False-positive 列表**见 `references/audit-pitfalls.md`(§1-§42,新增 §39a `src/bin/<name>.rs` + `build.rs` 白名单 / §39b check 19 upstream-aware base + diff hunks scoping / §40 leaf-mod.rs use super 豁免 / §41 try_X().unwrap() 上游 idiom 豁免 / §42 sub-file ext::Type 上游 carry-over,2026-09-14 hyperlane PR #34 monorepo 迁移实测 + 2026-09-18 eastspire/euv-docs PR #31 feat/cli-binary 实测)。 |
 
 ## 关键硬性规则(快速记忆)
 
@@ -153,6 +154,16 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
      漏跑 `cargo fmt` → PR CI `Format check` job fail,需要 force-push amend commit。`cargo fmt --all -- --check` 0 exit = OK。
    - **同样适用** hyperlane: CI 可能跑 `cargo fmt --check` 而不是 `hyperlane fmt --check`(以 `.github/workflows/rust.yml` 实际 job 为准,开 PR 前 `gh run view <run-id> --log` 验证)。
    - **Pitfall(rebase conflict 解决后 `cargo fmt --check` 仍 fail,euv 仓 2026-09-13 PR #217→#219 实测)**: git rebase 处理 `<<<<<<<` 冲突块时,即使删掉中间内容后 `cargo check` 退出 0,`cargo fmt --check` 仍可能因「孤儿重复注释 / 行缩进错位」挂——`cargo check` 不读注释,`cargo fmt` 读。**预防**:rebase amend 之前先 `cargo fmt --all -- --check`,exit 非零先 `cargo fmt` 修一遍再 amend。
+14. **禁止使用 `#[allow(...)]` / `#[allow(...)]` 类宏遮蔽 lint**(2026-09-14 user 原话:"从根源修复warn,禁止使用allow宏")。clippy / rustc 任何 warning(`needless_range_loop` / `unused_imports` / `dead_code` / `clippy::all` 等)**必须从根源修复**,**禁止用 `#[allow]`、`#[allow(unused)]`、`#[allow(clippy::xxx)]` 跳过**。
+   - 例:`for j in i+1..i+end_len { out.push(bytes[j]); }` 触发 `clippy::needless_range_loop` → 改成 `for &b in &bytes[i+1..i+end_len] { out.push(b); }`,**不是** `#[allow(clippy::needless_range_loop)]`。
+   - 例:`static_mut_refs` 安全情况下,改用 `&mut *(*std::ptr::addr_of_mut!(STATIC)).get_0().get()` 表达式包装,**不是** `#[allow(static_mut_refs)]`(参见 `euv-standards/references/signal-subscription-bindings.md` 2026-09-12 实测)。
+   - **例外**(2 个真实工作流场景):(a) 第三方宏展开产生的 dead_code,无法在源层消除(极罕见);(b) `#[cfg(test)] mod tests` 内测试专用 helper 函数,production build 看不到 — 这两类先用 clippy `#[expect(...)]` 配合 issue 编号注释,**默认仍禁止**。
+15. **`fn.rs` / `impl.rs` / `mod.rs` 文件体内禁止硬编码 byte / char / 多字符 string literal**(§R1.3c literal purity,2026-09-14 euv PR #233 实测)。任何 `b"<script"` / `b'<'` / `b'>'` / `"<!--"` / `"-a1b2c3"` 这类 magic byte / string literal 必须移到同目录的 `const.rs`(或更上游的 module-level const),通过 `pub const HTML_LT: u8 = b'<';` + `use super::*;` 引用。
+   - **触发**:写 HTML / WASM / 协议解析 / 文本 tokenizer / 任何"按字节比较"的逻辑时,几乎必然出现 magic byte 序列;**直接 hardcode 进 fn body = review reject**。
+   - **const 命名规范**:常量名应能描述 byte 含义(`HTML_LT` / `HTML_COMMENT_OPEN_BYTES` / `TOKEN_OPEN_PREFIX_BYTES`),**不是** `BYTE_60` 这种 octal-ish 数字命名。
+   - **长度从 const 拿,不写 magic number**:`bytes[i..i + HTML_COMMENT_OPEN_BYTES.len()]` 优于 `bytes[i..i + 4]`。
+   - **audit check 18**: `fn.rs hardcoded byte/string literals (R1.3c literal purity)` — 检测 PR diff 中 fn.rs / impl.rs 内 `b"..."` / `b'.'` / 非 trivial 长度 `&str` literal,排除 doc comment / `#[cfg(test)]` / `let` binding / 已知转义 (`b'\n'` `b'\t'` `b' '` `b'\0'`)。
+   - **const.rs 内排序**(沿用现有 `const` 按 `(name_len, name_lex)` 排序):多个 byte literal const 加进 const.rs 时按 const 名长度优先,长度相同按字母序,与 §1.5 const.rs 内排序规则一致。
 
 ## 跨章节冲突时
 
@@ -165,7 +176,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 **新 PR / 修改后跑这一组, 任一项非零 exit 必须修到 0 再 commit**:
 
 ```bash
-# 1. 13 项硬性规则批量 audit
+# 1. 15 项硬性规则批量 audit(2026-09-14: 13 → 15 项,新增 §14 no-allow + §15 R1.3c literal purity)
 python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo-root>
 # exit 0 = 全部通过;非零 = 逐项修(每条 FAIL 都打印 sample lines)
 
@@ -174,11 +185,24 @@ euv fmt && cargo fmt --all
 euv fmt && cargo fmt --all
 git status --short   # 期待空 = 幂等
 
-# 3. clippy 0 警告
+# 3. clippy 0 警告(2026-09-14 user 原话:从根源修复,禁止 #[allow])
 cargo clippy -p <your-crate> --all-targets --offline
+# 输出含任何 warning = 不得 commit,改 source 修到 0 exit
 
 # 4. test 编译通过
 cargo test --no-run -p <your-crate>
 ```
 
 PR 提交后 `gh pr checks <N>` 必须 build/clippy/tests/check/setup 5/5 pass。`Format check` job 单独注意——它跑 `cargo fmt --check` 而不是 `euv fmt --check`(参见 rule 13 pitfall)。
+
+### 已知 audit 盲点(命中时不一定是真违规,先看 audit-pitfalls 再判断)
+
+| audit rule | 盲点 | 缓解 |
+|---|---|---|
+| rule 6 (`mod.rs missing trailing use super::*`) | leaf mod.rs(子文件全不引用 parent symbol)加 `use super::*;` 触发 `unused_imports` warning | audit-pitfalls §40 — 加了智能豁免,leaf mod 不报 FAIL |
+| rule 17 (`sub-file body uses external crate full path`) | 只扫根 `[workspace.dependencies]`,**不扫子包** `[dependencies]`(type annotation `proc_macro2::TokenStream` 在 macros 子包、`log::Level` 在 cli 子包不会被抓到) | audit-pitfalls §42 — 已知限制,monorepo PR 留 follow-up |
+| rule 1 (`non-keyword prod files`) | 原本会把 `main.rs` 误报为 non-keyword | audit-pitfalls §39 — 加 `main.rs` 白名单 |
+| rule 1 / rule 7 (covers `src/bin/<name>.rs` + `build.rs`) | 之前会把 cargo convention 路径误报为非关键字文件 / 子文件缺 `use super::*` | audit-pitfalls §39a — 加 `src/bin/<name>.rs` + `build.rs` 白名单(2026-09-18 euv-docs PR #31) |
+| rule 19 (fn-body blank lines) | 默认 base 是 `origin/master`,fork 仓会把本地 master-only commits 算进 PR diff,误标 upstream 历史 | audit-pitfalls §39b — 用 `merge-base HEAD upstream/master` 作 base + diff hunks scoping |
+
+**当 audit 报 FAIL 但 §xx 的 false-positive 描述符合**:先 git diff 看该文件是不是上游原状 carry-over,如果是,在 PR body 标注"upstream code, deferred to follow-up",**不要为了 PASS 改原代码语义**(会偏离 monorepo PR scope)。
