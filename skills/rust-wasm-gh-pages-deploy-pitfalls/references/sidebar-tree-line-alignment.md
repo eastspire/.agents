@@ -1,24 +1,21 @@
-# 坑 31:侧边栏树线"对齐文字左侧开头" = 线贴子项文字列(2026-09-19)
+# 坑 31:侧边栏树线对齐 — 用户要的是"线从父标题文字左边缘垂下"(2026-09-19,两轮纠正后定论)
 
-**症状**:用户报"侧边栏文字下的左边框没有对齐文字左侧开头位置"。此前实现把树线放在父组标题文字列(children `margin-left: 0.75rem` → 线 x=14/35/56,与父标题文字对齐),但子项文字在 x=35/56/77 —— 线与其分组的文字隔 21px,用户认为没对齐。
+**两轮反馈链**:
+1. R4:"侧边栏文字下的左边框没有对齐文字左侧开头位置" → 我把线从父标题列(x=14)移到子项文字列(x=30,留 5px 间隙)。**误读**。
+2. R5:"现在侧边栏的文字最左侧和下面边框最左侧没有对齐" → "现在"=R4 改动造成的回归。用户真正语义:**树线属于父标题,从标题文字的第一个字符垂下;侧边栏所有文字的最左边缘(x=14)必须与最左侧树线(x=14)共享同一条竖线**。
 
-**用户语义**:树线属于它分组的**子项**,应贴着子项文字左边缘(留 ~5px 间隙,像引用条),不是对齐父标题列。
-
-**几何公式**:`gap(线→子项文字) = 1px(border-left) + children 容器 padding-left + 子项 padding-left`。margin-left 只控制线的绝对位置,不影响 gap。要贴文字必须三值同时改。
-
-**最终方案**(euv-docs site override in `euv-docs/src/lib.rs`;文字列不变 14/35/56/77,线移到 30/51/72):
-
+**最终几何**(euv-docs site override,文字列 14/35/56/77 不变):
 ```css
-.c_euv_sidebar_children { padding-left: 0; margin-left: 1.25rem; }              /* 深度≥2 */
-.c_euv_sidebar_children:not(.c_euv_sidebar_children .c_euv_sidebar_children) { margin-left: 1.75rem; }  /* 深度1 */
-.c_euv_sidebar_children .c_euv_sidebar_group_title,
-.c_euv_sidebar_children .c_euv_sidebar_link,
-.c_euv_sidebar_children .c_euv_sidebar_link_active { padding-left: 0.25rem; }
+.c_euv_sidebar_children { padding-left: 0.5rem; margin-left: 0.75rem; }  /* 线=父标题文字列 */
+.c_nav_footer_divider { left: 0.75rem; right: 0.75rem; }                 /* 底部分隔线也对齐 14 */
 ```
+- 统一 `margin-left: 0.75rem`(12px):children 容器的线恰好落在父级标题文字列(父内容区 x+12 = 父标题 padding-left 12px 的文字起点),各级自洽 14/35/56。
+- 验证断言:**像素级**用 inkrows 扫描(首个墨点 x),DOM 级用 Range API 首个 text node 的 glyph x;目标 = 每级 `lineX == 该级标题 textX ±1px`,且 `min(lines) == min(texts)`。
+- euv-ui 的 `c_nav_footer_divider` 默认 `left/right: space-lg(16px)`,与文字列(padL 12px)差 4px,站点 override 拉回 12px。
 
-- 深度1 margin 28px vs 深度≥2 20px:root 项 padL=12px、嵌套项 padL=4px,差 8px 由深度1 margin 补(28=20+8),保证每级缩进 21px 均匀。
-- `:not(复杂选择器)` 是 CSS Selectors L4,Chrome 88+ 支持,用来区分"有没有 children 祖先"=深度层级。
-- 验证断言:每个 children 容器 `childTextX - lineX == 5±1px`。用 Range API 取首个 text node 的 glyph x(document.createTreeWalker + createRange().getClientRects()[0].x),别用 element.getBoundingClientRect().x —— group title 里有 ▸ 箭头 span,element.x 会骗你。
-- euv-ui 0.25 的 class! 宏只支持伪类/伪元素(`hover {}`),不支持后代选择器;框架级实现需 sidebar 组件递归时传 depth 参数(破坏性 API 变更),属独立设计任务。本次只改 euv-docs override 即上线(PR #243)。
+**教训**:同一位置两轮相反描述时,以最新一轮 + "现在/还是"等回归措辞为准;改之前先 pixel-scan 当前态与上一态确认哪个对齐关系被破坏。不要用 `:not(复杂选择器)` 做深度补偿几何(脆弱且破坏左边缘统一性)。
 
-**验证脚本**:/tmp/verify_align.py(gap 断言 + 文字列回归)+ /tmp/ascii_sb.py(PIL 把截图转 ASCII 艺术,无 vision provider 时用)。
+**同轮新增能力**(euv-docs build.rs):
+- `build_sidebar` 叶子提升:只有 README 的目录不再消失,作为叶子链接出现(此前 ~30 个单页项目目录在侧边栏不可见)。
+- frontmatter `sidebar_order: [name, ...]`(目录 README 上,VuePress 风格)显式固定子项顺序;条目 = 目录名或文件 stem(.md 可省);未列出项按 (order, title) 排在列出项之后。根级顺序写在前页 README(docs/README.md)的 frontmatter。
+- 验证脚本:/tmp/verify_round5.py(46 顶层条目顺序逐对 diff + 线/文字/分隔线 x 对齐)。
