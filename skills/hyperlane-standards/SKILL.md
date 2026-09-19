@@ -1,6 +1,6 @@
 ---
 name: hyperlane-standards
-description: '**hyperlane 框架完整 API + 坑表 — 与 hyperlane 打交道时必加载**。版本 21.3.6,edition 2024,Tokio 异步 HTTP server。覆盖:Server::default() + route/task_panic/request_error/request_middleware/response_middleware 5 个注册方法(async,不能链式) + ServerHook::new/handle -> Status 钩子 trait + Context::get_request/get_mut_response 读写 + ServerConfig/RequestConfig 配置(setter 是 sync)+ RoutePattern/RouteSegment/RouteParams 路由(static / dynamic {name} / regex {name:pattern})+ HttpVersion / Status / RequestError / ServerError 错误体系 + hyperlane-macros 过程宏(#[route] #[hyperlane] #[task_panic] #[request_error] #[request_middleware] #[response_middleware] #[prologue_macros] #[epilogue_macros] context!)+ 22 个常见坑(async setter 不能链式、response setter 是 sync、ServerControlHook::Default 用 unwrap_or_default、Stream 不需要 import、inventory::collect! 由框架在 route/impl.rs 调用)+ 7 个互锁生态 crate(http-type 20.1.9 / http-constant / http-parse / hyperlane-macros / hyperlane-plugin-websocket / hyperlane-broadcast / hyperlane-plugin-server-monitor)。触发关键词:hyperlane, Server::default, ServerHook, ServerControlHook, HookType, RoutePattern, RouteSegment, RouteParams, Context, ServerConfig, RequestConfig, Status, RequestError, ServerError, HttpVersion, Stream, hyperlane-macros, #[route], #[hyperlane], #[prologue_macros], #[epilogue_macros], context!, inventory, TaskPanicHook, RequestErrorHook, RequestMiddleware, ResponseMiddleware, RequestHook, ResponseHook, WebSocketHook, SseHook, broadcast::Bus, http-type, http-constant, http-parse, plugin-websocket, plugin-server-monitor。**当且仅当任务完全不使用 hyperlane**才不需要加载。'
+description: '**hyperlane 框架完整 API + 坑表 — 与 hyperlane 打交道时必加载**。Monorepo 架构(根 `hyperlane` re-export + 5 子包: `hyperlane-core` / `hyperlane-macros` / `hyperlane-type` / `hyperlane-cli`),版本 21.3.6,edition 2024,Tokio 异步 HTTP server。覆盖:Server::default() + route/task_panic/request_error/request_middleware/response_middleware 5 个注册方法(async,不能链式) + ServerHook::new/handle -> Status 钩子 trait + Context::get_request/get_mut_response 读写 + ServerConfig/RequestConfig 配置(setter 是 sync)+ RoutePattern/RouteSegment/RouteParams 路由(static / dynamic {name} / regex {name:pattern})+ HttpVersion / Status / RequestError / ServerError 错误体系 + hyperlane-macros 过程宏(#[route] #[hyperlane] #[task_panic] #[request_error] #[request_middleware] #[response_middleware] #[prologue_macros] #[epilogue_macros] context!)+ 22 个常见坑(async setter 不能链式、response setter 是 sync、ServerControlHook::Default 用 unwrap_or_default、Stream 不需要 import、inventory::collect! 由框架在 route/impl.rs 调用)+ monorepo 内部依赖图 + cargo publish 路径 + `readme = ../../README.md` 拒绝陷阱 + 5 个子包之间 `path = ...` path-dep 模式。触发关键词:hyperlane, Server::default, ServerHook, ServerControlHook, HookType, RoutePattern, RouteSegment, RouteParams, Context, ServerConfig, RequestConfig, Status, RequestError, ServerError, HttpVersion, Stream, hyperlane-macros, hyperlane-core, hyperlane-type, hyperlane-cli, #[route], #[hyperlane], #[prologue_macros], #[epilogue_macros], context!, inventory, TaskPanicHook, RequestErrorHook, RequestMiddleware, ResponseMiddleware, RequestHook, ResponseHook, WebSocketHook, SseHook, broadcast::Bus, http-type, http-constant, http-parse, plugin-websocket, plugin-server-monitor。**当且仅当任务完全不使用 hyperlane**才不需要加载。'
 license: MIT
 ---
 # hyperlane-standards — 框架完整 API + 坑表
@@ -26,6 +26,8 @@ license: MIT
 | Avoid the 22 most common gotchas | [22 Common Pitfalls](#10-22-common-pitfalls) |
 | Pick an ecosystem crate to extend hyperlane | [7 Interlocking Ecosystem Crates](#11-7-interlocking-ecosystem-crates) |
 | Find docs-pages source for tutorials | [Documentation sources (docs-pages)](#12-documentation-sources-docs-pages) |
+| Work with the monorepo / path-deps / publish order | [Monorepo Layout & Internal Deps](#13-monorepo-layout--internal-deps) |
+| Bump the version of all crates at once | [Version Bump Rule](#14-version-bump-rule) |
 
 ---
 
@@ -37,19 +39,40 @@ license: MIT
 
 ## 1. Project Metadata
 
-- crate 名: `hyperlane`
-- 当前版本: `21.3.6`
+- 仓库: `hyperlane-dev/hyperlane` (single repo, monorepo)
+- **Monorepo**(2026-09 起) — 5 个 crate:
+  - `hyperlane` (根) — 纯 re-export shim,`use hyperlane::*` 暴露 core + macros + type(通过 core 间接)
+  - `hyperlane-core` — 框架本体: `Server` builder + `Context` + `Hook`/`Route`/`Config` + `http_type::*` 重导出
+  - `hyperlane-macros` — proc-macro 集合(`#[route]` 等),独立 proc-macro crate
+  - `hyperlane-type` — HTTP 类型库: Request/Response/Method/Status/Stream/Context/RouteParams/HttpStatus + concurrent 包装(ArcMutex/BoxRwLock/xxhash 等)
+  - `hyperlane-cli` — 命令行工具(fmt/bump/publish/watch/new/template)
+- 当前版本: 全部 crate 同步发布,单 version 号(`21.3.6`)
 - Rust edition: `2024`
 - License: `MIT`
-- 类型: 单 crate 库(非 workspace),`Server` builder + `Context` + `Hook`/`Route`/`Config` 类型
-- 关键字: `http`, `request`, `response`, `tcp`, `cross-platform`
-- 顶层重导出: `config::*`, `context::*`, `error::*`, `hook::*`, `route::*`, `server::*`, `http_type::*`, `inventory`
+- workspace 布局:
+  ```
+  hyperlane/
+  ├── Cargo.toml          # [workspace] + 根 hyperlane re-export 包
+  ├── core/               # hyperlane-core
+  ├── macros/             # hyperlane-macros (proc-macro)
+  ├── type/               # hyperlane-type
+  └── cli/                # hyperlane-cli (bin target)
+  ```
+- 顶层重导出(根 `hyperlane`): `hyperlane_core::*`(涵盖原 `config/context/error/hook/route/server/http_type/inventory`)
 - 关键宏支持: 派生自 `lombok-macros` (`Data`, `New`, `Getter`, `GetterMut`, `Setter`, `CustomDebug`, `DisplayDebug`, `Eq`, `PartialEq`, `Hash`, `Clone`, `Default`)
-- profile: `[profile.dev]` + `[profile.release]` 都用 `opt-level = 3`, `lto = true`, `incremental = false`, `panic = "unwind"`, `debug = false`, `codegen-units = 1`, `strip = "debuginfo"`
+- profile: `[profile.dev]` + `[profile.release]` 都用 `opt-level = 3`, `lto = true`, `incremental = false`, `panic = "unwind"`, `debug = false`, `codegen-units = 1`, `strip = "debuginfo"`(workspace 根定义一次,子包若重复定义会被 cargo 警告忽略,这是预期行为 — 跟 euv 一致)
 
-### 1.1 版本升级规则(用户说「升级版本」时,hyperlane 全家桶通用,含 `hyperlane-quick-start`)
+### 1.1 版本升级规则(用户说「升级版本」时,hyperlane 全家桶通用)
 
-只改目标仓库根 `Cargo.toml` 的**第一个** `version` 字段(`[package] version` 行,如 `hyperlane-quick-start` 的 `23.0.36`)。**不动** `[workspace.dependencies]` / `[dependencies]` 里任何依赖的 `version`,也**不动**子 crate 的 `package.version` —— 依赖同步由发版流程/CI 负责。禁止全局 sed `version = "X.Y.Z"`(会误伤第三方依赖,如 `http-type = "20.1.9"`)。详细版规见 `project-memory` skill 的 Version policy 节。
+Monorepo 5 个 crate 共享一个 version 号(`21.3.6`)。bump 时 **只改根 `Cargo.toml` 第 3 行 `[package] version`**,子 crate 的 `[package] version` + `[workspace.dependencies]` path-dep 内的 `version` 一律不动 — 由 CI `.github/workflows/rust.yml` 的 `sync_workspace_version` job 在 master push 上自动 propagate。
+
+**禁止全仓 sed `version = "X.Y.Z"`**(会误伤第三方依赖如 `http-compress = "3.0.28"`)。**禁止**手改 4 个子 crate 的 `Cargo.toml` 中的 `version` 字段。
+
+**PR 前 diff stat 自检**:`git diff --stat` 期望只有 1 file + 1 line(根 `Cargo.toml`)。多于 1 file = 停下来,先 `git checkout HEAD -- <额外文件>`。
+
+CI sync 行为: master merge → `sync_workspace_version` job 跑 → 在 master 上追加 `chore: sync all package versions to X.Y.Z` commit → 5 个 `Cargo.toml` + 根 `[workspace.dependencies]` 内 path-dep `version` 全部同步。等这个自动 commit 出现后再认为 release 完成。
+
+(详细跨多 PR 的 release bump 实战见 `references/release-bump-flow.md` — 含 PR #171 + #220 + minor/major patch 的踩坑史)
 
 ## 2. Installation
 
@@ -312,3 +335,150 @@ bash scripts/verify-references.sh                     # 看 vs HEAD 的 diff
 ```
 
 mapping 文件: `scripts/sync-references.mapping`(references/<file>.md → docs-pages/src/...)。要 pin 某个文件加 `# manual override:`,脚本不动它。
+
+## 13. Monorepo Layout & Internal Deps
+
+### 13.1 内部依赖图(path-dep,workspace 模式)
+
+```
+hyperlane-type        (叶子, 无内部依赖)
+   ↑ path-dep
+hyperlane-core ───────┐
+   ↑ path-dep        │
+hyperlane-macros ─────┤
+   ↑ path-dep        │
+hyperlane-cli ────────┤
+   ↑ path-dep        │
+hyperlane (根) ───────┘
+```
+
+**验证命令**:`cargo metadata --format-version=1 --no-deps` 看每个 `package.dependencies[]`,内部依赖的 `source` 字段必须是 `null`(path-dep,不打 crates.io)。任何 `source` 不为 null = 循环依赖 / 错配。
+
+**与 euv 的差异**: euv 子包间内部依赖为 0(core/macros/ui/engine/cli 完全平行)。hyperlane 的 `core` 仓**实际使用** `hyperlane-type` 的 `Request/Response/Status/Stream/Context/RouteParams` 类型,所以 core→type 是代码约束(非设计选择)。若要 euv-style 0 内部依赖,需要把 core 内部使用的 type 拆碎重定义,会破坏现有 API。
+
+### 13.2 Cargo.toml 依赖写法
+
+子包内部依赖用 `path = "..."` + 显式 `version`:
+```toml
+# core/Cargo.toml
+hyperlane-type = { path = "../type", version = "21.3.6" }
+
+# macros/Cargo.toml
+hyperlane-core = { path = "../core", version = "21.3.6" }
+
+# 根 Cargo.toml 引用子包用 workspace = true:
+hyperlane-core = { workspace = true }
+```
+
+根 `Cargo.toml` 的 `[workspace.dependencies]` 必须包含**全部** path-dep(sync_workspace_version job 依赖它来 sed):
+```toml
+[workspace.dependencies]
+hyperlane-core = { path = "core", version = "21.3.6" }
+hyperlane-macros = { path = "macros", version = "21.3.6" }
+hyperlane-type = { path = "type", version = "21.3.6" }
+hyperlane-cli = { path = "cli", version = "21.3.6" }
+```
+
+### 13.3 根 hyperlane 包(纯 re-export shim)
+
+```rust
+// src/lib.rs(无 //! 头注释,无 fn)
+pub use hyperlane_core::*;
+pub use hyperlane_macros::*;
+```
+
+`hyperlane_type::*` 由 `hyperlane_core` 内部 `pub use {hyperlane_type::*, inventory};` 间接暴露给用户,**根 lib.rs 不需要单独 re-export**(否则触发 unused_imports warning + 不必要)。
+
+根 `[dependencies]`:
+```toml
+[dependencies]
+hyperlane-core = { workspace = true }
+hyperlane-macros = { workspace = true }
+# 不要加 hyperlane-type — root 不直接用,加了就 dead dep
+```
+
+### 13.4 `cargo publish` 顺序(拓扑序,与 euv 一致)
+
+CI `.github/workflows/rust.yml` 的 `publish` job 按**拓扑序**发布(被依赖的先发):
+
+```
+hyperlane-type → hyperlane-core → hyperlane-macros → hyperlane-cli → hyperlane
+```
+
+每个 `cargo publish -p X --allow-dirty --no-verify` 是纯本地 package 操作,workspace 模式下 path-dep 自动解析为本地路径。**不需要**先把 path-dep 改成 crates.io 版本。
+
+**顺序由依赖图决定**(2026-09-14 PR #34 验证):`hyperlane-macros` 在 `Cargo.toml` 里 `dev-dependencies` 引 `hyperlane-core` + 生成代码引用 `::hyperlane_core::*`,所以 **`core` 必须先于 `macros` 发布**。如果 publish job 写成 `type → macros → core → cli → hyperlane`,macros 发布时 core 还没上 crates.io,resolver 失败。CI 静默吞错误(retry+continue),最终 `max_stable_version` 不匹配 tag。
+
+**检测 publish 顺序是否对**:`cargo metadata --format-version=1 --no-deps | jq -r '.packages[].dependencies[] | select(.source == null) | .name'` 看 internal dep 关系,反推拓扑序。或者直接看 `Cargo.toml` 的 `[dev-dependencies]` 里 `path = "..."` 引的目标。
+
+### 13.4.1 PR #34 实际 publish 顺序 pitfall(2026-09-14 verified)
+
+`hyperlane-macros/Cargo.toml` 写了:
+```toml
+[dev-dependencies]
+serde = { ... }
+```
+
+但宏生成代码里 `quote!` 出来的 token 含 `::hyperlane_core::Status /::RouteParams`,doctest 100 处有 `use hyperlane_core::*;`。**编译期宏展开需要 core crate 存在**。所以核心仓 `hyperlane-core` 必须先 publish,macros 才能 publish。
+
+不强制 `path-only dev-dep`(Rust macros 子 crate 通常不反向 dev-dep 根 crate,因为根是 re-export shim);只要 publish 顺序对,`hyperlane-core` 上 crates.io 后,`hyperlane-macros` 的 resolver 找到 `hyperlane-core = "21.3.6"` 即可。
+
+### 13.5 README 陷阱(cargo publish 拒绝跨仓 README)
+
+每个子包 `Cargo.toml` 的 `readme` **必须指向子包目录内的相对路径**。**禁止** `readme = "../../README.md"`(指向 monorepo 根 README) — `cargo publish` 会拒绝:
+```
+error: readme `../../README.md` does not appear to exist
+       (relative to `/path/to/monorepo/<subcrate>`).
+```
+
+**修复**:每个子包目录各放一份 `README.md`(从仓根 `cp` 一份即可),`readme = "README.md"`。这跟 euv monorepo 同模式(每个 euv-* 子仓都有独立 README.md)。
+
+### 13.6 顶层 `use` 命名坑(proc-macro crate)
+
+`hyperlane-macros` 是 proc-macro crate,其源码生成的 TokenStream 用 `::hyperlane::Status/HookType/inventory` 等路径。如果保留单仓时代的 `::hyperlane::*` 路径,展开到用户代码时会找不到 crate。
+
+**monorepo 改法**:把所有 `macros/src/**/*.rs` 内的 `::hyperlane::` 替换为 `::hyperlane_core::`(`sed -i 's|::hyperlane::|::hyperlane_core::|g'`)。同时 `macros/src/lib.rs` 的 100 个 doctest 里 `use hyperlane::*;` → `use hyperlane_core::*;`。
+
+**为什么不反过来**让根 `hyperlane` 反向依赖 macros?会成环(`hyperlane-macros` 不能依赖 `hyperlane`)。正确方向: macros 用 `::hyperlane_core::*` 直接引用,不绕根包。
+
+### 13.7 monorepo 引入后从单仓迁移的 checklist
+
+(从单仓 hyperlane → monorepo 的实战顺序,见 `references/monorepo-migration-checklist.md`)
+
+- [ ] `git mv src core/src && git mv tests core/tests`
+- [ ] `cp -r upstream-cli/* cli/` + 同理 macros/type
+- [ ] 删除每个子仓的 `.git` 子目录(避免嵌套 repo)
+- [ ] 每个子仓的 `lib.rs` 顶部 `//! <name>` 头注释必须删除(rust-standards §2.5)
+- [ ] 每个子仓的 `Cargo.toml` 改:
+  - `name` → 改前缀 (`hyperlane-type` / `hyperlane-macros` / `hyperlane-cli`)
+  - `readme = "../../README.md"` → `readme = "README.md"`(并 `cp README.md` 到子包目录)
+  - `repository` → 统一指向 `https://github.com/hyperlane-dev/hyperlane.git`
+  - 内部依赖用 `path = "..."` + `version`
+- [ ] 根 `Cargo.toml` 写 `[workspace]` + 根 hyperlane 包(纯 re-export)
+- [ ] `macros/src/**` 内所有 `::hyperlane::` 替换为 `::hyperlane_core::`
+- [ ] `macros/src/lib.rs` 内 100 个 doctest 的 `use hyperlane::*` 替换为 `use hyperlane_core::*`
+- [ ] `tests/mod.rs` 内 `use hyperlane::*` 替换为 `use hyperlane_core::*`(在子包内)
+- [ ] 跑 `cargo check --workspace` + `cargo test --workspace` + `audit_rust_standards.py`
+- [ ] 跑 `cargo metadata` 验证无循环
+
+## 14. Version Bump Rule
+
+跟 `euv-standards §17` 同模式。简版:
+
+```bash
+cd /root/github/hyperlane-dev/hyperlane
+NEW_VER="21.3.7"
+OLD_VER="21.3.6"
+# 只改根 Cargo.toml
+sed -i "s/^version = \"$OLD_VER\"$/version = \"$NEW_VER\"/" Cargo.toml
+git diff --stat   # 期望只有 Cargo.toml +1/-1
+git add Cargo.toml
+git commit -m "chore: bump version to $NEW_VER"
+```
+
+**不**做:
+- ❌ `sed -i 's/version = "21.3.6"/version = "21.3.7"/' */Cargo.toml`
+- ❌ 编辑 `core/Cargo.toml` / `macros/Cargo.toml` / `type/Cargo.toml` / `cli/Cargo.toml`
+- ❌ 编辑 `[workspace.dependencies]` 内 path-dep 的 `version`
+
+CI sync 在 master push 上自动补齐上述字段。

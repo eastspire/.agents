@@ -1,0 +1,152 @@
+name: Deploy to <target-org>/<target-repo>
+
+# Cross-repo deploy workflow template — derived from docs-pages/docs
+# (2026-09-19). Source repo builds artifacts, pushes them to a target
+# Pages/docs repo. Implements the 5-step hardening from坑 22 in
+# rust-wasm-gh-pages-deploy-pitfalls:
+#   1. source repo identity assertion
+#   2. rm -rf www before build
+#   3. build (euv-docs / euv build / cargo build → www/)
+#   4. www/ artifact quality check
+#   5. source SHA baked into .deploy/build-info + commit message
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# `contents: read` is sufficient on the source repo because the write to
+# the target repo uses a PAT supplied via `TARGET_REPO_PAT` (GITHUB_TOKEN
+# is scoped to the source repo only and cannot push across repos).
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-<short-name>
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout <source-org>/<source-repo> (source)
+        uses: actions/checkout@v4
+
+      - name: Verify source is <source-org>/<source-repo>
+        # Hard guard against an accidental fork swap or a wrong `uses`
+        # upstream — confirm the just-checked-out repo is the one we
+        # intend to build, and capture its SHA into the deploy record
+        # so the deployed site can always be traced back to a specific
+        # source commit.
+        run: |
+          set -euo pipefail
+          remote=$(git remote get-url origin)
+          case "$remote" in
+            *github.com/<source-org>/<source-repo>*) ;;
+            *) echo "::error::unexpected source repo: $remote"; exit 1 ;;
+          esac
+          echo "SOURCE_REPO=$remote" >> "$GITHUB_ENV"
+          echo "SOURCE_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+
+      - name: Checkout <target-org>/<target-repo> (target)
+        uses: actions/checkout@v4
+        with:
+          repository: <target-org>/<target-repo>
+          path: __target
+          persist-credentials: true
+          token: ${{ secrets.TARGET_REPO_PAT }}
+
+      - name: Install build toolchain
+        # Adjust commands to match your stack (euv-cli / wasm-pack /
+        # node / cargo). The euv-docs example:
+        run: |
+          cargo install euv-cli --locked
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+          cargo install --git https://github.com/euv-dev/euv-docs \
+            --rev <PINNED_SHA> --bin euv-docs --locked --force
+
+      - name: Force fresh build output
+        # cargo rerun-if-changed + sccache can let a build.rs re-run
+        # still leave a stale www/ from a prior invocation. Wiping www/
+        # before the build step guarantees the produced tree contains
+        # only this run's artefacts (坑 13 + 坑 22).
+        run: rm -rf www
+
+      - name: Build site → www/
+        env:
+          EUV_DOCS_SRC_DIR: ${{ github.workspace }}/docs
+        run: euv-docs docs --out www --index-html template.html
+
+      - name: Verify build produced output
+        # If www/ is empty or missing the index.html / wasm bundle that
+        # GitHub Pages serves at the site root, fail fast — pushing an
+        # empty tree would silently break the live site.
+        run: |
+          set -euo pipefail
+          [ -f www/index.html ] || { echo "::error::www/index.html missing"; exit 1; }
+          [ -d www/pkg ] || { echo "::error::www/pkg missing"; exit 1; }
+          test -n "$(ls -A www)" || { echo "::error::www/ is empty"; exit 1; }
+
+      - name: Push to <target-org>/<target-repo>
+        run: |
+          set -euo pipefail
+          cd "__target"
+          find . -maxdepth 1 \
+              -not -name '.git' \
+              -not -name '.' \
+              -not -name '..' \
+              -exec rm -rf {} +
+          cp -r ../www/* .
+          # `.nojekyll` tells Pages (build_type=legacy) to skip Jekyll
+          # processing of this branch — without it, Jekyll sees the flat
+          # www/ artefact tree as "no _config.yml, no Jekyll index" and
+          # serves a 404 even when index.html is on disk (坑 23). Drop
+          # this line if your Pages project uses build_type=workflow
+          # (artifact upload only — Jekyll never runs there).
+          touch .nojekyll
+          # Sentinel: source repo + commit SHA + workflow run id go
+          # into the deployed tree so any deployed commit can be
+          # traced back to the exact source commit that built it.
+          mkdir -p .deploy
+          cat > .deploy/build-info <<EOF
+          source_repo=${SOURCE_REPO}
+          source_sha=${SOURCE_SHA}
+          workflow_run=${GITHUB_RUN_ID}
+          built_at=$(date -u +%FT%TZ)
+          EOF
+          git config user.name "deploy-bot"
+          git config user.email "deploy@<your-domain>"
+          git add -A
+          git diff --cached --quiet || git commit -m "Deploy from ${SOURCE_REPO}@${SOURCE_SHA}"
+          # Pull latest remote before pushing so a run started from an
+          # older checkout does not get rejected. On conflicts the
+          # fresh build wins via -X theirs.
+          #
+          # NOTE: change `master` to `gh-pages` (and the Checkout step
+          # above) if your Pages project source branch is gh-pages
+          # (坑 24 recommends this so master stays clean source).
+          git fetch origin master
+          git rebase -X theirs origin/master || git rebase --abort
+          git push origin master
+
+      - name: Sync Pages (optional, mirror API)
+        # Only needed if you maintain a mirror (e.g. ltpp.vip / custom
+        # CDN). Drop this step if Pages is the only deploy target.
+        run: |
+          max_retries=60
+          retry_delay=60
+          for i in $(seq 1 $max_retries); do
+            if curl -sf -X POST https://<mirror-host>/api/github/pages/sync/<target-org>/<target-repo> \
+              -H "Connection: close"; then
+              echo ""
+              echo "Sync succeeded on attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i of $max_retries failed"
+            if [ $i -lt $max_retries ]; then
+              echo "Retrying in ${retry_delay}s..."
+              sleep $retry_delay
+            fi
+          done
+          echo "All $max_retries attempts failed"
+          exit 1

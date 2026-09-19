@@ -740,6 +740,106 @@ euv_vconsole_panel {
 
 > ⚠️ 在**非 workspace** 项目里用这些组件（crates.io 依赖）需要 euv ≥ 0.15.2 —— 该版本起 `html!` 宏的组件注册表会扫 `$CARGO_HOME/registry/src/*/<name>-<version>/src`；更早版本只扫本 crate + path 依赖，registry 依赖的 `euv_*` 标签会被当成原生元素报 `AttrValueAdapter` trait 错。
 
+### 3.G 站点级 CSS 覆盖 — 用 `Css::inject_css` 在消费 euv-ui 的项目里改 sidebar / navbar / feature_card 的 4 个坑
+
+实战背景：docs-pages/docs-euv 这种站点级项目（fork euv-docs 模板），需要把上游 euv-ui 默认样式改成自己的设计。每个坑都是"看着生效了但其实没生效"或"local build OK 但 CI build 失败"的类型。
+
+**坑 1：Rust raw string 的 `<` 字符泄漏到 CSS 输出**
+
+`Css::inject_css(r#"<..."#)` 的写法里，开头的 `<` 不是 raw string 的一部分（`r#"..."#` 起始只到第一个 `"`），但 `<` 在 `inject_css` 的写入路径里**会原样出现在生成的 CSS 文本开头**——后续的 CSS parser 在 `<` 处 bail，**整段 inject_css 之后的**所有规则（包括本次 inject 的、后续 inject 的）全部不解析。常见表现：自己写 override 不生效，且**之前已经生效的规则突然也不生效了**（不是只看本规则）。
+
+修复：写 `r#"..."` 让 raw string 从下一行第一个非空白字符开始，不要带 `<`：
+```rust
+Css::inject_css(r#"
+    html body .c_home_feature_grid .c_feature_card {
+        padding: 16px !important;
+        border: 1px dashed #000 !important;
+    }
+"#);
+```
+
+**坑 2：local build 与 CI build 的 CSS 优化器行为不同**
+
+- 本地 `euv-cli 0.21.2` 编译：基本不优化嵌套选择器
+- CI 用 `euv-cli 0.24.7` 编译：会合并/移除嵌套 descendant selectors
+
+后果：`.c_euv_sidebar_children > div > .c_euv_sidebar_children { margin-left: 20px }` 这种 nested selector 在本地看着 work（各级 children container 都偏移），但 CI build 后 `> div >` 被合并，只剩 `.c_euv_sidebar_children` 一条规则生效，深层嵌套的 children container 没偏移。
+
+修复方案：把嵌套深度展平，避免 `> div >` 中间节点；或者用 `:nth-child()`/`:nth-of-type()` 直接锁深层。**不要假设 local build 通过 = CI 也通过**——这两个版本必须都验证（cd 上游 `cargo install euv-cli --force` 把本地 bump 到 CI 同版本）。
+
+**坑 3：sidebar hover 加粗"左边框"是 `box-shadow: inset 4px 0px 0px var(--accent)`，不是真的 border**
+
+用户原话："侧边栏悬浮确实左侧边框加粗"——但 euv-ui 源码 (`ui/src/style/class/fn.rs` ~line 3672) 的 hover 是用 `box-shadow` 做 inset 视觉，不是改 `border-left-width`。所以 grep `:hover` 找 sidebar rule 时找不到 border 改动是正常的。完整 euv example 的 hover 规则：
+
+```css
+.c_euv_sidebar_link:hover {
+    background: var(--accent-muted);
+    color: var(--accent);
+    box-shadow: inset 4px 0px 0px var(--accent);
+}
+.c_euv_sidebar_group_title:hover {
+    background: var(--accent-muted);
+}
+```
+
+`inset 4px 0px` 在 link **内部**左侧画 4px 实色阴影，视觉上像左侧边框"加粗"。**box-shadow 不占位**——所以即使加了 hover，旁边的 `c_euv_sidebar_children` dashed border 位置完全不动。
+
+**坑 4：sidebar group title 距离顶部 ≠ main 区域 h1 距离顶部**
+
+euv example 桌面 nav 栈：`c_nav_header (72px) + c_nav_locale_row (60px) + c_nav_section_label (34px) = 166px` 后才到 sidebar 第一个 group title y=166。
+
+站点只配单语言时 `c_nav_locale_row` 不渲染（高度 0），导致 group title 从 y=106 开始——和 main 区域 h1 (~166) 错位 60px。修复：
+
+```css
+html body .c_nav_items_scroll {
+    padding-top: 60px !important;  /* 补齐缺失的 locale row 高度 */
+}
+```
+
+`html body` 前缀提 specificity 防止上游 `c_nav_items_scroll` 后定义规则覆盖。
+
+**Sidebar dashed border 对齐首字符最终方案**
+
+```css
+html body .c_nav_items_scroll .c_euv_sidebar_group {
+    padding-left: 0px !important;
+}
+html body .c_nav_items_scroll .c_euv_sidebar_children {
+    margin-left: 20px !important;
+    width: calc(100% - 20px) !important;
+}
+```
+
+效果：每个层级 children container 虚线 border-left 紧贴该层文字首字符 x 位置（一级 x=22，二级 x=55，三级 x=88……），每个 group title 文字和 link 文字都从同 x 开始。
+
+**Feature card 覆盖（对齐 footer 边框元素）**
+
+euv-ui 默认 `c_feature_card`：`padding: 16px; border: 1px solid #e3e3e3; border-radius: 8px;`（带边框带圆角，像瓦片）。要让 cards 与 footer dashed 边框元素风格统一：
+
+```css
+html body .c_home_feature_grid .c_feature_card {
+    padding: 16px !important;
+    border: 1px dashed #000 !important;
+    border-radius: 0 !important;
+}
+```
+
+注意保留 `padding: 16px`——只是改 border 样式和去圆角，不要碰 padding（否则内容贴边）。
+
+**README badge 图片最大宽度问题**
+
+`shields.io` badge (`![](https://img.shields.io/crates/v/xxx.svg)`) 在 euv-markdown 里默认 `max-width: 100%`，会被文档主区域宽度撑到一行只有一张 badge 的宽度（看起来像"放大到最大"）。修复：
+
+```css
+.md-body img {
+    max-width: 100%;
+    height: auto;
+    display: inline-block;  /* 关键：不让 img 撑满父容器 */
+}
+```
+
+或者限制 height：`max-height: 20px` 让 badge 保持小图标尺寸（多数 shields badge 设计就是 20px 高）。
+
 ---
 
 ## 4. Home / Hero Page Spec
@@ -958,6 +1058,7 @@ div { class: c_home()
 ## 9. Quick Notes / Anti-Patterns
 
 ❌ 写 class! 时硬编码颜色/间距 — 一律 `var!(xxx)`。
+❌ **在 `class!` 块里给每条属性加 `// 解释这条 CSS 是什么 / 为什么这样写` 的注释** — 属性本身就是 self-documenting，注释占空间、PR # 噪音、euv fmt 不动它们。例外：(a) 解释**结构性**决策（如某个 class 在 mobile vs desktop 的语义区别、跨 framework 的契约变量如 `--euv-mobile-safe-top`），(b) 引用 PR 号的简短 fix 指针（如 `// PR #NNN`）。**禁用的注释**：解释某条 property 作用的 tutorial 段落、warning "不要删除这条"，把 commit message 内容复述到代码里。reviewer 看到 6 行的 CSS rule + 11 行的 `// 因为 iOS WebKit …` = 立即 reject。`ui/src/style/class/fn.rs` 历史上 tab/overlay fix 的 commit 把所有 why 注释合并到 commit message body 即可（PR #231 / PR #232 body 已包含完整 rationale）。2026-09-14 user explicit correction: "删除样式代码里的注释" — 适用于本文件 + `ui/src/style/css/fn.rs` + `ui/src/style/var/fn.rs` + `example/src/style/class/fn.rs`。
 ❌ 添加阴影、彩色背景、圆角 — design system 是黑/白硬边。
 ❌ 在 page 里写新 class! — 全局或本地 class! 块集中维护。
 ❌ 自定义 `<button class="mybtn" />` — 用 `euv_button`。

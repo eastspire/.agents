@@ -24,6 +24,8 @@ use std::{
     sync::Arc,
 };
 
+use current_crate::*;
+
 use {
     external_crate_1::*,
     external_crate_2::{Deserialize, Serialize},
@@ -35,6 +37,13 @@ use {
     },
 };
 ```
+
+**常见违规**(详见 `references/06-module-imports.md` §6.1):
+
+1. private use 写到 pub use 之前
+2. `pub use {sub-modules::*}` 放到 `pub use std` / `pub use external` 之后
+3. mod 列表中插空行
+4. 单条 `use external_crate::Symbol;` 没并入 `use {...}` 块(如 `use log::SetLoggerError;` 单独成行)
 
 ## proc-macro lib.rs(子模块名不带 r#)
 

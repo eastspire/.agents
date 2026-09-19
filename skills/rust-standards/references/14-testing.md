@@ -6,6 +6,27 @@
 - **`tests/mod.rs` 直接列子模块**(`mod config; mod context; ...`,子模块名不带 `r#`),开头 `use crate_name::*;` 引入被测 crate 的全部公共 API。
 - **`tests/<sub>/mod.rs` 极简三段式**(与 src 同样遵守 `mod r#xxx;` + `use super::*;`),但**测试模块内部符号全部私有**,不需要 `pub use`、不需要 `pub(crate) use`(tests/ 是独立 crate)。
 - **`tests/<sub>/fn.rs`** 写法:`use super::*;` 开头,然后直接 `#[test] fn test_case() { let value: T = ...; ... assert_eq!(...); }`,每个 `#[test]` 函数独立、互不依赖。
+
+**Pitfall(`tests/<sub>/fn.rs` 缺首行 `use super::*;` 触发 §14.1 字面违规)**:
+
+项目惯例:每个 `tests/<sub>/fn.rs` 第一行必须是 `use super::*;`,即使 super 实际上没 re-export 任何东西(`tests/<sub>/mod.rs` 通常只有 `mod r#fn;`)。
+
+euv PR #233 第一版我写了:
+```rust
+use std::path::Path;
+use std::fs;
+```
+作为首行 — 编译过、tests pass、audit rule 7 跳过 tests/ 不查。但 `tests/fmt/fn.rs` / `tests/hmr/fn.rs` 实际都是 `use super::*;` 开头,user 指出不一致。
+
+**正确写法**(use super::*; 永远是字面第 1 行,std import 放后面):
+```rust
+use super::*;
+
+use std::path::Path;
+use std::fs;
+```
+
+`use super::*;` 在 build/mod.rs 实际是空操作(没有 pub use re-export),但字面第 1 行 `use super::*;` 是项目惯例,匹配 `tests/fmt/fn.rs` `tests/hmr/fn.rs` 现存 pattern。
 - **测试不需要镜像 src**:tests/ 里只放真正需要测试行为的文件(通常是 `fn.rs`),不必为 src/ 里每个关键字文件都建立对应测试文件。
 
 ## 14.2 覆盖率

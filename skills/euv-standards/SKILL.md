@@ -1,6 +1,6 @@
 ---
 name: euv-standards
-description: '**euv 框架完整 API + 坑表 — 与 euv 框架打交道时必加载**。version '*', edition 2024。涵盖:7 个 crate 布局、`html!`/`class!`/`vars!`/`var!`/`#[component]`/`#[watch]`/`#[computed]` 过程宏真实签名、28 个 euv-ui 组件（带 view/）+ 358 个 design class + 2 个 theme var 集合、Signal/VirtualNode 响应式系统、`App::mount()` 入口。'
+description: '**euv 框架完整 API + 坑表 — 与 euv 框架打交道时必加载**。version 0.24.x, edition 2024。涵盖:7 个 crate 布局、`html!`/`class!`/`vars!`/`var!`/`#[component]`/`#[watch]`/`#[computed]` 过程宏真实签名、28 个 euv-ui 组件（带 view/）+ 358 个 design class + 2 个 theme var 集合、Signal/VirtualNode 响应式系统、`App::mount()` 入口、下游工具仓(euv-docs / euv-cli) engine 版本 pin 铁律、crates.io + GitHub Release 流水线模板。'
 ---
 
 # euv 框架完整规范 (verified 2026-08)
@@ -319,7 +319,9 @@ pub struct EuvButtonProps {
 | **`match { signal }` arm 切换后，旧 tab 的 page-level `Signal<bool>` 状态幸存 → 切回 tab 时 overlay / 状态错位再现** | `match` arm 切换时 `core/src/renderer/render/impl.rs:914` 走 `render_full_replace`（整 arm DOM 子树销毁重建），但**注册在 page-level `HookContext` 里的 `Signal` 不会随之清除**——`hook_context.switch_arm`（`core/src/reactive/hook/impl.rs:24`）只清 per-arm hooks/cleanups。表现：fullscreen tab A 进入全屏 → `canvas_2d_fullscreen.set(true)`（page-level signal）→ 切到 tab B（A arm DOM 被销毁）→ 切回 A（A arm 重建）→ `c_game_container_fullscreen` overlay 重现，因为 `canvas_2d_fullscreen` signal 仍然是 `true`。**修复模式**：tab 切换处理器里**先复位所有 per-tab state signal 再 `tab.set(value)`**。例：`game_2d_on_tab_select(tab, value, fullscreen)` 在闭包最前面 `fullscreen.get_canvas_2d().set(false); fullscreen.get_web_gl().set(false); fullscreen.get_web_gpu().set(false);` 再 `tab.set(value)`。其他跨 arm 持有的 boolean / enum signal（modal-open、form-state、pending-uploads）同理。诊断：复现切 tab 后残留 UI → 在 `register_popstate_guard`/tab handler 加日志确认 signal 没复位。verified PR #104 (0.18.38)。 |
 | **fixed-aspect canvas（800×450 = 16:9）放进全屏容器后，绘制的球/精灵被拉伸成椭圆** | canvas backing buffer 是固定逻辑分辨率（`GAME_2D_CANVAS_WIDTH × GAME_2D_CANVAS_HEIGHT = 800 × 450`）。如果外层 `c_game_container_fullscreen`（`width: 100%; height: 100%; position: fixed`）直接铺满 viewport，再把 `<canvas>` 用 `width: 100%; height: 100%` 嵌进去，浏览器按 viewport 比例（如 1280×800 = 1.6:1）拉伸 16:9 的 bitmap → 球变横向椭圆。**修复：插一层 16:9 letterbox wrapper**——class 必备三件套 `aspect-ratio: "16 / 9"; width: "100%"; max-width: "100%"; max-height: "100%"; height: "auto"; display: "flex"; align-items: "center"; justify-content: "center";`，**外加 `position: "relative"`**（让 `c_game_loading_overlay` 这种 `position: absolute` 的子元素以此为定位锚点，否则会逃逸到 `c_game_container_fullscreen`）。view 里 `<div class: c_letterbox()><canvas class: c_canvas() .../></div>`，原 backing 不变（仍 800×450），浏览器均匀缩放到 letterbox。generic 模式：任何"fixed-aspect bitmap/sprite 嵌入 fluid 容器"都套这个 letterbox 包装。verified PR #104 (0.18.38, euv example game_2d/game_3d 全屏模式)。 |
 | **clickable `<div>` with delegated `onclick` inside scrollable container OR fixed-position overlay is silently dead on iOS Safari（影响 `/conditional`、`/game_2d`、`/game_3d`、`/keep_alive` 等所有用 `c_tab_item_*` 的 page；以及所有用 `c_modal_overlay` / `c_vconsole_overlay` / `c_euv_drawer_overlay` / `c_mobile_overlay` 的 modal/drawer/vconsole）** | iOS WebKit 把 tap 误判为"开始滚动" → 直接 suppress synthetic `click`,`Registry::delegation("click")` 监听 window 但 iOS 根本不派发 click,所以 delegated handler 永远不被调用。Android/PC 没这个手势消歧义逻辑所以正常。`euv_button`(真 `<button>`)不受影响,iOS 把 button 当原生交互元素直接派发 click。两个变体位置: (a) **scrollable 容器内的 clickable leaf**(如 tab item)— PR #231 加 `touch-action: manipulation` 到 `c_tab_item_active` / `c_tab_item_inactive`;(b) **fixed-position overlay 背景遮罩上的 click-to-close**(如 `c_modal_overlay` 等所有 `c_*_overlay`)— PR #232 加同一对 CSS 到 `c_modal_overlay` / `c_vconsole_overlay` / `c_euv_drawer_overlay` / `c_mobile_overlay`。两个位置都要 `touch-action: manipulation` + `user-select: none`(+ `-webkit-` 前缀)——告诉 iOS 这个元素只响应 tap + 平移,不做双击缩放等待,不做滚动手势消歧,同时关掉 iOS 长按文字选择气泡。**作用域只到 leaf 元素 / overlay 类自身,绝不要写到 `c_app_main` 这种滚动容器上**(会让页面无法 pan)。Generic 模式:任何自定义 clickable `<div>`/`<span>`(不是 `<button>`/`<a href>`)且在 scrollable 容器或 fixed overlay 里都需要这两条 CSS。诊断:iOS Safari 里 tap 无 console error、无 state 变化,但在 macOS Safari 同 page 正常。完整 repro + 通用化模式 + 修复代码 + 不该做的事见 `references/euv-ios-tab-click-pitfall.md`。verified PR #231 (0.24.5, tabs) + PR #232 (0.24.6, overlays)。 |
-| **agent (自动) 在 `class!` / `html!` 宏体里塞"why 解释"块注释,user 会立刻让删 (PR #231/#232 + user 2026-09-14 明确指令)** | agent 反复踩的同一类反模式:为某次 fix 在 `class!` class body 顶部写 5-15 行的"iOS WebKit: ... rationale ..."注释;**这些注释不是文档,user 视其为 unsolicited preamble / 教学**,与对话中"禁止 lecture"同源。**Rule**:`class!` / `html!` 宏体里**只写 CSS 属性和 reactive 控制流,不加解释性注释**。必要的 why 写到 (a) commit message + PR body(那是给 reviewer 看);(b) `references/` 文件(那是给未来 agent 看)。**例外**:`class!` 块外的 `///` doc comment 或函数级 `///` 注释是项目惯例,保留;类体内 `// xxx` inline 注释一律不写。**Pre-commit 自检**:任何 `class!` block 内的 `//` 注释都该是"为什么这条 property 必须这样"的**反直觉**说明(如 `cursor: pointer` 在 `<div>` 上的兼容陷阱),否则删。PR #231 (9 行)+ PR #232 (12 行) agent 注释合计 21 行,user 一个回合清光;后续 euv 修复在 class! 里写注释前先想"如果 user 让我删,我愿意删吗?"。 |
+| **agent (自动) 在 `class!` / `html!` 宏体里塞"why 解释"块注释,user 会立刻让删 (PR #231/#232 + user 2026-09-14 明确指令)** | agent 反复踩的同一类反模式:为某次 fix 在 `class!` class body 顶部写 5-15 行的"iOS WebKit: ... rationale ..."注释;**这些注释不是文档,user 视其为 unsolicited preamble / 教学**,与对话中"禁止 lecture"同源。**Rule**:`class!` / `html!` 宏体里**只写 CSS 属性和 reactive 控制流,不加解释性注释**。必要的 why 写到 (a) commit message + PR body(那是给 reviewer 看);(b) `references/` 文件(那是给未来 agent 看)。**例外**:`class!` 块外的 `///` doc comment 或函数级 `///` 注释是项目惯例,保留;类体内 `// xxx` inline 注释一律不写。**Pre-commit 自检**:任何 `class!` block 内的 `//` 注释都该是"为什么这条 property 必须这样"的**反直觉**说明(如 `cursor: pointer` 在 `<div>` 上的兼容陷阱),否则删。PR #231 (9 行)+ PR #232 (12 行) agent 注释合计 21 行,user 一个回合清光;后续 euv 修复在 class! 里写注释前先想"如果 user 让我删,我愿意删吗?"。**2026-09-19 加深**:同样的规则应用到 `///` doc comment——user PR review 时也清掉了大量函数级 `///` 注释(`/// Renders the home page: ...`、`/// # Arguments`、`/// # Returns`、字段的 `/// The card title.` 等),只保留一句非显然的功能描述。规则升级为:**agent 写的所有注释(function-level `///`、field `///`、inline `//`)都该 self-documenting,且仅在反直觉或交叉边界时写**;显而易见的字段名/函数名不需要注释重申。"如果 user 让我删,我愿意删吗?" 这条 prompt 同样适用于所有注释,不只是宏体里的。 |
+| **下游工具仓(euv-docs / euv-cli) Cargo.toml 把 framework engine 设为 `"*"` 浮到最新可能引入 CSS API mismatch (2026-09-19 docs-pages 部署教训, euv-docs PR #40)** | 任何下游工具 crate 的 `Cargo.toml` 都应 **pin 到上游主仓规定的具体版本**(`euv-dev/euv` 当前是 `0.18` 写死,PR #13 故意 pin),而不是 `"*"`。理由:framework engine CSS 类名 + safe-area pattern + UI 组件签名跨 minor 版本会变,下游工具仓若用 `euv-ui` 组件或样式,版本浮动引入 CSS API mismatch → mobile nav / sidebar 对齐 / 主题色 / 首页边框 fallback 到旧样式 = "看起来没修复但实际是版本 mismatch"。**验证法**:查 `git log -- Cargo.toml` 在 `euv-dev/euv` 仓找 `#13` PR 注释;或 `curl -sL https://raw.githubusercontent.com/euv-dev/euv/master/Cargo.toml \| grep -E '^euv \|^euv-ui' \| head -3` 看上游 pin。**deploy 引用下游工具仓必须 pin 绝对 SHA**(`cargo install --git ... --rev <sha>`,勿用 `main` / `master`),每次 bump 都要 review 对应 PR + 上游 engine 兼容矩阵。**实战误用**:`eastspire/euv-docs@35febe7` fork 把 `euv = "0.18"` 改为 `"*"` 让 engine 跳到 0.24.x → 线上 sidebar 对齐丢失 + 首页边框全无 → 用户连续 3 轮反馈"修复全没了"。**修复** = 切回 `euv-dev/euv-docs@6c62600` (upstream, `euv = "0.18"` 官方 pin) → 立即恢复正常 sidebar / anchor / 主题色。 |
+| **GitHub Pages 仓 deploy.yml 用 `cargo install --git euv-dev/euv` 装 euv-docs CLI 时,`-p euv-docs` 报 "unexpected argument '-p' found";`--bin` 不带包名 cargo 报 "multiple packages with binaries found";正解是包名作位置参数** | `cargo install --git` 的 flag 与 `cargo build` / `cargo run` 不同:**`-p <crate>` 不支持**(`-p` 在 install 的 flag 列表里没有,得用 `-- -p` 才能传给 cargo build,但 install 自己不看),**包名是位置参数**(放最后),`--bin <name>` 仅在多 binary crate 里选具体 binary。**6 种错都试过**:(1) 只 `--bin euv-docs` → "multiple packages with binaries found: euv-cli, euv-docs";(2) 加 `-p euv-docs` → "unexpected argument '-p' found";(3) 删 `--bin` 加 `euv-docs` → OK 但 cargo 默认走 default branch 不可控;(4) 加 `--branch master` 加 `euv-docs` → OK;**正解**:`cargo install --target-dir /tmp/td --git URL --branch <b> <crate> --bin <bin> --force`。**配套**:install step 必须在 fetch step **之后** (否则 build.rs 在 euv 仓没 checkout 时 panic "site config missing");EUV_DOCS_SRC_DIR 必须**绝对路径**(`${{ github.workspace }}/...`),不能用相对(因 Actions cwd 不可靠)。完整 deploy 模板 + fetch/install/build 顺序 + force-push admin 升级模式见 `references/euv-docs-cli-deploy-pipeline.md`。 |
 
 ## 13. 最小可运行模板
 
@@ -606,6 +608,8 @@ curl -sS -X PUT https://api.github.com/repos/euv-dev/euv/pulls/<N>/merge \
 
 **千万不要全局 sed `version = "X.Y.Z"` 在所有子目录**(会误伤第三方依赖版本号,且违反铁律)。
 
+**Sub-crate 边界设计(release 时跟 monorepo 直接相关)**: euv 单仓时代所有源码在根 `src/`,monorepo 后每个子包有独立 `Cargo.toml`。release sync 时 `[workspace.dependencies]` 内 6 个 path-dep 的 `version` 也会被 sed 同步(见 sync_workspace_version job 源码)。**新增子包坑**:`Cargo.toml` 的 `[workspace.dependencies]` 必须为每个 `<name>-*` 子包加 `path = "..."` + `version` 两行(sync job 不会自动给新成员加 pin)。**每个子包必须有自己目录内的 `README.md`**(`cp README.md <sub>/README.md`),`readme = "README.md"`。**禁止** `readme = "../../README.md"`(跨仓根路径) — `cargo publish` 会报 `readme ../../README.md does not appear to exist (relative to ...)` 并拒绝打包。monorepo 迁移完整 checklist 见 `hyperlane-standards/references/monorepo-migration-checklist.md`(hyperlane 首次非 euv monorepo 转换实战)。
+
 **Dep 块顺序 amend 进同一 release PR**(2026-09-14 verified PR #233):
 当一个 release PR 同时引入新 dep + 触发了 `rust-standards §13.7` "整体长度 + 字典序"重排,新 PR 的 Cargo.toml diff 应当**只展示 reorder**(`git diff --stat` 无新增 dep 行,只是顺序调整)。如果同一个 PR 里既引入新 dep 又 reorder,**优先 amend reorder 进原 commit**(force push),而不是开新 PR:
 
@@ -660,3 +664,235 @@ print('OK')
 ## 18. 跨仓 workflow trigger(euv → euv-app)
 
 euv (`euv-dev/euv`) 和 euv-app (`eastspire/euv-app`) **不同 org**,跨 org workflow trigger **0-secret 不可行**:`workflow_run` 不跨 org、默认 `GITHUB_TOKEN` 无 `actions: write` 跨仓 scope、只有 PAT(`public_repo` classic / fine-grained `Actions: Write` on 下游 repo)或共享 GitHub App 能解。完整方案 / 模板 / revert 模式见 `references/cross-repo-workflow-trigger-limits.md`(实测 PR #228 + revert #230)。
+
+## 19. euv-docs PR 流程(2026-09-19 PR #238 实测)
+
+### 19.1 PR base 必须与你分支时的上游 tip 匹配
+
+**坑**:打开 PR 时把 base 设为 `master` 而 head 是 fork 的最新 commit,**即使 git diff 看起来 clean,mergeable 也可能 = false**(mergeable_state = dirty)。
+
+**根因**:你的 fork branch 与 upstream master 各自有 commits,GitHub 的三方 merge = `base ∪ head - common_ancestor`。如果 head 含 base 没有的 commits(如 `3de773d0 bump 0.25.0`),且 base 不是 head 的祖先 → 实际三方 merge 要 rebase 这些 commits,而冲突时 `mergeable: false`。
+
+**诊断**(开 PR 后立刻跑):
+
+```bash
+# REST API 而非 gh(无 read:org scope 时 gh pr view GraphQL 报错)
+python3 -c "
+import json, urllib.request, os
+token = os.environ['GH_TOKEN']
+req = urllib.request.Request(
+    'https://api.github.com/repos/euv-dev/euv/pulls/<N>',
+    headers={'Authorization': f'token {token}'},
+)
+resp = json.loads(urllib.request.urlopen(req).read())
+print(f'state={resp[\"state\"]} mergeable={resp.get(\"mergeable\")}')
+print(f'base={resp[\"base\"][\"sha\"][:7]} head={resp[\"head\"][\"sha\"][:7]}')
+print(f'mergeable_state={resp.get(\"mergeable_state\")}')
+"
+# 期望: mergeable=True, mergeable_state=clean, head=HEAD~1, base=master HEAD
+```
+
+**mergeable_state = dirty 时 CI 不会触发**(GitHub 跳过)。修法:本地 rebase `git rebase euv-dev/master`,再 force-push。
+
+### 19.2 PR 上的 `sync_workspace_version` 是 skipped
+
+`.github/workflows/rust.yml` 的 `sync_workspace_version` job 条件是 `if: github.event_name == 'push' && github.ref_name == 'master'`,**只在 push master 时跑**。PR 上的 build/check/clippy/tests 跑时 workspace deps 还是上一次 sync 后的状态。
+
+**坑**:根 `Cargo.toml` bump 到 0.24.6,但 `[workspace.dependencies]` 还写 `euv = "0.24.5"` → PR clippy / build / tests 全部失败:
+
+```
+error: failed to select a version for the requirement `euv = "^0.24.5"`
+candidate versions found which didn't match: 0.24.6
+required by package `euv-engine v0.24.5 (/path/to/euv-engine)`
+```
+
+**修法**(PR 必须做的 sync,模拟 CI sync_workspace_version 的 sed):
+
+```bash
+cd ~/github/euv-dev/euv
+# 1. bump commit (只改 root Cargo.toml)
+NEW=0.24.6 OLD=0.24.5
+sed -i "s/^version = \"$OLD\"$/version = \"$NEW\"/" Cargo.toml
+git diff --stat   # 期望: Cargo.toml | 2 +-
+
+# 2. sync workspace deps + member versions (与 sync_workspace_version job 同样的 sed)
+for f in cli/Cargo.toml core/Cargo.toml engine/Cargo.toml \
+         example/Cargo.toml macros/Cargo.toml ui/Cargo.toml \
+         euv-docs/Cargo.toml; do
+    sed -i "s|^version = \"$OLD\"\$|version = \"$NEW\"|" "$f"
+done
+sed -i "s|version = \"$OLD\"|version = \"$NEW\"|g" Cargo.toml   # workspace.dependencies
+git diff --stat   # 期望: 8 files changed, 14 insertions(+), 14 deletions(-)
+
+# 3. 两个 commit(分开!不能合并)
+git add Cargo.toml && git commit -m "chore: bump version to $NEW"
+git add -A && git commit -m "chore: sync workspace versions to $NEW"
+
+# 4. push + open PR
+git push origin feat/foo
+```
+
+merge 后 master 上 CI 跑 `sync_workspace_version` 会变 **no-op**(workspace 已同步,无需再写)。
+
+**根 Cargo.toml vs workspace deps 是 2 个独立 commit**(前 1 个,后 2 个):这是 §17 + sync workflow 的标准 2-commit 模式,别把它们 amend 进同一个 commit。
+
+### 19.3 重写已 push 的 PR commit — rebase + amend + force-push
+
+场景:PR 已经 push 到 remote,user 又让你修改(修注释 / 删无用代码)。**不要**新增"cleanup commit" 污染 PR history。**做**:
+
+```bash
+# 1. 在 working tree 应用所有 cleanup 修改
+# (文件 patch + euv fmt)
+
+# 2. soft reset 到 PR fix commit 的前一个 commit(留出 fix commit作为 amend target)
+git reset --soft <prev-commit-of-fix-sha>
+# 此时 staged = fix commit + cleanup 的全部 diff
+
+# 3. amend 全部进 fix commit
+git commit --amend --no-edit -C <fix-sha>
+# HEAD 仍是 fix commit (同一 SHA 复用 author/date),内容吸收 cleanup
+
+# 4. force-push
+git push origin <branch> --force
+```
+
+**危险**:`-C <fix-sha>` 保留原 fix commit 的 author/date(不是新 SHA);`-c <fix-sha>` 改用新 author/date 但保留 message。**永远用 `-C`**——保持 amend 痕迹不可见。
+
+如果 amend 时写错了 commit message,`git commit --amend` 改 message 后再 push。
+
+### 19.4 `DocsFeature` 替代 `EuvFeature` 的模式
+
+**坑**:`euv-docs` pin `euv = "0.18"`(PR #13),`euv-ui` 0.18.x 的 `EuvFeature` frozen,**不能 augment** 加 `link` 字段。
+
+**修法**(在 `euv-docs/src/data/struct.rs` 加本地 wrapper):
+
+```rust
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DocsFeature {
+    pub icon: &'static str,
+    pub title: &'static str,
+    pub details: &'static str,
+    pub link: &'static str,    // ← 新增字段,euv-ui 0.18 没有
+}
+```
+
++ 改 `DocsPage.features: &'static [DocsFeature]`(替换 `&'static [EuvFeature]`)。
+
++ `euv-docs/build.rs` emit 时改用 `DocsFeature { icon, title, details, link }`,而非 `EuvFeature { icon, title, details }`。
+
++ **不要保留 `EuvFeature` 兼容 shim**——pin 0.18 已冻结上游,兼容代码只是死代码。
+
++ `Default` derive **必须保留**——`try_get_props().unwrap_or_default()` 需要 fallback,删除会破坏组件挂载。
+
+### 19.5 `euv_feature_grid` 不支持 link → 自己写 atomic render
+
+**坑**:`euv-ui` 0.18 的 `euv_feature_grid` 不接 `link`(只 render `<div>`,不能 render `<a>`)。即使上游加 link 字段,euv-docs pin 0.18 也不会拿到。
+
+**修法**(直接用 atomic `<div>` + `<a>` 自己写,绕过 `euv_feature_grid`):
+
+```rust
+#[component]
+pub(crate) fn docs_feature_grid(node: VirtualNode<DocsFeatureGridProps>) -> VirtualNode {
+    let DocsFeatureGridProps { features } = node.try_get_props().unwrap_or_default();
+    if features.is_empty() { return html! { "" }; }
+    html! {
+        div { class: "c_docs_feature_grid"
+            for feature in features.iter() {
+                docs_feature_card { feature: *feature }
+            }
+        }
+    }
+}
+```
+
+`docs_feature_card` 内部根据 `feature.link.is_empty()` 决定 wrap `<div>` vs `<a>`(external http vs internal route)。
+
+### 19.6 String class + `Css::inject_css` —— 当 `class!` macro 不可达时
+
+**坑**:`class!` macro 定义在 `euv-ui/src/style/class/fn.rs` 且宏本身是 `pub(crate)`,**外部 crate 不能调用**。`euv-docs` 想加自定义 class(如 `c_docs_feature_card_*` / `c_docs_container_tip`)不能走 `class!` 宏。
+
+**修法**:
+
+1. 在 `html!` 内直接用字符串 class name:
+   ```rust
+   html! { div { class: "c_docs_feature_card" ... } }
+   ```
+
+2. 在 `lib.rs::main()` `Css::inject_css(raw_css)` 注入对应 CSS 规则:
+   ```rust
+   Css::inject_css(
+       ".c_docs_feature_card { display: flex; ... } \
+        .c_docs_feature_card:hover { ... } \
+        .docs-container-tip { ... } \
+        ..."
+   );
+   ```
+
+3. CSS 选择器走逗号分组合并同类项避免冗长:
+   ```css
+   .docs-container-tip, .docs-container-note, .docs-container-important, .docs-container-info { ... }
+   .docs-container-warning, .docs-container-caution { ... }
+   .docs-container-title { ... }   /* 共享 title 样式 */
+   ```
+
+**注意**:skill §3.G 第 4 条警告"CSS 嵌套 `> div >` 被优化器合并失效"。逗号分组的扁平选择器是安全的,**但嵌套 descendant 选择器在 euv CSS 注入路径里会被合并掉**——测试长链 `> ` 嵌套时用 headless Chromium DOM probe 验证 computed style 真的生效了。
+
+### 19.7 `if { cond }` 在 reactive `if` 里 cond 是非 Signal 裸 bool 时
+
+skill §12 坑表已记录此陷阱:**`if { bool_var }`** 报 `bool` no method `get`,因为 macro 把单段标识符自动 rewrite 为 `.get()`。**修法**:
+
+- 把 `let show_icon: bool = ...; if { show_icon }` 改为 `if { show_icon == true }`(多段 token 不触发 auto-get)
+- 或把 bool 改为 `Signal<bool>`:`let show_icon: Signal<bool> = App::use_signal(...)`
+
+**首选 `== true` 写法**——Signal 创建有运行时代价,组件 props 的中间 bool 用纯 bool + `== true` 即可。
+
+### 19.8 在 euv-docs 这种 monorepo 子包改代码 — Rust edition 2024 lint 噪声
+
+**坑**:`euv-docs/src/component/password_gate/view/fn.rs` 用 `async fn` + `spawn_local(async move {...})`,但 patch tool 自带的 rustfmt < 1.85 不认 edition 2024 语法,会输出假错:
+
+```
+error[E0670]: `async fn` is not permitted in Rust 2015
+```
+
+**修法**:这是 pre-existing(不是你的修改引入的),看 patch tool 的 lint 输出是否标 "Pre-existing lint errors — this edit didn't introduce new ones"。`cargo fmt -- --check` 在 euv-docs workspace clean → CI 用 rustc 1.98 编过,本地 patch tool 报的错不阻塞 push。
+
+### 19.9 PR push 后 CI 不 trigger —— 检查 mergeable_state 不是 commit
+
+**坑**:push 后 `gh pr checks` 显示 "no checks reported"。
+
+**诊断**:
+
+```bash
+python3 -c "...(§19.1 同样的脚本)..."
+# 看 mergeable_state:
+# - clean → CI 应已跑
+# - dirty → CI 不跑(merge 冲突),修 rebase 后 push
+# - unstable → CI 还在跑,等
+# - blocked → required checks 没全过
+# - behind → base 已更新,需要 rebase
+```
+
+常见:本地 push 用了相对路径 env var → 构建用了错误的 source → CI 实际没编译源代码(只 cargo install)。修法:用绝对路径 `EUV_DOCS_SRC_DIR="$PWD/docs"`。
+
+### 19.10 cargo fmt on 单行长字符串的 indent 陷阱
+
+**坑**:在 `Css::inject_css("...long string...")` 这种字符串里,如果缩进改了(比如 patch 把 `"..."` 从 4 spaces 改成 12 spaces),`cargo fmt` 会要求**closing `"`** 与 opening `"` 缩进一致。报错信息:
+
+```
+Diff in /path/to/lib.rs:65:
+              .docs-container-danger { ... } \
+              .docs-container-title { ... } \
+              .docs-container-title:empty { display: none; }",
+-        );"
++    );"
+```
+
+**修法**:跑 `cargo fmt --manifest-path <pkg>/Cargo.toml` 重写整个字符串到正确缩进,然后再 patch 字符串内的内容。或者把整个字符串重写到一个 raw literal `r#"..."#`,cargo fmt 不动 raw literals。
+
+### 19.11 cargo install --git 的 `EUV_DOCS_SRC_DIR` 必须绝对路径
+
+**坑**:`cargo install --git URL --branch master euv-docs` 会跑 build script。build script 读 `EUV_DOCS_SRC_DIR` 决定 source 目录。如果 `EUV_DOCS_SRC_DIR=./docs`(相对路径),**build script 用当前 cwd 解析**,而 `cargo install` 的 cwd 是 monorepo root → `./docs` = monorepo_root/docs = euv-docs 自带 demo docs(无用户内容)。
+
+**修法**:**绝对路径**。`EUV_DOCS_SRC_DIR="$PWD/docs"` 或 `EUV_DOCS_SRC_DIR="$(realpath ./docs)"`。
+
+完整 deploy pipeline 模板详见 `references/euv-docs-cli-deploy-pipeline.md`。

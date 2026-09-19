@@ -1346,6 +1346,30 @@ grep -E '^title|^description' docs/config.toml
 
 **适用范围**:任何用 euv-docs CLI 部署的项目,在 fix 完坑 26 之后必须额外检查 `docs/config.toml` 的 `[site].title` / `[site].description` / `[[locales]].title` 等用户可见字段是不是用户真实信息,而不是 euv-docs 模板 starter。
 
+### 坑 27:euv-docs build.rs 的 `public` 目录跳过是任意深度匹配 — 嵌套内容目录被误杀(2026-09-19 docs-pages/docs 教训)
+
+**症状**:`#/essay/public/2026/06-09.html` 404,essay/public/ 下所有页面在 `docs_gen.rs` 里完全不存在;侧边栏也没有 essay/public 分组。
+
+**根因**:`build.rs` 的 `collect_md` / `build_sidebar` / `copy_doc_assets_recurse` 用 `path.file_name() == "public"` 判跳过,**任意深度**生效 — 本意是只跳过顶层 `docs/public/`(站点静态资源),但 `docs/essay/public/` 这种**内容目录**也被误杀。
+
+**解法**:跳过判断加 root 限定 `&& path.parent() == Some(root)`,只有 `docs/public/` 直子目录被跳过(euv PR #239 commit f7dcf22e)。`collect_md` 因此加了 `root: &Path` 参数。
+
+**诊断**:build 后 `grep -c 'essay/public' OUT_DIR/docs_gen.rs`,0 = 被误杀。
+
+**适用范围**:任何 euv-docs 项目里有嵌套 `public/` 内容目录的场景(VuePress 迁移站常见,VuePress 的 public 语义是"根级静态资源",用户会在子目录复用这个名字)。
+
+### 坑 28:raw HTML `<img src="/…">` 不走 md 图片的 src 重写 — 子路径部署 404(2026-09-19 docs-pages/docs 教训)
+
+**症状**:md 图片 `![](/essay/x.jpg)` 都正常(经 `rewrite_image_src` → `./essay/x.jpg`),但 `docs/hyperlane/README.md` 里 raw HTML `<img src="/img/hyperlane.png">` 线上 404,`naturalWidth=0`。
+
+**根因**:`rewrite_image_src`(坑 14 的框架化解法,PR #239)只作用于 pulldown-cmark 的 `Tag::Image` 事件。raw HTML 走 `Event::Html` / `Event::InlineHtml`,原样透传。
+
+**解法**:`rewrite_html_asset_src(html)`:扫 `src="` / `src='`,若值以 `/` 开头且非 `//`(protocol-relative),插入 `.` 变 `./…`。在 `Event::Html | Event::InlineHtml` 两个出口统一调用(euv PR #239 commit f7dcf22e)。`href="/…"` 不重写(站内 raw HTML 链接应写成 hash 路由形式,docs 仓目前 0 处)。
+
+**诊断**:Playwright `[...document.querySelectorAll('article img')].map(i => [i.getAttribute('src'), i.naturalWidth])` — src 以 `/` 开头 = 没重写;nw=0 = 404。
+
+**适用范围**:任何 euv-docs 项目 md 里写 raw HTML `<img>` / `<video>` / `<source>` / `<audio>` 的站点。
+
 ## Support files
 
 - `templates/cross-repo-deploy.yml` — starter workflow for the source-builds-pages-product pattern (source repo builds, pushes to a target Pages repo). Implements坑 22's 5-step hardening (source identity assertion, force-fresh www/, build artifact check, source SHA baked into `.deploy/build-info` + commit message). Copy to `.github/workflows/deploy.yml`, replace `<source-org>/<source-repo>` / `<target-org>/<target-repo>` / `<PINNED_SHA>` placeholders, set the `TARGET_REPO_PAT` repo secret.

@@ -118,6 +118,80 @@ for i, line in enumerate(lines, 1):
 
 **踩坑**:audit script rule 15 (R1.3a raw-string-aware) 实测 38 false positives → 0 false positives 后 PASS。验证方法:临时插一个 `pub(crate) struct INVALID_TEST { ... }` 到非 `struct.rs` 文件,看 audit 是否 FAIL。
 
+### 1.3c literal purity — `fn.rs` 内禁止硬编码 byte/char/string literals(2026-09-14)
+
+**反例**(踩坑,euv PR #233 minify_html_template):
+```rust
+// fn.rs 内 ❌
+pub fn minify_html_template(html: &str) -> String {
+    while i < len {
+        let b: u8 = bytes[i];
+        if b == b'<' { ... }
+        if b == b'>' { ... }
+        if i + 7 <= len && bytes[i..i + 7].eq_ignore_ascii_case(b"</script") { ... }
+        ...
+    }
+}
+```
+
+`fn.rs` 里反复出现 `b'<'` / `b'>'` / `b'/'` / `b' '` / `b"<script"` / `b"</script"` / `b"<style"` / `b"</style"` / `b"<!--"` / `b"-->"` 这 10 个 byte/char/string literals。**字面值是 named symbol**(语义清晰、有名字、会被多次引用),等价于 `pub const HTML_LT: u8 = b'<';` —— 应当定义到 `const.rs`。
+
+**修正**(强制):
+```rust
+// const.rs ✅
+pub const HTML_LT: u8 = b'<';
+pub const HTML_GT: u8 = b'>';
+pub const HTML_SLASH: u8 = b'/';
+pub const HTML_SPACE: u8 = b' ';
+pub const HTML_COMMENT_OPEN_BYTES: &[u8] = b"<!--";
+pub const HTML_COMMENT_CLOSE_BYTES: &[u8] = b"-->";
+pub const HTML_SCRIPT_OPEN_PREFIX_BYTES: &[u8] = b"<script";
+pub const HTML_SCRIPT_CLOSE_PREFIX_BYTES: &[u8] = b"</script";
+pub const HTML_STYLE_OPEN_PREFIX_BYTES: &[u8] = b"<style";
+pub const HTML_STYLE_CLOSE_PREFIX_BYTES: &[u8] = b"</style";
+```
+```rust
+// fn.rs ✅ — 引用 const,不再写 raw literal
+pub fn minify_html_template(html: &str) -> String {
+    while i < len {
+        let b: u8 = bytes[i];
+        if b == HTML_LT { ... }
+        if b == HTML_GT { ... }
+        if i + HTML_SCRIPT_CLOSE_PREFIX_BYTES.len() <= len
+            && bytes[i..i + HTML_SCRIPT_CLOSE_PREFIX_BYTES.len()]
+                .eq_ignore_ascii_case(HTML_SCRIPT_CLOSE_PREFIX_BYTES) { ... }
+        ...
+    }
+}
+```
+
+**判断标准**(`fn.rs` 内某 literal 是否应当提到 `const.rs`):
+| 标准 | 提到 const.rs |
+|---|---|
+| 出现 ≥2 次(包括相同 byte slice 比较) | ✅ |
+| 语义上是个有名字的 token(tag delimiters / markers / EOF / EOL / 协议字符串) | ✅ |
+| 长度 > 1 char / 单 byte | ✅(单 byte char literal `b'<'` 也算,因为 `<` 是 HTML tag delimiter) |
+| 在 fn 体、attribute、pattern match 中反复出现的 magic value | ✅ |
+| 调试 / log 用一次性 string(`"failed to parse"`) | ❌(留在 fn 内,§9.5 风格) |
+| 1-2 char separator(`","` / `":"`) | ❌(太琐碎) |
+
+**额外好处**:提 const 后调用 `*.len()` 代替 magic number `7` / `8` / `6` / `4` / `3`(§1.4),`HTML_SCRIPT_CLOSE_PREFIX_BYTES.len()` self-documenting,改 const 值时所有调用点自动同步。
+
+**例外**:`fn.rs` 可以出现的 literal:
+- 文档 doc-comment 中的 inline Rust 示例(`/// # Examples\n/// \n/// \`\`\`\n/// foo("<script>")\n/// \`\`\``)
+- `#[cfg(test)] mod tests` 测试 helper(不进 production)
+- error message string 模板(format! 用)
+- log 输出 message(动态组装)
+
+**检测**(audit script 新增 check 18,2026-09-14 加):
+- 扫所有 PR 改动的 `fn.rs` / `impl.rs` / `mod.rs` 文件
+- 在 fn body / if / while / match 表达式位置匹配 `b"<bytes>"` / `b'<char>'` / 多字符 `"<string>"`
+- 排除:doc-comment 行(`///` `//!`)、测试块(`#[cfg(test)]` / `#[test]`)、const/let 一次性 binding、`r#"..."#` raw string
+
+**踩坑来源**:user 原话(2026-09-14):"硬编码的字符,没有遵守rust standard skill,定义到const.rs"。任何 `fn.rs` 写完提交前,grep `b"\|b'` 自检,出现则必须先抽 const 或加 inline `// §1.3c exception: <reason>` 注释(注意§9.5 一般禁 fn 体注释,但本例外明确允许一行说明)。
+
+**与 §1.3a 的关系**:§1.3a 管 top-level declaration(struct/enum/impl...),§1.3c 管 fn/impl body 内的 literal。两者互补,audit script 的 check 16 检 §1.3a,新增 check 18 检 §1.3c。
+
 ## 1.4 raw identifier 命名(关键!)
 
 由于 `enum` / `impl` / `const` / `static` / `struct` / `trait` / `type` / `fn` 是 Rust 关键字,直接写 `mod enum;` 会编译失败。所有关键字文件必须在 `mod.rs` 中以 **raw identifier**(`r#xxx`)形式声明:

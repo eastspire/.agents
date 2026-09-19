@@ -3,13 +3,14 @@ name: docs-pages-docs-contribution
 description: docs-pages/docs VuePress site — direct push master.
 license: MIT
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
   category: frontend-dev
   related_skills:
     - frontend-dev/euv-docs-contribution
     - gh-pr-creation-workflow
     - rust-standards
     - git-standards
+    - rust-wasm-gh-pages-deploy-pitfalls
 ---
 
 # docs-pages-docs contribution (docs-pages/docs)
@@ -282,6 +283,7 @@ When a new crate mirrors one of these in upstream structure, mirror the correspo
 - **Forgetting to update `sidebar.js`** when adding a new subdir — content exists but is unreachable from nav. Re-read the sidebar.js section above; this is the single most common miss.
 - **Forgetting to update home `src/README.md` features block** — sidebar can still discover the subdir via routing, but the home hero card won't link to it. The inverse is also true: an orphaned home card (`/euv-docs/` link) with no subdir → 404.
 - **Frontmatter `head` collapsed to single line** — `hope` theme parser expects nested list form (`- - meta\n    - name: keywords\n    - content: ...`), not a single `- name: keywords` line. Test by re-fetching the rendered page and checking the `<meta name="keywords">` is populated.
+- **`patch` tool sequencing error on multi-line frontmatter edits** — when editing frontmatter blocks with `patch`, your `new_string` should be the *complete* post-edit block, not a partial appended block on top of the old block. If you want to add lines after `head:`, your `old_string` must include the *next* anchor line (e.g. `title: 首页`) so the patch has a stable boundary. Otherwise the patch will leave the original block unchanged (uniqueness mismatch) or duplicate keys (`heroText:` appearing twice = YAML parser picks last one). Lesson: read the file (or at least the affected block with offset/limit) before patching frontmatter; verify with `git diff <file>` after each patch; if the diff doesn't match intent, revert with `git checkout HEAD -- <file>` and try again with a wider `old_string`. Three separate patch attempts on one file in a row = stop, re-read, then patch.
 - **`<Bottom />` placed before content ends** — pages with trailing content after `<Bottom />` render with a stray empty nav-pager block at the very bottom. Always end-of-body.
 - **Forging a PR when direct-push works** — `docs-pages/docs` is admin-only; just push master. Opening a PR against your own admin access wastes a round-trip. (Exception: if you actually want CI to gate it, that's a separate workflow setup.)
 - **`git push origin master` rejected with "non-fast-forward"** — means local master drifted (a teammate/auto-process committed since you cloned). `git fetch origin && git reset --hard origin/master` is the safe sync (no local work lost if you committed first).
@@ -290,6 +292,43 @@ When a new crate mirrors one of these in upstream structure, mirror the correspo
 - **"Pipeline didn't take effect" ≠ deploy failed** — when a user says the GitHub pipeline or build didn't take effect on a live page, **never** answer from memory. Always self-explore: fetch the Actions run, read the logs, and probe `ltpp.vip/api/github/pages/sync/docs-pages/pages` + the long path. The most likely explanations are (a) the user's browser was hitting a 0-byte short path (the ltpp.vip nginx rule, expected), (b) the user assumed Vercel was involved when it's actually GitHub Actions + a custom ltpp.vip sync API, or (c) Vercel label was misleading. Don't ask the user to clarify when the evidence is one `gh run view --log` away.
 - **VuePress dev server returns 344-byte placeholder for every route** — `yarn dev` runs at `0.0.0.0:8080` but VuePress dev mode does NOT SSR; body is `<div id="app"></div>` until JS hydrates. `curl http://127.0.0.1:8080/<route>/` returns the same 344-byte stub regardless of whether the subdir scaffolded correctly. To verify dev-mode content, must use headless chromium (Playwright). `gh api`+ curl alone cannot validate dev mode. See Verification section.
 - **GitHub Actions UI page never reaches `networkidle`** — the actions run page uses socket.io for live updates, so `wait_until='networkidle'` times out at 60s. Use `wait_until='domcontentloaded'` instead, or skip the browser entirely and use `gh api repos/docs-pages/docs/actions/runs/<id>/logs | unzip` to read logs as text.
+- **`yarn run build` hangs on low-memory VMs (3.5GB RAM, ~200 md files)** — vite compilation of 195 dataset pages regularly exceeds the 240s foreground timeout and even a 420s background poll, but the build is NOT stuck — vuepress/esbuild processes still consume CPU (15-20%) and the log shows no error, just `Browserslist: caniuse-lite is 9 months old` and ongoing compilation. The wrong response is kill-and-retry (wastes ~7 min of work) or assume hang + ask user to check (the user doesn't have faster hardware). The right response: `background=true` with `notify_on_complete=true`, give it 600-900s, monitor with `process(action='poll', timeout=...)` and `tail /tmp/build.log`. `tail -3 /tmp/build.log` every few minutes to confirm vite is still progressing (no error). Vercel CI runs the same build on GitHub Actions runners (much faster) — local build is only needed when verifying frontmatter changes before pushing. Don't pre-emptively run local builds on this VM; push + let CI verify.
+
+## Marking the repo DEPRECATED (when content migrates to docs-pages/docs-euv)
+
+When the user says "this VuePress repo is deprecated" / "废弃" / "停止维护" because content has moved to `docs-pages/docs-euv` (the euv + Rust WASM replacement), apply BOTH of the following changes to `src/README.md` in the same commit:
+
+**Change 1 — frontmatter `head` block**: add `robots: noindex` + a DEPRECATED `description` meta. This affects search engines (noindex) and browser tabs (descriptive). Don't replace `heroText` / `tagline` / `features` — the home page should keep its existing visual identity; deprecation is a meta-level signal, not a content rewrite.
+
+```yaml
+head:
+  - - meta
+    - name: keywords
+    - content: 首页
+  - - meta
+    - name: robots
+    - content: noindex
+  - - meta
+    - name: description
+    - content: 'DEPRECATED: 本仓库已停止维护。文档已迁移至 docs-pages/docs-euv (基于 euv + Rust WASM)。本仓库仅保留历史快照。'
+title: 首页
+heroText: eastspire
+tagline: '<existing motto — DO NOT REPLACE>'
+```
+
+**Change 2 — visible WARNING callout at end of body**: meta tags alone are invisible to readers who land on the page. Append a `> [!WARNING]` block (VuePress hope-theme custom container) **after the existing content** (before `<Bottom />` is also fine, but end-of-file is safer — `Bottom` is rendered separately):
+
+```markdown
+> [!WARNING]
+>
+> **本仓库已废弃 (DEPRECATED)** — 文档已迁移至 [docs-pages/docs-euv](https://github.com/docs-pages/docs-euv)（基于 euv + Rust WASM）。
+>
+> 本仓库仅保留历史快照，不再接受新内容提交。如需查看最新文档请前往迁移仓库。
+```
+
+**Why both**: meta-only deprecation fails to surface in the rendered page; body-only deprecation leaves search engines indexing dead pages. Both together is the complete signal.
+
+**Don't**: replace `heroText` with the warning (breaks the home page visual), add an `[!WARNING]` as a top-level heading (competes with the actual content), or touch `features:` / `actions:` blocks (those still link to working pages). If user wants a more aggressive deprecation (full GitHub archive, redirect to new site), that's a separate decision — clarify before doing more than the README banner.
 
 ## Verification — verifying dev server content (Playwright, not curl)
 

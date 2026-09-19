@@ -28,6 +28,8 @@
 | `DisplayDebug` | `Display` 用 `{:?}` 格式 | 调试输出兼 `Display` |
 | `DisplayDebugFormat` | `Display` 用 `{:#?}` 格式 | 多行调试输出 |
 
+> **⚠️ Lombok 行为坑 — `#[get(pub, copy)]` 实际仍然返回 `&T`(2026-09-18 eastspire/euv-docs PR #31 实测 lombok-macros 2.0 / 2.1)**:本表说 `#[get(pub, copy)]` 对 Copy 类型返回 `T`(字段值副本),但实际 lombok 2.0 / 2.1 不论 `copy` 与否,生成的 `get_field(&self)` 都返回 `&T`。详 §17.8。
+
 **标准组合**:
 
 ```rust
@@ -56,12 +58,51 @@ user.set_name("bob".to_string());
 
 ## 17.4 Option / Result 字段的 try_getter
 
-lombok-macros 会**额外**生成 `try_get_field` 系列方法(仅字段类型为 `Option<T>` 或 `Result<T, E>` 时生成):
+lombok-macros 会为每个字段同时生成两组 getter。**`Option<T>` / `Result<T, E>` 字段的 `get_*` 是 `clone().unwrap()`**——直接 panic,不是返回 `Option<&T>`:
 
-- `Option<T>` → `pub fn try_get_field(&self) -> Option<&T>`
-- `Result<T, E>` → `pub fn try_get_field(&self) -> Result<&T, &E>`
+- `get_field(&self) -> T` (对 `Option<T>` / `Result<T, E>` 字段) — `self.field.clone().unwrap()`
+  - **None / Err 时直接 panic**,不能安全访问 `Option` 字段
+  - 类型签名看起来是 `T`,不是 `Option<T>`——调用方看不出来会 panic
+- `try_get_field(&self) -> &Option<T>` / `&Result<T, E>` — 返回裸引用的 Option / Result,调用方做 pattern match
+  - **唯一安全的访问路径**
+- `get_field(&self) -> &T` (对非 `Option` / `Result` 字段) — 普通引用
 
-其他类型字段**不生成** `try_get_xxx`,**不要**手动写 `try_get` 方法;如需安全访问,统一用 `match` / `if let` 配合 `get_field` 写显式逻辑。
+**示例对比**(lombok 2.0 `cargo expand` 实测):
+```rust
+#[derive(Data, New)]
+pub struct Args {
+    #[get(pub)] #[set(pub)] required: PathBuf,
+    #[get(pub)] #[set(pub)] maybe:    Option<PathBuf>,
+}
+// 展开后:
+//   pub fn get_required(&self) -> &PathBuf            { &self.required }
+//   pub fn get_maybe(&self)    -> PathBuf             { self.maybe.clone().unwrap() }
+//   pub fn try_get_maybe(&self) -> &Option<PathBuf>   { &self.maybe }
+```
+
+**踩坑实证**(2026-09-18 euv-docs `Args::index_html` 字段,`cargo expand` 输出):
+```text
+pub fn get_index_html(&self) -> PathBuf {
+    self.index_html.clone().unwrap()
+}
+pub fn try_get_index_html(&self) -> &Option<PathBuf> {
+    &self.index_html
+}
+```
+
+实际写 `match args.get_index_html() { ... }` 想拿到 `Some(...)` / `None` —— 编译就过不了 (编译器推断 `match` 期望 `Option<_>`,实际拿到 `PathBuf`, `Some` 分支永远 unreachable);改成 `match args.try_get_index_html() { Some(p) => ..., None => ... }` 才正确。
+
+**判定准则**(写新 code 前):
+1. **字段类型是 `Option<T>` / `Result<T, E>`** → 用 `try_get_*`(`&Option<T>` / `&Result<T, E>`),做显式 match
+2. **字段类型是普通 `T`(Copy 或非 Copy)** → 用 `get_*`(`&T`)。注意对 `Copy` 类型字段用 `*x.get_*()` 解引用取出值
+3. **想设字段值** → 用 `set_*` (始终是 `&mut self`),与字段类型无关
+
+**常见反模式**:
+- `let x: Option<&T> = args.get_optional_field()`  — 编译失败 (`get_*` 返回 `T`,不是 `Option<&T>`)
+- `args.get_optional_field()` 在 `None` 分支会直接 panic,不带任何类型信号
+- 期望 `get_*` 返回 `Option<&T>` 是 Rust 标准库约定(例如 `HashMap::get`),**Lombok 不遵循这个约定**
+
+其他类型字段**不生成** `try_get_xxx`,**不要**手动写 `try_get` 方法;如需安全访问,统一用 `match` / `if let` 配合 `try_get_field` 写显式逻辑。
 
 ## 17.5 版本与冲突
 
@@ -137,4 +178,114 @@ pub struct Tween<T: Interpolable + Copy> { ... }
 ```
 
 这种 struct 文档会**显式说明**为何不 derive Lombok,需保留手写 accessor。在仓库里 grep `Lombok-shaped counterpart` 或 `not deriving \`Data\`` 找这种例外,不要强改 setter。
+
+## 17.8 Lombok `get_*` 实际返回 `&T` —— 调用方必须解引用(2026-09-18 实测)
+
+**§17.2 表格描述与 lombok-macros 2.0 / 2.1 实际行为不符**。表格说:
+
+> `#[get(pub, copy)]` - Generates a public getter that returns a copy of the field value (`self.field`) for Copy types
+
+实际 `cargo expand --lib` 展开 Lombok 生成的代码(lombok-macros 2.0.36 + 2.1 都一样):
+
+| 字段类型 | `#[get(pub)]` 实际签名 | `#[get(pub, copy)]` 实际签名 |
+|---|---|---|
+| `bool` | `pub fn get_x(&self) -> &bool` | `pub fn get_x(&self) -> &bool` |
+| `&'static str` | `pub fn get_x(&self) -> &&'static str` | `pub fn get_x(&self) -> &&'static str` |
+| `PathBuf` | `pub fn get_x(&self) -> &PathBuf` | `pub fn get_x(&self) -> &PathBuf` |
+
+`copy` 修饰符**被忽略** —— 所有 Lombok `get_*` 一律返回 `&T`(或 `&&T` for references)。
+
+**调用方陷阱**:
+
+```rust
+// ❌ 错误: 拿 `&bool` 当 `bool` 用
+if args.get_release() {
+    // E0308: expected `bool`, found `&bool`
+}
+
+// ❌ 错误: 拿 `&&'static str` 当 `&str` 用(例如 Command::arg)
+.command.arg(args.get_name())  // arg 期望 &OsStr
+// E0308: expected `&OsStr`, found `&&str`
+
+// ✅ 正确: 显式解引用
+if *args.get_release() { ... }
+.command.arg(*args.get_name())
+```
+
+**经验**:写完 `#[derive(Data, New)]` 的 struct,先 `cargo expand --lib` 看 Lombok 实际生成的 `get_*` 签名(尤其 `bool` / `&T` 字段),不要按 §17.2 表格的描述脑补签名。
+
+**验证代码**(复制粘贴,确认 Lombok 行为版本相关):
+```rust
+use lombok_macros::{Data, New};
+
+#[derive(Data, New)]
+pub struct Probe {
+    #[get(pub)]              b: bool,
+    #[get(pub, copy)]        c: bool,
+    #[get(pub)]              r: &'static str,
+    #[get(pub, copy)]        s: &'static str,
+}
+
+// cargo expand --lib 后:
+//   pub fn get_b(&self) -> &bool          ← 都是 &T
+//   pub fn get_c(&self) -> &bool          ← copy 不生效
+//   pub fn get_r(&self) -> &&'static str  ← 双 ref
+//   pub fn get_s(&self) -> &&'static str  ← copy 不生效
+```
+
+## 17.9 `CustomDebug` 与 `Debug` 互斥(2026-09-18 实测)
+
+**反例**(踩坑,eastspire/euv-docs PR #31 第一版):
+
+```rust
+use lombok_macros::{Data, New, CustomDebug};
+
+#[derive(Clone, Debug, PartialEq, Eq)]       // 标准 Debug
+#[derive(Data, New, CustomDebug)]             // Lombok CustomDebug 也 impl Debug
+pub struct Args { ... }
+```
+
+**编译错误**:
+```
+error[E0119]: conflicting implementations of trait `Debug` for type `Args`
+ --> src/lib.rs:3:21
+  |
+3 | #[derive(Clone, Debug, PartialEq, Eq)]
+  |                 ----- first implementation here
+4 | #[derive(Data, New, CustomDebug)]
+  |                     ^^^^^^^^^^^ conflicting implementation for `Args`
+```
+
+**正确写法**(只用一个 Debug 派生):
+
+```rust
+use lombok_macros::{Data, New, CustomDebug};
+
+#[derive(Clone, PartialEq, Eq)]               // 不写 Debug
+#[derive(Data, New, CustomDebug)]             // Lombok 负责 Debug impl
+pub struct Args { ... }
+```
+
+§17.2 表头说"`CustomDebug` 替代标准 `#[derive(Debug)]` 的更细粒度版本" —— 这句话隐含了**互斥**,但容易被忽略。两行 derive 都不带 `Debug` 才不会冲突。
+
+**反向陷阱**:如果只想用 `Data + New` 不要 Debug,同样**不要** `#[derive(Debug)]` —— `Data` / `New` 不会自动加 Debug,但如果标准 derive 加了 `Debug`,而后续又把 `CustomDebug` 加进 Lombok derive,就会撞 impl。
+
+## 17.10 `cargo fmt` 合并相邻 `#[derive]` 行(2026-09-18 实测)
+
+**§17.2 "标准组合" 示例**用了两行 `#[derive(...)]`:
+
+```rust
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Data, New, CustomDebug)]
+```
+
+**`cargo fmt --all` 会自动合并**为一行:
+
+```rust
+#[derive(Clone, Debug, Default, PartialEq, Eq, Data, New, CustomDebug)]
+```
+
+合并后**语义正确**(lombok-macros 都是 proc-macro derive,放进同一个 `#[derive(...)]` 完全合法),但偏离示例格式。两种写法都通过 audit / clippy / fmt 幂等检查,只是表面不一致。
+
+**对策**:写完后跑 `cargo fmt --all && cargo fmt --all -- --check` —— 如果 `cargo fmt` 改动了 `#[derive]` 行,**接受** 合并后的版本,不要写 `.rustfmt.toml` 配置强行保留两行(formatting config 跨 crate 不通用,会污染下游项目)。
 

@@ -207,6 +207,25 @@ gh repo view <owner>/<repo> --json parent
 12. **`gh pr view N` stdout is often empty** with restricted-scope GH_TOKEN. Use `gh pr view N --json ...` or `gh api repos/<org>/<repo>/pulls/N` for reliable reads.
 13. **`gh pr edit --title` silently fails** when token lacks `read:org` (GraphQL path). For renaming PRs, use REST: `curl -X PATCH -H "Authorization: token ***" https://api.github.com/repos/<org>/<repo>/pulls/<N> -d @payload.json`.
 14. **`gh pr create --head owner:branch` fails with "Head ref must be a branch" / "Not all refs are readable"** when the head repo isn't registered as a fork in GitHub's graph — `gh repo create` makes an independent repo, NOT a fork, and the `parent` metadata is never set retroactively even after `git remote add upstream && git push upstream master`. Verify with `gh repo view <you>/<repo> --json parent`; if `parent == null` you need to delete + re-fork cleanly. See `github/github-repo-management` §11.2 (Independent repo vs fork), §11.3 (-N collision cleanup), §11.1 (`delete_repo` scope).
+14a. **`gh pr create` returns "No commits between euv-dev:master and eastspire:fix/branch" even though `git diff upstream/master..HEAD --stat` clearly shows a diff.** Symptom: the GraphQL compare endpoint sees the head branch as effectively at the same SHA as the base (timing? cache? graph consistency lag?). The branch is correctly pushed, `gh api repos/<org>/<repo>/compare/<base>...<head>` returns `ahead_by: 1, behind_by: 0`, but `gh pr create` still fails. **Fix**: skip `gh pr create` entirely and POST to the REST endpoint directly:
+    ```python
+    import json, urllib.request, os
+    body = open("/tmp/pr-body.md").read()
+    data = json.dumps({
+        "title": "<type>(<scope>): <subject>",
+        "head": "eastspire:fix/branch",
+        "base": "master",
+        "body": body,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.github.com/repos/<org>/<repo>/pulls", method="POST", data=data)
+    req.add_header("Authorization", f"token {os.environ['GH_TOKEN']}")
+    req.add_header("Accept", "application/vnd.github+json")
+    resp = urllib.request.urlopen(req)
+    pr = json.loads(resp.read())
+    print(pr["html_url"])  # https://github.com/<org>/<repo>/pull/<N>
+    ```
+    Set `GH_TOKEN` via `source /root/.bashrc.d/gh_token.sh && export GH_TOKEN` before running. Returns the PR URL directly. Common cause: the head branch wasn't pushed to the fork (`origin`) — verify with `git ls-remote <your-remote> <branch>` first. If empty, push to fork then retry — `gh pr create` from `upstream` direct URL without fork coordination is the trigger.
 15. **After PR merge, local `master` drifts ahead of `origin/master`** (Track 2 fork setup). `origin = eastspire/<repo>` (your fork) gets only branch pushes, NOT the merge commit; `upstream = <org>/<repo>` (PR target) has the new master HEAD. Symptom: `git status` says "Your branch is ahead of 'origin/master' by N commits" but `origin/master` is irrelevant — what matters is `upstream/master`. **Recovery**: `git fetch upstream master && git reset --hard upstream/master`. euv PR #233/#234/#235/#236 chain (2026-09-14) had this exact pattern repeat 4× — every time after merge, `master` was "ahead of origin/master" but actually was at the old fork master. **Best practice**: after `gh pr merge`, immediately run `git fetch upstream master && git reset --hard upstream/master && git log -1 --oneline` to confirm local master = upstream HEAD before starting the next PR.
 
 ## Supersede flow (Track 2 only)
@@ -278,6 +297,32 @@ gh pr list --repo <org>/<repo> --state open --author @me --json number,title,hea
 ```
 
 If a fix-relevant PR is already open → append. Otherwise → new PR.
+
+16. **Local fork master is ahead of `upstream/master` — don't push the whole branch.** Symptom: your local fork's `master` has commits the upstream doesn't (e.g. an unmerged clippy-clean or version-bump commit that you merged locally first to keep CI green, but haven't pushed as a PR yet). The Track 2 instruction "branch from clean upstream/master" hides this case — if you only do `git checkout master && git pull upstream master && git checkout -b feat/foo` you'll land on a master whose tip is NOT upstream's tip, and `git diff upstream/master..feat/foo` will include those local-only commits in the PR's diff. Two clean fixes:
+
+    ```bash
+    # A) Cherry-pick the single commit you want to ship (preserves commit hash + message)
+    git checkout -b feat/foo upstream/master
+    git cherry-pick <local-only-commit-sha>          # resolve any conflicts
+    git push -u origin feat/foo
+    gh pr create --repo <org>/<repo> --head eastspire:feat/foo ...
+
+    # B) Rebase the local-only commits onto upstream first
+    git checkout master
+    git rebase upstream/master                        # rewrites local-only commits on top
+    git checkout -b feat/foo                          # now local master == upstream
+    # then amend/append and push as normal
+    ```
+
+    **Conflict scope rule during cherry-pick / rebase**: if the upstream version of a file lacks a section that your local-only commit added (e.g. Cargo.toml `[profile.dev]` block from a local-only clippy-clean commit, when upstream has none yet), the conflict resolver should **drop that section from the PR** — it belongs to a separate scope (clippy-clean PR, version-bump PR) and mixing scopes dilutes review. The 4-file PR (#31 on `euv-dev/euv-docs`, 2026-09-18) reproduced this exactly: cherry-pick of `41c6deb` (CLI) had a Cargo.toml conflict because `41c6deb` was committed on top of `d5a8443` (profile config), and upstream didn't yet have either. Resolution kept `[[bin]]` (CLI scope) and dropped `[profile.dev]/[profile.release]` (clippy-clean scope, separate PR).
+
+    Verification before `gh pr create` — confirm the PR diff contains ONLY the intended scope:
+    ```bash
+    git fetch upstream
+    git diff --stat upstream/master..HEAD           # exactly the files you intend
+    git diff upstream/master..HEAD | grep -E '^[+-]' | grep -v '^+++' | grep -v '^---' | wc -l
+    # If line count matches your expected diff scope, you're clean.
+    ```
 
 ## Commit message style (both tracks)
 

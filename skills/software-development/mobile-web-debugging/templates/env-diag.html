@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<!-- 故意不加 viewport-fit=cover：诊断目的之一是看宿主是否强制沉浸式 -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>移动环境诊断</title>
+<style>
+  body { font-family: ui-monospace, monospace; margin: 0; padding: 16px; background: #fff; color: #000; font-size: 15px; line-height: 1.9; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .k { color: #666; }
+  .v { font-weight: 700; word-break: break-all; }
+  .box { margin-top: 16px; padding: 12px; border: 2px solid #000; }
+</style>
+</head>
+<body>
+<h1>移动端环境诊断</h1>
+<div id="out">加载中…</div>
+<div class="box">此盒子 padding-top = env(safe-area-inset-top)<br/>若上方有可见空隙说明 env &gt; 0</div>
+<script>
+  function probe(name) {
+    const d = document.createElement('div');
+    d.style.paddingTop = 'env(' + name + ', 0px)';
+    document.body.appendChild(d);
+    const v = getComputedStyle(d).paddingTop;
+    d.remove();
+    return v;
+  }
+  const meta = document.querySelector('meta[name=viewport]');
+  const rows = [
+    ['env(safe-area-inset-top)', probe('safe-area-inset-top')],
+    ['env(safe-area-inset-bottom)', probe('safe-area-inset-bottom')],
+    ['env(safe-area-inset-left) / right', probe('safe-area-inset-left') + ' / ' + probe('safe-area-inset-right')],
+    ['innerWidth x innerHeight', innerWidth + ' x ' + innerHeight],
+    ['visualViewport', Math.round(visualViewport.width) + ' x ' + Math.round(visualViewport.height) + ' @ scale ' + visualViewport.scale.toFixed(2)],
+    ['screen', screen.width + ' x ' + screen.height],
+    ['devicePixelRatio', devicePixelRatio],
+    ['viewport meta', meta ? meta.content : '(none)'],
+    ['document.title', document.title],
+    ['UA', navigator.userAgent],
+  ];
+  document.getElementById('out').innerHTML = rows.map(([k, v]) => '<div><span class="k">' + k + '</span><br/><span class="v">' + v + '</span></div>').join('');
+</script>
+</body>
+</html>

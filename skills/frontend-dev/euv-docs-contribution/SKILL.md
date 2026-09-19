@@ -194,6 +194,129 @@ After local verification, run `gh pr merge` and wait for the GitHub Actions Page
 - **The TOC lists only h2 + h3**: `h1`, `h4`, `h5`, `h6` render as plain headings but never go into the right-side anchor TOC. This is by design (existing behaviour). Don't be surprised when probing.
 - **GitHub Pages CDN caching**: the live URL `https://euv-dev.github.io/euv-docs/...` may serve a stale `euv_docs_bg.wasm` for a few minutes even after the deploy succeeds. Wait 30–60s and re-probe, or hit `https://euv-dev.github.io/euv-docs/euv_docs_bg.wasm?t=<timestamp>` to bypass cache.
 - **CJK slugs**: heading text containing CJK characters produces a slug that preserves the CJK chars (`#你好-euv-docs`). When writing an anchor link from EN → ZH section, the link target uses the CJK slug — easy to typo. Always grep the `c_euv_doc_toc` to confirm the exact href before writing cross-locale anchor links.
+- **`euv_logo` component hardcodes the letter `"E"`**: the upstream `euv-ui` component in `src/component/logo/view/fn.rs` renders `"E"` as a literal in both `<button>` and `<span>` branches — it does NOT accept a prop and ignores `DocsSite.logo` even though `build.rs` writes that field into `SITE`. **The intended fix is to leave `logo = ""` (empty) in `docs/config.toml`** — the framework then falls back to its hardcoded `"E"` literal. Don't try to override via JS (overkill) or fork euv-ui (extreme). Setting `logo = "📘"` (or any emoji) has zero effect. Setting `logo = "◆"` (geometric char) does render via the JS hack but the cleanest production solution is just empty `logo = ""`.
+- **Hash router auto-detects `README.md`**: route `#/foo` resolves to `docs/foo/README.md` (and only that file — `docs/foo.md` 404s, `docs/foo/index.html` 404s). `#/foo/bar.html` resolves to `docs/foo/bar.md` (NOT `docs/foo/bar/index.md`). Verified by Playwright `c_euv_result_code === '404'` tests. Hero button `link: /catalog` (no extension) 404s; must be `link: /catalog.html`. Always use the `.html` suffix on hash links to be explicit, OR verify the README convention before relying on it.
+- **`** 💡 TIP**` (no space) parses; `** TIP**` (space inside `**`) renders as literal text**: refinement of the `[!tip]` workaround (坑 15 in `rust-wasm-gh-pages-deploy-pitfalls`). CommonMark's emphasis rule disallows whitespace adjacent to the closing `**`. After the bulk emoji-strip pass, every `**💡 TIP**` becomes `** TIP**` (leading space inside the asterisks from the regex insertion point) → DOM shows literal `** TIP` instead of bold `TIP`. Fix: another regex sweep `\s+\*\*\s+(\w)` → `**$1` to collapse the space. Always check the rendered DOM `article.querySelectorAll('strong')` after any bulk-frontmatter rewrite that touches `**...**` markers.
+- **Nested sidebar group titles indent as if they were leaf links**: when a sidebar group contains another group (e.g. `ltpp` → `LTPP-APP` → `dev-build`), the nested group title renders at x=43 because the framework wraps it in an unwrapped `<div>` inside `.c_euv_sidebar_children`. The hierarchy looks broken — a parent group title and its nested sibling title appear at different x positions, while nested group title and its leaf child end up at the same x=44. Fix: site-local CSS override to pull nested group titles left and align with the parent text x. Full selector pattern under "Framework limitations and overrides" below.
+- **`c_feature_card` events: framework has no `link` field**: confirmed坑 18 in `rust-wasm-gh-pages-deploy-pitfalls`. The only in-workspace fix without forking the framework is to inject JS event delegation from `lib.rs` after `App::mount` — a single `document.addEventListener('click', ...)` that walks up to `.c_feature_card` and routes by `c_feature_name` text via a hardcoded title→route map. External URLs use `window.open(url, '_blank', 'noopener,noreferrer')`. This pattern works because `web_sys::eval` lets the WASM module inject JS without going through Rust-side event handler closures. The map lives as a `r##"..."##` `&'static str` in `lib.rs` so it gets baked into the binary at compile time.
+- **`mailto:` in `home.actions[].link` 404s as hash route**: the framework's hash router treats every `link:` value as an internal route unless it starts with `http://`/`https://`. `link: mailto:root@ltpp.vip` renders as `#mailto:root@ltpp.vip` → 404. Workaround: use `link: https://github.com/<org>/issues` (target=_blank) or any `https://` URL. Framework's only special-case for external is the http(s) prefix.
+- **Emoji-strip regex catches mobile drawer `☰` and `✕` glyphs**: the bulk emoji purge regex `[\U0001F000-\U0001FFFF\u2600-\u27BF\u2300-\u23FF]` covers `\u2600-\u27BF` (Dingbats block) which **includes `☰` (U+2630 Trigram for Heaven, hamburger menu)** and **`✕` (U+2715 Multiplication X, close button)**. These are NOT emoji but the regex strips them anyway, leaving mobile menu button / drawer close button empty after purge. After any emoji-strip pass, restore them in `src/component/layout/view/fn.rs`: `c_mobile_menu_button()` → `"☰"`, `c_mobile_drawer_close_button()` → `"✕"`. Verify with Playwright at 375px viewport: `page.locator('.c_mobile_menu_button').innerText === '☰'`.
+
+## Framework limitations and overrides (2026-09 docs-pages/docs-euv)
+
+The upstream `euv-docs` engine has three hard-coded UX choices that any non-trivial fork will need to override via site-local CSS or JS injection. All overrides must be applied AFTER `Css::inject_css(EUV_MD_CSS)` in `main()`.
+
+### Override 1: feature card clickable navigation
+
+`EuvFeature` does NOT carry a `link` field — the framework silently drops `link:` keys from feature YAML. The pattern that works without forking the framework:
+
+```rust
+const ROUTES_JSON: &str = r##"{"ltpp":"#/ltpp","hyperlane":"#/hyperlane/process.html","euv":"https://github.com/euv-dev/euv", ...}"##;
+
+fn inject_feature_card_click_routes() {
+    let window = web_sys::window().unwrap();
+    let js = format!(r#"
+        (function() {{
+            if (window.__docsEuvFeatureWired) return;
+            window.__docsEuvFeatureWired = true;
+            var ROUTES = {routes};
+            document.addEventListener('click', function(ev) {{
+                var el = ev.target;
+                while (el && el !== document) {{
+                    if (el.classList && el.classList.contains('c_feature_card')) {{
+                        var name = el.querySelector('.c_feature_name');
+                        var title = name ? name.textContent.trim() : '';
+                        var route = ROUTES[title];
+                        if (route) {{
+                            ev.preventDefault();
+                            if (route.indexOf('http') === 0) {{
+                                window.open(route, '_blank', 'noopener,noreferrer');
+                            }} else {{
+                                window.location.hash = route;
+                            }}
+                        }}
+                        return;
+                    }}
+                    el = el.parentNode;
+                }}
+            }}, true);
+        }})();
+        "#, routes = ROUTES_JSON);
+    let _ = js_sys::eval(&js);
+}
+```
+
+Call after `App::mount("#app", app)`. The `window.__docsEuvFeatureWired` flag prevents re-installation across SPA route changes. Use raw `js_sys::eval` instead of `Closure` machinery — keeps WASM binary small, avoids `Send`/`Sync` headaches with `web_sys` types, no `forget()` bookkeeping.
+
+### Override 2: feature card border
+
+`euv-ui`'s `.c_feature_card` CSS has no `border` attribute. The site-local CSS override:
+
+```rust
+Css::inject_css(
+    ".c_home_feature_grid .c_feature_card { \
+         border: 1px solid var(--euv-c-border, #e3e3e3) !important; \
+         border-radius: 8px !important; \
+         padding: 16px !important; \
+         transition: border-color 0.15s ease, transform 0.15s ease; \
+         cursor: pointer; \
+     } \
+     .c_home_feature_grid .c_feature_card:hover { \
+         border-color: var(--euv-c-brand, #3451b2) !important; \
+         transform: translateY(-2px); \
+     } \
+     @media (prefers-color-scheme: dark) { \
+         .c_home_feature_grid .c_feature_card { border-color: var(--euv-c-border-dark, #2e2e2e) !important; } \
+         .c_home_feature_grid .c_feature_card:hover { border-color: var(--euv-c-brand-dark, #a8b1ff) !important; } \
+     }",
+);
+```
+
+Use `var(--euv-c-..., #fallback)` so theme-color vars degrade gracefully if euv-ui renames them in a future release. Hardcoded brand colors like `#3451b2` only belong in `:hover` states.
+
+### Override 3: nested sidebar group titles align with parent text x=22
+
+Without override: nested group titles (`APP`, `桌面客户端`, etc.) render at x=43 — visually indistinguishable from leaf links (`开发构建说明` at x=44). Hierarchy looks broken. Override to pull them back to x=22 (same as parent text):
+
+```rust
+Css::inject_css(
+    /* Nested (depth-2) group titles: align with parent text x=22.
+       The title's parent group sits at x=23 (children container
+       x=10 with 1px border + 12px padding). Pull left by 1px and
+       zero padding so the inner span starts at x=22. Width grows
+       by 1px so the right edge stays flush with the parent. */
+    ".c_euv_sidebar_children > div > .c_euv_sidebar_group > .c_euv_sidebar_group_title { \
+         margin-left: -1px !important; \
+         padding-left: 0 !important; \
+         width: calc(100% + 1px) !important; \
+     } \
+     .c_euv_sidebar_children .c_euv_sidebar_children > div > .c_euv_sidebar_group > .c_euv_sidebar_group_title { \
+         margin-left: -1px !important; \
+         padding-left: 0 !important; \
+         width: calc(100% + 1px) !important; \
+     }",
+);
+```
+
+Selector chain walks through `.c_euv_sidebar_children > div` (the unwrapped wrapper `<div>` the framework inserts — there's no class on it, but it exists as a direct child of `c_euv_sidebar_children`). Same pattern works for depth-3 nested groups (use the second selector to target children of children). Leaf links (`c_euv_sidebar_link`) keep their original indent at x=44 — visually obvious hierarchy after the override.
+
+### Override 4: content-page first heading y-position matches home hero (24px from top)
+
+First heading inside `article.md-body` has upstream `margin-top: ~32px` that collapses through the wrapping `<slot style="display:contents">` and pushes the article down 32px below `c_app_main`'s `padding-top: 24px`. Visually misaligned with the home hero `h1` (which starts flush at y=24). Override:
+
+```rust
+Css::inject_css(
+    ".c_euv_doc_content > article > *:first-child { margin-top: 0 !important; } \
+     .c_euv_doc_content > article h1:first-of-type, \
+     .c_euv_doc_content > article h2:first-of-type, \
+     .c_euv_doc_content > article h3:first-of-type, \
+     .c_euv_doc_content > article h4:first-of-type, \
+     .c_euv_doc_content > article h5:first-of-type, \
+     .c_euv_doc_content > article h6:first-of-type { margin-top: 0 !important; padding-top: 0 !important; }",
+);
+```
+
+Verify with Playwright `article.querySelector('h1, h2, h3, h4, h5, h6').getBoundingClientRect().top === 24`. Both `> *:first-child` (catches the slot) and `h*:first-of-type` (catches the first heading inside the slot) are needed because the slot's `display:contents` makes its children behave like direct descendants for layout purposes.
 
 ## Verification checklist for euv-docs content / CSS PRs
 
@@ -225,3 +348,9 @@ App::mount("#app", app);
 ```
 
 Always carry a comment block explaining **why**, not just **what**. Match the existing anchor override style for tone and depth.
+
+## References
+
+- `references/framework-overrides.md` — site-local CSS override selectors for euv-docs framework limitations (feature card border, nested sidebar group alignment, heading y-position, anchor glyph hiding, JS event delegation for click routing, hash route conventions). Full selector chains + verification recipes, copied verbatim from the docs-pages/docs-euv site fork. Use when implementing any euv-docs fork that needs to beat an upstream framework limitation.
+- `references/rendering-fixes.md` — concrete build.rs + doc_page + image-pipeline fixes from PR #238/#239 cycle: image src rewrite (`/foo.jpg` → `./foo.jpg`), inline asset copying (`copy_doc_assets`), GitHub-style `> [!TIP]` alert parsing (`transform_github_alerts`), and content-page h1 rendering. Includes the `var!()`/raw-CSS pitfall and a full Playwright verification recipe. Use when the user reports "images don't load / [!tip] doesn't render / title not aligned / home cards not clickable / sidebar not indented".
+- `references/cli-binary.md` — adding a `[[bin]]` native CLI to a cdylib euv-docs crate that builds any markdown directory. Covers the three-edit recipe (Cargo.toml / build.rs env-var lookup / src/bin/euv-docs.rs), three reproduced pitfalls (missing Cargo.toml from inherited cwd, PATH forwarding, sccache target dir layout), and the no-clap / no-anyhow justification per `rust-standards` §13.1. Use when the user asks "turn euv-docs into a CLI" / "build docs from any markdown dir" / "add `--out` flag".
