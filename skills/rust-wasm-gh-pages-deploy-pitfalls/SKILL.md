@@ -1370,6 +1370,35 @@ grep -E '^title|^description' docs/config.toml
 
 **适用范围**:任何 euv-docs 项目 md 里写 raw HTML `<img>` / `<video>` / `<source>` / `<audio>` 的站点。
 
+### 坑 29:`> [!tip]` 紧跟内容行(无空 `>` 分隔)会被劫持成容器标题 — 内容行变成大写纯文本,反引号不解析(2026-09-19 docs-pages/docs 教训)
+
+**症状**:`#/ltpp/` 页面 `LTPP \`WEB\` 基于 \`Vue2.js\` …` 整行渲染成**大写、带字面反引号**的标题文本,`<code>` 不解析。
+
+**根因**:`transform_github_alerts` 的 title 推断:marker 行(`> [!tip]`)之后第一个非空 `>` 行当容器标题。GitHub alert 语法**没有标题概念**,用户写 `> [!tip]\n> 内容…`(中间无空 `>` 行)时内容被劫持成 `::: tip <内容>` 的 title,而 `.docs-container-title` 是纯文本 + `text-transform: uppercase` → 内容大写 + 反引号字面量。
+
+**解法**:title 只从 marker 行 `]` 之后的同行文本取(`> [!tip] 自定义标题`),后续 `>` 行一律进 body(euv PR #241)。诊断:`page.evaluate` 查 `.docs-container-title` 的 innerText 是否是内容文本而不是 `TIP`/`NOTE` 等 kind label;`article.innerText.includes('`')` 有字面反引号 = 中招。
+
+**适用范围**:任何用 euv-docs 渲染 GitHub alert 的 md。写法和 attributes.md 的"marker 后空一行"都能正常工作,但**不能依赖用户记得空行** — 框架必须按 GitHub 语义处理。
+
+### 坑 30:euv-docs 组件自定义 class 不得硬编码颜色/圆角/阴影 — 必须 var! token + euv-ui 标准 class(2026-09-19 docs-pages/docs 教训)
+
+**症状**:password gate 用 GitHub Primer 风格(蓝 `#0969da` 按钮、红 `#cf222e` 错误、0.375-0.75rem 圆角、focus ring 阴影),与 euv-ui 单色直角设计系统冲突,dark mode 下直接崩(硬编码白底)。
+
+**根因**:`password_gate/view/const.rs` 的 `c_pw_gate_*` class! 全部硬编码 hex/rem,没有消费 `var!()` token,输入框/按钮也没用 euv-ui 标准的 `c_euv_input` / `c_euv_input_error` / `c_euv_button_primary_md`。
+
+**解法**(euv PR #241):
+1. **布局类保留自定义但只写布局**(wrapper flex 居中、card max-width/padding),视觉属性全换 `var!()`:`border: 1px dashed var!(border)`、`background: var!(background)`、`color: var!(foreground)` / `var!(muted-foreground)`,padding/margin/font-size 全走 spacing/font 阶。
+2. **交互控件直接用 euv-ui 标准 class fn**:`class: c_euv_input()` / `c_euv_input_error()` / `c_euv_button_primary_md()` — euv-docs 里可直接调用(lib.rs 的 `use euv_ui::*` 对子孙模块可见),CSS 注册/注入与组件内调用同一机制。
+3. **圆角/阴影/彩色一律删**:euv-ui 设计系统直角(无 border-radius 声明)、几乎无阴影、单色。
+4. 错误态在单色系统里 = `c_euv_input_error`(foreground 边框)+ 同前景色错误文字,**不引入红色**。
+
+**验证清单**(改动后必跑):
+- Playwright getComputedStyle:card `1px dashed` + radius 0 + shadow none;input 36px + `1px solid`;button 42px + accent bg。
+- 错误路径:输错密码 → input 换 `_error` class + 错误文字颜色 = foreground(黑/白)。
+- 解锁路径:正确密码 → gate 卸载 + 正文渲染;reload 后 localStorage 仍解锁。
+
+**适用范围**:任何 euv-docs / euv 业务项目里写自定义 class! 的组件。写之前先查 euv-ui-standards §3 有没有现成标准 class(input/button/field/card/alert),能复用就不新造。
+
 ## Support files
 
 - `templates/cross-repo-deploy.yml` — starter workflow for the source-builds-pages-product pattern (source repo builds, pushes to a target Pages repo). Implements坑 22's 5-step hardening (source identity assertion, force-fresh www/, build artifact check, source SHA baked into `.deploy/build-info` + commit message). Copy to `.github/workflows/deploy.yml`, replace `<source-org>/<source-repo>` / `<target-org>/<target-repo>` / `<PINNED_SHA>` placeholders, set the `TARGET_REPO_PAT` repo secret.
