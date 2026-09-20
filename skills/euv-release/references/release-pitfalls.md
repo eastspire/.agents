@@ -1058,3 +1058,15 @@ cargo clippy -p euv -p euv-core -p euv-engine -p euv-ui -p euv-example -- -D war
 # Expected: "Finished `dev` profile [optimized] target(s) in N.NNs" — no errors
 # If errors appear that DON'T involve files your PR touched, they're pre-existing.
 ```
+
+## P18 — CI sync job 撞车会把 bump 的根版本回写 (2026-09-20, 0.25.6 实测)
+
+**Symptom**: 合并 PR 后立刻 bump 根版本并 push。若合并触发的 CI (sync_workspace_version) 还在跑,它会以合并 commit 的旧根版本为基准**重写所有 Cargo.toml(包括根)**,压在你刚推的 bump commit 之上 —— master HEAD 变成 "sync to <旧版本>",根版本被回写,bump 丢失,crates.io 停在旧版本。
+
+**Rule**: bump push 之前必须确认 master 上没有任何 in-flight CI run:
+```bash
+gh api 'repos/euv-dev/euv/actions/runs?per_page=5' \
+  --jq '[.workflow_runs[] | select(.status != "completed")] | length'
+# 必须为 0 才能 push bump
+```
+有在跑的 run 就等到 0。被回写后的恢复:在最新 master 上重新 patch 根版本 + 再 push 一次(干净时 sync 会产生正确的 "sync to <新版本>")。
