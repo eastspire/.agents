@@ -1,6 +1,6 @@
 ---
 name: rust-wasm-gh-pages-deploy-pitfalls
-description: 'Rust + euv → 发布/部署踩坑记录,涵盖 WASM/GitHub Pages 部署 (import path / CDN 缓存 / master ref 损坏 / **Pages build_type=legacy 会忽略 upload-pages-artifact 的 Jekyll 暗坑 / docs/public 复制 subltety 必须 force fresh / Pages 子路径部署 md 绝对路径必须带子前缀 / [!tip] VuePress 自定义容器在 euv-docs 上原文泄漏 / **README frontmatter 2-vs-4 空格缩进错位 → 整个 features: 数组被吞 / euv-docs feature card 不支持 link: 字段,卡片不点击 / c_feature_card 默认无边框,site-local CSS override pattern / emoji 在 headless Chromium 渲染成方框 + Pages CDN 缓存双重失效 / euv-docs CLI 产物默认写到 <EUV_DOCS_SRC_DIR>/www 不是 cwd/www / euv-docs CLI positional SRC_DIR 传相对路径会让 build.rs 读 euv-docs crate 自带 starter docs 渲染模板而不是用户 docs**) + crates.io cargo publish (workspace dev-dep chicken-and-egg / 版本号静默失败 / pre-flight dep resolver) + 移动端浏览器 safe-area 与 navbar 间距 (env() vs CSS var 的脱钩、navbar background 同 page 背景导致的安全区视觉不可见、use_safe_area_fix hook 的缓存语义) + **跨 repo deploy chain (euv master merge 不会自动触发 euv-docs deploy,需手动 workflow_dispatch + ltpp.vip sync-pages.sh;下游 repo 加 pages.yml 实现自动链;Pages env policy 必须显式 PUT branch;双分支 workflow deploy 把 source 切到 docs 让用户视角"新地址")** + **patch version bump 只改 root Cargo.toml 的 1 个字段,CI sync_workspace_version 自动同步 7 个 member**(不要手工改 7 处) + **分支 base 错误导致 PR diff 混入未合 commit**(必须从干净 master 起)。同一仓库任意 Rust 发布链路触发本 skill。'
+description: 'Rust + euv → 发布/部署踩坑记录,涵盖 WASM/GitHub Pages 部署 (import path / CDN 缓存 / master ref 损坏 / **Pages build_type=legacy 会忽略 upload-pages-artifact 的 Jekyll 暗坑 / docs/public 复制 subltety 必须 force fresh / Pages 子路径部署 md 绝对路径必须带子前缀 / [!tip] VuePress 自定义容器在 euv-docs 上原文泄漏 / **README frontmatter 2-vs-4 空格缩进错位 → 整个 features: 数组被吞 / euv-docs feature card 不支持 link: 字段,卡片不点击 / c_feature_card 默认无边框,site-local CSS override pattern / emoji 在 headless Chromium 渲染成方框 + Pages CDN 缓存双重失效 / euv-docs CLI 产物默认写到 <EUV_DOCS_SRC_DIR>/www 不是 cwd/www / euv-docs CLI positional SRC_DIR 传相对路径会让 build.rs 读 euv-docs crate 自带 starter docs 渲染模板而不是用户 docs / `gh run view` success 不等于 deploy 完成 — artifact 推到 gh-pages 必须查 `?sha=gh-pages` 才能确认**) + crates.io cargo publish (workspace dev-dep chicken-and-egg / 版本号静默失败 / pre-flight dep resolver) + 移动端浏览器 safe-area 与 navbar 间距 (env() vs CSS var 的脱钩、navbar background 同 page 背景导致的安全区视觉不可见、use_safe_area_fix hook 的缓存语义) + **跨 repo deploy chain (euv master merge 不会自动触发 euv-docs deploy,需手动 workflow_dispatch + ltpp.vip sync-pages.sh;下游 repo 加 pages.yml 实现自动链;Pages env policy 必须显式 PUT branch;双分支 workflow deploy 把 source 切到 docs 让用户视角"新地址")** + **patch version bump 只改 root Cargo.toml 的 1 个字段,CI sync_workspace_version 自动同步 7 个 member**(不要手工改 7 处) + **分支 base 错误导致 PR diff 混入未合 commit**(必须从干净 master 起)。同一仓库任意 Rust 发布链路触发本 skill。'
 ---
 
 # Rust → WASM + GitHub Pages 部署踩坑记录
@@ -1398,6 +1398,73 @@ grep -E '^title|^description' docs/config.toml
 - 解锁路径:正确密码 → gate 卸载 + 正文渲染;reload 后 localStorage 仍解锁。
 
 **适用范围**:任何 euv-docs / euv 业务项目里写自定义 class! 的组件。写之前先查 euv-ui-standards §3 有没有现成标准 class(input/button/field/card/alert),能复用就不新造。
+
+## 坑 31:`workflow run` success ≠ artifact 推到 master — 验证 deploy 完成必须查 `gh-pages` 分支(2026-09-21 docs-pages/docs 教训)
+
+**症状**:`gh workflow run deploy.yml --repo docs-pages/docs` 触发后,`gh run view` 显示 `conclusion: success`,跑了几分钟,但用 `gh api repos/docs-pages/pages/commits?per_page=3`(默认 = master 分支)查 target 仓最近 commit,**看到的还是几天前的旧 commit**,容易误判"流水线没真生效",再去 rerun / debug / force-push,折腾一圈才发现部署其实完成了。
+
+**根因**:cross-repo deploy workflow(坑 22 的 source-builds-pages-product pattern)把 artifact push 到 target 仓的 **`gh-pages` 分支**,**不是 `master`**。`docs-pages/docs` 的 deploy.yml 在 CI 里:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    repository: docs-pages/pages
+    ref: gh-pages      # ← 关键:checkout 到 gh-pages 分支
+    path: __docs_pages
+- name: Push to docs-pages/pages
+  run: |
+    cd __docs_pages
+    ...
+    git fetch origin gh-pages
+    git rebase -X theirs origin/gh-pages
+    git push origin gh-pages   # ← push 也到 gh-pages
+```
+
+Pages 项目 source 配置 `build_type=legacy` + `source.branch=gh-pages`(坑 23 + 24),所以 GitHub Pages 服务从 `gh-pages` 分支 serve 静态产物。**master 分支在这次 deploy 中完全没被触碰**,所以查 master 当然看不到新 commit。
+
+`gh api repos/<o>/<r>/commits` 不带 `?sha=` 时,GitHub API 默认返回 default branch 的最近 commits(对 `docs-pages/pages` 是 `master`)。所以即使 `gh-pages` 分支刚刚被推了新 SHA,master 看上去纹丝不动 → 误判。
+
+**解法(三件套,触发后必跑)**:
+
+1. **直接查 `gh-pages` 分支**:
+   ```bash
+   gh api repos/<target-owner>/<target-repo>/commits?sha=gh-pages\&per_page=3 \
+     --jq '.[] | {sha: .sha[:7], msg: .commit.message | split("\n")[0], date: .commit.committer.date}'
+   ```
+   注意 `?sha=gh-pages` 参数必填,且 URL 里 `&` 要 shell 转义(`\&`)。
+
+2. **查 Pages 服务自己的最近 build metadata**(直接证据,绕开 git branch 概念):
+   ```bash
+   gh api repos/<target-owner>/<target-repo>/pages/builds/latest \
+     --jq '{commit: .commit[0:7], status, created_at, duration: .duration}'
+   ```
+   返回的 `commit` SHA 对应 Pages 服务刚才 serve 的产物 commit。`status: built` = 部署真生效。
+
+3. **直接读 workflow log 里 push step 的 commit SHA**(流程执行的事故痕迹):
+   ```bash
+   gh run view <run_id> --log | grep -E 'gh-pages -> gh-pages|\[gh-pages [a-f0-9]{7}\]'
+   ```
+   `a073ac6..a24173a gh-pages -> gh-pages` 这种 push 报告就是铁证。
+
+**预防**(deploy 完成后回报用户前的自检流程):
+```bash
+# 1. 跑完 gh run view,看到 conclusion: success 先别报"完成"
+gh run view <run_id> --repo <source-owner>/<source-repo> --jq '.conclusion'
+
+# 2. 查 target 仓的 gh-pages 分支最近 commit
+gh api repos/<target-owner>/<target-repo>/commits?sha=gh-pages\&per_page=1 \
+  --jq '.[] | {sha: .sha, msg: .commit.message}'
+
+# 3. 比对 source commit 和 target commit 的 `source_sha` 是否一致
+#    workflow log 里 SOURCE_SHA=<source_head> + deploy commit message 含 ${SOURCE_SHA}
+#    → 一致 = 真部署了 source HEAD 的内容
+```
+
+**反例**:只跑 `gh api repos/.../commits?per_page=3`(无 `?sha=` 参数),看到 commit 还是 09-18 的就报告"流水线没生效"→ 用户会质问,浪费一次返工。
+
+**适用范围**:任何跨仓 deploy + git push artifact pattern 的 Pages 项目(euv / euv-docs / hyperlane-docs / docs-pages/pages / 任何 source-builds-pages-product)。如果 deploy.yml 把 artifact push 到 `gh-pages` 分支(坑 22 + 23 + 24 的标准 pattern),验证时必须查 `gh-pages` 而非 `master`。
+
+**额外补充**(2026-09-21 实证):deploy commit message 用 `Deploy from ${SOURCE_REPO}@${SOURCE_SHA}`(坑 22 的 5-step hardening 强制要求),所以即使 `gh-pages` 分支显示新 commit 也能立刻反向核对 source SHA = "线上产物对应 source HEAD `8c3747d`" = 真正 deploy 了最新代码。如果 source SHA 没变 / 不对,说明 deploy 跑了但 build 用了老 source(坑 21 的典型)。
 
 ## Support files
 
