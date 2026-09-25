@@ -179,6 +179,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
      3. `tests/<file>.rs`(loose root)→ 删 `use super::*;` + 删注释(E0433:`super` 在 crate root 不存在)
      4. 幂等:二次运行所有计数 = 0
    - **Pre-commit 必跑 + 不能 skip**:这是 user 钦定的硬约束(`会重置`),跑 audit 必须 R14.7 通过;auto-fixer 是合规手段不是绕过手段——仅用它把代码改对,不改语义。
+   - **Pitfall(2026-09-25 实测,从 orphan script 接入这条 check):新加一个独立 verification script 到 audit 流水线前,必须先用一个合规 fixture + 一个违规 fixture 双向验证脚本行为**。`verify_test_imports_centralized.sh` 第一次接入时,双引号 shell heredoc 里的正则 `^use super::\*;` 因 `\!` 和 `\*` 的混淆,grep 反而把 `use super::*;` 自身当成违规,导致**每一个合规文件都被 FAIL**——比"完全不检查"更糟(给用户一种'有检查在跑'的安全感,但实际产出全误报)。**对应规则**:写完 verification script 第一件事,跑 `bash <script> <fixtures/compliant_dir>` 期望 exit 0 + OK 行,再跑 `bash <script> <fixtures/violating_dir>` 期望 exit 1 + violation 行+明确文件路径;两个 fixture 都通过才把这个脚本接到 audit 上。**audit 自身的子检查也走 'subprocess 把 stdout 当 output / stderr 当 diagnostic' 的契约**:wrapper shell 模板想要让 audit 把某条 check 当 pass 看待,必须让它的 stdout 为空(或者被 `grep -v` 过滤掉 OK 行 + 靠 `${PIPESTATUS[0]}` 传递 exit code),不要简单地"script 跑完 exit 0 = pass"——verify 之类的脚本即使在成功路径上也会打印 `OK: N file(s) ...`,audit 默认把任何非空 stdout 视为 FAIL。**audit 调用一个 verification script 时,它的绝对路径必须在 Python 层面通过 `os.path.dirname(__file__)` 拿到,然后用模板变量(本仓用 `{{audit_script_dir}}`) 注入 shell 模板**——别在 shell 子进程里写 `$(dirname "$0")` 找脚本位置,因为 audit 是 `subprocess.run(['bash', '-c', cmd])`,shell 的 `$0` 是 `bash` 不是 audit 自己。
 
 ## 跨章节冲突时
 
