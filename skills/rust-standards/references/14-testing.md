@@ -265,3 +265,124 @@ git diff origin/master HEAD --stat -- 'tests/**/*.rs'
 ```
 
 If `#[cfg(test)]` shows up in the diff but no `tests/<feature>/` file was created, the PR is incomplete — fix before push.
+
+
+## 14.7 `tests/<sub>/fn.rs` 顶部只允许 `use super::*;` 一条 use(2026-09-25 user 钦定:`会重置`)
+
+### 铁律
+
+`tests/<sub>/fn.rs` 中除 `use super::*;` 之外的任何 `use` 都是违规。其他依赖(`std::xxx` / `wasm_bindgen_test::wasm_bindgen_test` / `web_sys::xxx` / crate-internal `pub` items)都通过 `tests/<sub>/mod.rs` 顶部的 `pub use xxx;` glob re-export,**所有 fn.rs 共用一个 namespace**。
+
+### 为什么这条规则是硬约束
+
+```rust
+// tests/<sub>/mod.rs  ← 集中暴露,所有 fn.rs 共用
+pub use wasm_bindgen_test::wasm_bindgen_test;
+pub use std::collections::HashMap;
+mod r#fn;
+use super::*;
+```
+
+```rust
+// tests/<sub>/fn.rs  ← 只允许这一行 use
+use super::*;
+
+#[wasm_bindgen_test]
+fn my_test() {
+    let mut map = HashMap::new();      // 通过 super::* 拿到,不需要本地 use
+    map.insert("a".to_string(), 1);
+    assert_eq!(map.len(), 1);
+}
+```
+
+**反模式**(❌ 必驳回):
+
+```rust
+// tests/<sub>/fn.rs
+use super::*;
+use wasm_bindgen_test::wasm_bindgen_test;   // ← 违规 1: fn.rs 不允许显式 use ns
+use std::collections::HashMap;              // ← 违规 2: fn.rs 不允许显式 use std
+
+#[wasm_bindgen_test]
+fn my_test() { ... }
+```
+
+**触发后果**:
+
+1. **clippy `unused_imports`**:父模块 `tests/<sub>/mod.rs` 已 `pub use`,本地 `use` 与 glob 冲突 → clippy 报红
+2. **review 必驳回**:与 §6 集中导入契约冲突
+3. **user 硬约束**:`会重置` —— 任何 PR 引入此类违规,跑 audit 直接 FAIL,不得绕过
+
+### 检测(audit check 19)
+
+```bash
+# 自动跑:被 audit_rust_standards.py 包含
+python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo-root>
+# → FAIL: 19. tests/<sub>/fn.rs non-super use (R14.7)
+
+# 也可单独跑:
+bash ~/.agents/skills/rust-standards/scripts/verify_test_imports_centralized.sh <repo-root>
+# → VIOLATION: tests/<sub>/fn.rs has non-super use lines
+```
+
+检查逻辑:
+- 找所有 `tests/<sub>/fn.rs`(跳过顶层 `tests/mod.rs` / loose `tests/<file>.rs`)
+- 每行 grep `^use `,只看 column 0 的顶层 use,**不**看 fn 体内 use(测试 fn 体内不应有 use,但 fn.rs 内整体都应该只靠 `super::*`)
+- 只要有一行非 `use super::*;` 的 use,就报告
+
+### Auto-fixer(strictify_tests_layout.py,2026-09-25 加固)
+
+```bash
+# 单次跑:删注释、规范化 mod.rs、清除 fn.rs 违规 use
+python3 ~/.agents/skills/rust-standards/scripts/strictify_tests_layout.py <repo-root>
+
+# 幂等:二次跑零改动
+python3 ~/.agents/skills/rust-standards/scripts/strictify_tests_layout.py <repo-root>
+git status --short    # 期待空
+```
+
+strictify 行为细则:
+1. `tests/<sub>/mod.rs` → 顶部保留全部 `pub use xxx;` (按输入顺序去重),末尾固定 `mod r#fn;` + `use super::*;`(没 `mod r#fn;` 自动补)
+2. `tests/<sub>/fn.rs` → 删注释,删任何非 `use super::*;` 的 use,**只**保留首个 `use super::*;`
+3. `tests/<file>.rs` loose root(没中间 mod.rs)→ 删 `use super::*;`(E0433) + 删注释
+4. 二次运行所有计数 = 0 = 幂等
+
+### 手动修复(不用 strictify 时)
+
+```rust
+// ❌ Before (违反 §14.7):
+// tests/foo/mod.rs
+mod r#fn;
+use super::*;
+
+// tests/foo/fn.rs
+use super::*;
+use wasm_bindgen_test::wasm_bindgen_test;
+
+#[wasm_bindgen_test]
+fn t() { ... }
+```
+
+```rust
+// ✅ After (1 处改动:mod.rs 加 pub use + fn.rs 删重复 use):
+// tests/foo/mod.rs
+pub use wasm_bindgen_test::wasm_bindgen_test;
+mod r#fn;
+use super::*;
+
+// tests/foo/fn.rs
+use super::*;
+
+#[wasm_bindgen_test]
+fn t() { ... }
+```
+
+### 适用范围 & 不适用范围
+
+| 路径 | 检查? | 备注 |
+| --- | --- | --- |
+| `tests/<sub>/fn.rs` | ✅ | 严格 — 只能有 `use super::*;` |
+| `tests/<sub>/mod.rs` | ❌ | 本文件**本身**就是放 `pub use xxx;` 的地方,内容多样 |
+| `tests/mod.rs` (顶层) | ❌ | 列 `mod <sub>;` 每个 sub-test 的注册处,不要求只 super |
+| `tests/<file>.rs` (loose root) | ❌ | 是 integration test crate root,`super` 不存在,**严禁**写 `use super::*;` |
+| `src/` 任一文件 | ❌ | §6 集中导入由 §6.1/§6.4 + audit rule 7/17 覆盖,与 §14.7 不同维度 |

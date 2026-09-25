@@ -121,7 +121,9 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | 脚本 | 用途 |
 |------|------|
 | [scripts/verify_tests_layout.sh](scripts/verify_tests_layout.sh) | 验证 §14.4 (无 inline tests) + §14.5 (无测试注释) + top-level mod.rs 无 `use super::*;`。`bash <path>/verify_tests_layout.sh <repo_root>` 即可全检。 |
-| [scripts/audit_rust_standards.py](scripts/audit_rust_standards.py) | 完整 19 条 audit 规则(覆盖 §1 / §2 / §5 / §6 / §9 / §11 / §14 / §17 / §R1.3c + check 19 fn-body blank lines)。**False-positive 列表**见 `references/audit-pitfalls.md`(§1-§42,新增 §39a `src/bin/<name>.rs` + `build.rs` 白名单 / §39b check 19 upstream-aware base + diff hunks scoping / §40 leaf-mod.rs use super 豁免 / §41 try_X().unwrap() 上游 idiom 豁免 / §42 sub-file ext::Type 上游 carry-over,2026-09-14 hyperlane PR #34 monorepo 迁移实测 + 2026-09-18 eastspire/euv-docs PR #31 feat/cli-binary 实测)。 |
+| [scripts/verify_test_imports_centralized.sh](scripts/verify_test_imports_centralized.sh) | 验证 §14.7 (`tests/<sub>/fn.rs` 仅含 `use super::*;`) —— 被 `audit_rust_standards.py` check 19 调用,也可单独 `bash <path>/verify_test_imports_centralized.sh <repo_root>` 跑。 |
+| [scripts/strictify_tests_layout.py](scripts/strictify_tests_layout.py) | §14.4 / §14.5 / §14.7 auto-fixer。删注释、合并冗余空白、把违规的 fn.rs use 重新规范到 mod.rs 的 `pub use`。`python3 <path>/strictify_tests_layout.py <repo_root>` in-place rewrite,**幂等**(二次运行 0 diff)。**只对 tests/ 跑,绝不对 src/** —— 写文件名白名单是 mod.rs/fn.rs,跑在 src/ 上会把源码注解乱删。 |
+| [scripts/audit_rust_standards.py](scripts/audit_rust_standards.py) | 完整 20 条 audit 规则(覆盖 §1 / §2 / §5 / §6 / §9 / §11 / §14 / §17 / §R1.3c + check 19 R14.7 test fn.rs non-super use + check 20 fn-body blank lines)。**False-positive 列表**见 `references/audit-pitfalls.md`(§1-§43,新增 §43 R14.7 new check exception list)。 |
 
 ## 关键硬性规则(快速记忆)
 
@@ -169,6 +171,15 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
    - **长度从 const 拿,不写 magic number**:`bytes[i..i + HTML_COMMENT_OPEN_BYTES.len()]` 优于 `bytes[i..i + 4]`。
    - **audit check 18**: `fn.rs hardcoded byte/string literals (R1.3c literal purity)` — 检测 PR diff 中 fn.rs / impl.rs 内 `b"..."` / `b'.'` / 非 trivial 长度 `&str` literal,排除 doc comment / `#[cfg(test)]` / `let` binding / 已知转义 (`b'\n'` `b'\t'` `b' '` `b'\0'`)。
    - **const.rs 内排序**(沿用现有 `const` 按 `(name_len, name_lex)` 排序):多个 byte literal const 加进 const.rs 时按 const 名长度优先,长度相同按字母序,与 §1.5 const.rs 内排序规则一致。
+16. **`tests/<sub>/fn.rs` 顶部只允许 `use super::*;` 一条 use**(§14.7,2026-09-25 user 原话:"优化 rust-standards skill 要求只要是 rust 代码一定要严格遵守,如果不遵守代码我会重置")。任何 `use std::xxx;` / `use wasm_bindgen_test::wasm_bindgen_test;` / `use crate::xxx;` / `use web_sys::xxx;` 这类 namespace 引入**必须**放到父模块 `tests/<sub>/mod.rs` 顶部,以 `pub use std::xxx;` / `pub use wasm_bindgen_test::wasm_bindgen_test;` 等 `pub use` 形式集中暴露,然后 `fn.rs` 通过 `use super::*;` 拿到 glob。理由:`fn.rs` 已经走 `use super::*;` 拿到父模块的所有 `pub use` re-export,**再写一条多余的 use = 与 §6 集中导入契约冲突,且必然触发 clippy `unused_imports` 警告**(父模块已 re-export,本地 `use` 是冗余的)。
+   - **audit check 19**: `tests/<sub>/fn.rs non-super use (R14.7)` —— 找所有 `tests/<sub>/fn.rs`(跳过 `tests/<file>.rs` loose root 文件,跳过 `tests/mod.rs`),逐行 grep `^use `,只要存在**非** `use super::*;` 的行就 FAIL。fix 路径:**先**调整 `tests/<sub>/mod.rs`,加对应 `pub use xxx;` 然后从 `tests/<sub>/fn.rs` 顶部删掉那条 `use`;或直接跑下面的 `strictify_tests_layout.py` auto-fixer。
+   - **auto-fixer**:`python3 ~/.agents/skills/rust-standards/scripts/strictify_tests_layout.py <repo-root>` 会:
+     1. `tests/<sub>/mod.rs` → 顶部保留所有 `pub use xxx;` re-export,末尾固定为 `mod r#fn;` + `use super::*;`(没 `mod r#fn;` 自动补)
+     2. `tests/<sub>/fn.rs` → 删注释,删掉**任何**非 `use super::*;` 的 use,只保留首个 `use super::*;`
+     3. `tests/<file>.rs`(loose root)→ 删 `use super::*;` + 删注释(E0433:`super` 在 crate root 不存在)
+     4. 幂等:二次运行所有计数 = 0
+   - **Pre-commit 必跑 + 不能 skip**:这是 user 钦定的硬约束(`会重置`),跑 audit 必须 R14.7 通过;auto-fixer 是合规手段不是绕过手段——仅用它把代码改对,不改语义。
+   - **Pitfall(2026-09-25 实测,从 orphan script 接入这条 check):新加一个独立 verification script 到 audit 流水线前,必须先用一个合规 fixture + 一个违规 fixture 双向验证脚本行为**。`verify_test_imports_centralized.sh` 第一次接入时,双引号 shell heredoc 里的正则 `^use super::\*;` 因 `\!` 和 `\*` 的混淆,grep 反而把 `use super::*;` 自身当成违规,导致**每一个合规文件都被 FAIL**——比"完全不检查"更糟(给用户一种'有检查在跑'的安全感,但实际产出全误报)。**对应规则**:写完 verification script 第一件事,跑 `bash <script> <fixtures/compliant_dir>` 期望 exit 0 + OK 行,再跑 `bash <script> <fixtures/violating_dir>` 期望 exit 1 + violation 行+明确文件路径;两个 fixture 都通过才把这个脚本接到 audit 上。**audit 自身的子检查也走 'subprocess 把 stdout 当 output / stderr 当 diagnostic' 的契约**:wrapper shell 模板想要让 audit 把某条 check 当 pass 看待,必须让它的 stdout 为空(或者被 `grep -v` 过滤掉 OK 行 + 靠 `${PIPESTATUS[0]}` 传递 exit code),不要简单地"script 跑完 exit 0 = pass"——verify 之类的脚本即使在成功路径上也会打印 `OK: N file(s) ...`,audit 默认把任何非空 stdout 视为 FAIL。**audit 调用一个 verification script 时,它的绝对路径必须在 Python 层面通过 `os.path.dirname(__file__)` 拿到,然后用模板变量(本仓用 `{{audit_script_dir}}`) 注入 shell 模板**——别在 shell 子进程里写 `$(dirname "$0")` 找脚本位置,因为 audit 是 `subprocess.run(['bash', '-c', cmd])`,shell 的 `$0` 是 `bash` 不是 audit 自己。
 
 ## 跨章节冲突时
 
@@ -181,9 +192,10 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 **新 PR / 修改后跑这一组, 任一项非零 exit 必须修到 0 再 commit**:
 
 ```bash
-# 1. 15 项硬性规则批量 audit(2026-09-14: 13 → 15 项,新增 §14 no-allow + §15 R1.3c literal purity)
+# 1. 16 项硬性规则批量 audit(2026-09-25: 15 → 16 项,新增 §14.7 tests/<sub>/fn.rs only-use-super)
 python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo-root>
 # exit 0 = 全部通过;非零 = 逐项修(每条 FAIL 都打印 sample lines)
+# §14.7 FAIL 的修复首选 auto-fixer(见 step 5);其他 FAIL 改 source 改到 0 exit。
 
 # 2. 官方格式化器幂等(双跑)
 euv fmt && cargo fmt --all
@@ -196,6 +208,14 @@ cargo clippy -p <your-crate> --all-targets --offline
 
 # 4. test 编译通过
 cargo test --no-run -p <your-crate>
+
+# 5. §14 tests/ 合规性 auto-fix(2026-09-25 新增,user 硬约束:`会重置`)
+#    用 strictify_tests_layout.py 把 §14.4 / §14.5 / §14.7 一次性改对,**幂等**:
+python3 ~/.agents/skills/rust-standards/scripts/strictify_tests_layout.py <repo-root>
+python3 ~/.agents/skills/rust-standards/scripts/strictify_tests_layout.py <repo-root>
+git status --short   # 二次运行必须有零改动 = 幂等
+# 如果仍有改动 = 还存在 audit 误报或 strictify 未覆盖的 corner case —— **不要**再次跑,先看 git diff
+# 哪些文件改了、是不是改得对,**严禁**用 auto-fixer 改源码语义。它只动 tests/。
 ```
 
 PR 提交后 `gh pr checks <N>` 必须 build/clippy/tests/check/setup 5/5 pass。`Format check` job 单独注意——它跑 `cargo fmt --check` 而不是 `euv fmt --check`(参见 rule 13 pitfall)。
@@ -208,6 +228,7 @@ PR 提交后 `gh pr checks <N>` 必须 build/clippy/tests/check/setup 5/5 pass�
 | rule 17 (`sub-file body uses external crate full path`) | 只扫根 `[workspace.dependencies]`,**不扫子包** `[dependencies]`(type annotation `proc_macro2::TokenStream` 在 macros 子包、`log::Level` 在 cli 子包不会被抓到) | audit-pitfalls §42 — 已知限制,monorepo PR 留 follow-up |
 | rule 1 (`non-keyword prod files`) | 原本会把 `main.rs` 误报为 non-keyword | audit-pitfalls §39 — 加 `main.rs` 白名单 |
 | rule 1 / rule 7 (covers `src/bin/<name>.rs` + `build.rs`) | 之前会把 cargo convention 路径误报为非关键字文件 / 子文件缺 `use super::*` | audit-pitfalls §39a — 加 `src/bin/<name>.rs` + `build.rs` 白名单(2026-09-18 euv-docs PR #31) |
-| rule 19 (fn-body blank lines) | 默认 base 是 `origin/master`,fork 仓会把本地 master-only commits 算进 PR diff,误标 upstream 历史 | audit-pitfalls §39b — 用 `merge-base HEAD upstream/master` 作 base + diff hunks scoping |
+| rule 19 (`tests/<sub>/fn.rs non-super use`, R14.7) | 顶层 `tests/<file>.rs` loose 文件(没有中间 mod.rs 子目录)应有 `use crate::...` 而不是 `use super::*;` —— 本 rule 不扫这些,所以不报 FALSE,but 注意 loose `tests/<file>.rs` 由 §14.4 限制(否则就是 integration test crate root,`super` 不存在 = E0433)。**新加的 check,没有已知盲点**;若报 FAIL,先看 audit-pitfalls §43,大概率是 true positive,跑 `strictify_tests_layout.py` auto-fixer。 | audit-pitfalls §43 — R14.7 exception list(2026-09-25 新增) |
+| rule 20 (fn-body blank lines) | 默认 base 是 `origin/master`,fork 仓会把本地 master-only commits 算进 PR diff,误标 upstream 历史 | audit-pitfalls §39b — 用 `merge-base HEAD upstream/master` 作 base + diff hunks scoping |
 
 **当 audit 报 FAIL 但 §xx 的 false-positive 描述符合**:先 git diff 看该文件是不是上游原状 carry-over,如果是,在 PR body 标注"upstream code, deferred to follow-up",**不要为了 PASS 改原代码语义**(会偏离 monorepo PR scope)。
