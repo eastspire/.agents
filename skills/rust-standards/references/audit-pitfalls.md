@@ -1686,3 +1686,53 @@ parse `[dependencies]` from each sub-crate's `Cargo.toml`, not just
 initial monorepo PR; address each sub-crate's lib.rs re-export in
 follow-up PRs scoped to that crate (one PR per crate keeps review
 diff small).
+
+## 43. Check 19 false positives — R14.7 `tests/<sub>/fn.rs` non-super use (2026-09-25 new check)
+
+Check 19 wraps `verify_test_imports_centralized.sh`. The script's detection:
+
+- Path glob: `*/tests/*/fn.rs` — any `tests/` immediate subdir whose filename
+  is exactly `fn.rs`. This **deliberately** skips `tests/mod.rs` (the test
+  crate root) and `tests/<sub>.rs` (loose integration-test files at root).
+- Each matching file: extract every line matching `^use ` at column 0, then
+  subtract lines that are exactly `use super::*;` (fixed-string match, no
+  regex pitfalls). What's left = violation.
+
+Known **non**-false-positive cases (these are real violations; auto-fixable):
+
+1. `tests/<sub>/fn.rs` has `use std::path::Path;` at the top.
+   Fix: move to `tests/<sub>/mod.rs` as `pub use std::path::Path;`,
+   delete from `fn.rs`. Or run `strictify_tests_layout.py`.
+2. `tests/<sub>/fn.rs` has `use wasm_bindgen_test::wasm_bindgen_test;`.
+   Same fix path — move to mod.rs as `pub use wasm_bindgen_test::wasm_bindgen_test;`.
+3. `tests/<sub>/fn.rs` has `use web_sys::HtmlElement;` or similar.
+   Same fix path — move to mod.rs as `pub use web_sys::HtmlElement;`.
+4. `tests/<sub>/fn.rs` has `use crate_name::SomeType;`.
+   Same — but FIRST confirm the type is `pub` (if `pub(crate)` the test
+   belongs to a deleted path per §14.4 — there's nothing to re-export).
+
+Known **actual** false-positive patterns (the script's logic intentionally
+excludes these; if you see one reported, file a bug):
+
+1. None known yet. **The check is new (2026-09-25)**; run it on every
+   eastspire-owned repo and add new entries here as they appear.
+
+**Auto-fixer caveat**: `strictify_tests_layout.py` always rewrites
+`tests/<sub>/mod.rs` even if `fn.rs` was already compliant — it normalizes
+mod.rs to: top `pub use xxx;` block(s) + `mod r#fn;` + `use super::*;`.
+Run it twice on a clean repo: second run should print `0 0 0` for all
+counts (sub mod.rs / sub fn.rs / loose .rs). If not, debug before
+claiming compliance — usually means upstream code has a corner case
+the strictifier doesn't model.
+
+If R14.7 FAIL surfaces in CI but the **only** offending file is one your
+PR didn't touch (i.e. upstream had this violation historically): don't
+fix it in this PR — open a follow-up PR scoped to that one test file.
+Reasons:
+- Mixing R14.7 cleanup with your actual feature diff dilutes review.
+- Audit check 19 only flags files in the git diff against origin/master
+  (when audit-runs from the PR's perspective) — so if CI ran against
+  master HEAD, that's the upstream state. Confirm with
+  `git diff origin/master..HEAD -- '*/tests/*/fn.rs'` first.
+
+**Reference**: `references/14-testing.md §14.7` for the full prose.

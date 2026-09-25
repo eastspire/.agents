@@ -24,6 +24,13 @@ for the master-pattern exceptions the script cannot statically detect):
 11. r# on non-keyword file (R1.4)
 12. implicit Vec::new() without type annotation (R5.1)
 13. #![cfg(test)] in test fn.rs (R14.2)
+14. comments in test files (R14.5)
+15. pure &Foo helper in fn.rs should be impl method (R1.3.1)
+16. column-0 decl type mismatch in keyword files (R1.3a, raw-string-aware)
+17. sub-file body uses external crate full path (R6.4-pitfall-b)
+18. fn.rs hardcoded byte/string literals (R1.3c literal purity)
+19. fn-body blank lines (R9.1 §9.1 item 10)
+20. tests/<sub>/fn.rs non-super use (R14.7)
 
 Each check prints either "PASS: N. <category>" or "FAIL: N. <category>: <count>
 hits" followed by up to 5 sample lines.
@@ -522,6 +529,21 @@ for i, line in enumerate(lines, 1):
 sys.exit(0)
 PY
 '''),
+    ('tests/<sub>/fn.rs non-super use (R14.7)', '''
+# Per R14.7: tests/<sub>/fn.rs may contain ONLY `use super::*;` as a top-level
+# use statement. Other imports (std / wasm_bindgen_test / web_sys / ...) must
+# be re-exported by the parent tests/<sub>/mod.rs via `pub use`.
+# Wrapper invokes the dedicated `verify_test_imports_centralized.sh` script.
+# {{audit_script_dir}} is substituted at audit-script load time (see main()).
+# Filter the inner script's "OK: N file(s) ..." line so it doesn't register
+# as a hit; only propagate the violation report + exit status.
+cd {{target}}
+bash "{{audit_script_dir}}/verify_test_imports_centralized.sh" "{{target}}" \
+    | grep -v -E '^OK: [0-9]+ tests/'
+exit_code=${PIPESTATUS[0]}
+test "$exit_code" -ne 0 && echo "FAIL: verify_test_imports_centralized.sh exited $exit_code"
+exit "$exit_code"
+'''),
     ('fn-body blank lines (R9.1 §9.1 item 10)', '''
 # Per audit-pitfalls #33: blank lines inside fn bodies violate §9.1 item 10.
 # Detection: track brace depth, classify context (fn body vs trait/impl/test),
@@ -645,9 +667,23 @@ def main():
     if not os.path.isdir(os.path.join(target, '.git')) and not os.path.isdir(os.path.join(target, '..', '.git')):
         print(f'warning: {target} does not appear to be a git repo (git diff may be empty)')
 
+    # Substitutions available in every shell template:
+    #   {{target}}            — absolute path of the repo root being audited
+    #   {{audit_script_dir}}  — directory holding this audit script (for invoking
+    #                            companion scripts like verify_test_imports_centralized.sh)
+    audit_script_dir = os.path.dirname(os.path.abspath(__file__))
+    target = os.path.abspath(target)
+    substitutions = {'target': target, 'audit_script_dir': audit_script_dir}
+
+    def substitute(template: str) -> str:
+        for k, v in substitutions.items():
+            template = template.replace('{{' + k + '}}', v)
+        return template
+
     results = []
     for i, (name, shell_template) in enumerate(CHECKS, start=1):
-        n, out = run_check(name, shell_template, target)
+        cmd = substitute(shell_template)
+        n, out = run_check(name, cmd, target)
         if out:
             results.append((n, 'FAIL', out))
             print(f'FAIL: {i}. {n}: {len(out)} hits')
