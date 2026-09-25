@@ -1,6 +1,6 @@
 # Audit script false-positive catalog
 
-`scripts/audit_rust_standards.py` checks 13 categories of rust-standards
+`scripts/audit_rust_standards.py` checks 20 categories of rust-standards
 violations in a single pass. Several categories cannot be checked
 statically because the master repo has pattern exceptions that look like
 violations to a non-master-aware script. This document enumerates every
