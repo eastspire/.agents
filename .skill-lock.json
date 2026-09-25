@@ -390,6 +390,96 @@
       "updatedAt": "2026-08-15T01:09:15.607Z",
       "skillFolderHash": "4346f37ed6640c9d0eb70e240e48a42b04c9052d",
       "sourceUrl": "https://github.com/eze-is/web-access.git"
+    },
+    "connect-recommend": {
+      "source": "https://docs.stripe.com/skills",
+      "sourceType": "remote",
+      "skillPath": "skills/stripe/connect-recommend/SKILL.md",
+      "installedAt": "2026-09-25T11:30:19.416Z",
+      "updatedAt": "2026-09-25T11:30:19.416Z",
+      "skillFolderHash": "e071433629d5ef16acd55001384bd2c21b60171a",
+      "sourceUrl": "https://docs.stripe.com/.well-known/skills/connect-recommend/SKILL.md"
+    },
+    "connect-required-verification-information": {
+      "source": "https://docs.stripe.com/skills",
+      "sourceType": "remote",
+      "skillPath": "skills/stripe/connect-required-verification-information/SKILL.md",
+      "installedAt": "2026-09-25T11:30:19.416Z",
+      "updatedAt": "2026-09-25T11:30:19.416Z",
+      "skillFolderHash": "1aafe115503f2bb427005669c8678635baafcfc8",
+      "sourceUrl": "https://docs.stripe.com/.well-known/skills/connect-required-verification-information/SKILL.md"
+    },
+    "metronome": {
+      "source": "https://docs.stripe.com/skills",
+      "sourceType": "remote",
+      "skillPath": "skills/stripe/metronome/SKILL.md",
+      "installedAt": "2026-09-25T11:30:19.416Z",
+      "updatedAt": "2026-09-25T11:30:19.416Z",
+      "skillFolderHash": "728479e09f7bc356aeaf1910e737c37ad8b47c5f",
+      "sourceUrl": "https://docs.stripe.com/.well-known/skills/metronome/SKILL.md"
+    },
+    "stripe-apps": {
+      "source": "https://docs.stripe.com/skills",
+      "sourceType": "remote",
+      "skillPath": "skills/stripe/stripe-apps/SKILL.md",
+      "installedAt": "2026-09-25T11:30:19.416Z",
+      "updatedAt": "2026-09-25T11:30:19.416Z",
+      "skillFolderHash": "32f591d686e5ea3bf1651923713f22e9294353f1",
+      "sourceUrl": "https://docs.stripe.com/.well-known/skills/stripe-apps/SKILL.md"
+    },
+    "stripe-best-practices": {
+      "source": "https://docs.stripe.com/skills",
+      "sourceType": "remote",
+      "skillPath": "skills/stripe/stripe-best-practices/SKILL.md",
+      "installedAt": "2026-09-25T11:30:19.416Z",
+      "updatedAt": "2026-09-25T11:30:19.416Z",
+      "skillFolderHash": "b80a1b6d571ff7c321ba4762c2de7b70e05a129e",
+      "sourceUrl": "https://docs.stripe.com/.well-known/skills/stripe-best-practices/SKILL.md"
+    },
+    "stripe-directory": {
+      "source": "https://docs.stripe.com/skills",
+      "sourceType": "remote",
+      "skillPath": "skills/stripe/stripe-directory/SKILL.md",
+      "installedAt": "2026-09-25T11:30:19.416Z",
+      "updatedAt": "2026-09-25T11:30:19.416Z",
+      "skillFolderHash": "0725070de5c8f19db041dce5fac233eab9a3a84e",
+      "sourceUrl": "https://docs.stripe.com/.well-known/skills/stripe-directory/SKILL.md"
+    },
+    "stripe-docs": {
+      "source": "https://docs.stripe.com/skills",
+      "sourceType": "remote",
+      "skillPath": "skills/stripe/stripe-docs/SKILL.md",
+      "installedAt": "2026-09-25T11:30:19.416Z",
+      "updatedAt": "2026-09-25T11:30:19.416Z",
+      "skillFolderHash": "8de3fd8877404f6f016d8668fec6023f48355a0e",
+      "sourceUrl": "https://docs.stripe.com/.well-known/skills/stripe-docs/SKILL.md"
+    },
+    "stripe-pay": {
+      "source": "https://docs.stripe.com/skills",
+      "sourceType": "remote",
+      "skillPath": "skills/stripe/stripe-pay/SKILL.md",
+      "installedAt": "2026-09-25T11:30:19.416Z",
+      "updatedAt": "2026-09-25T11:30:19.416Z",
+      "skillFolderHash": "844fd601872dac21bd87cc230e422d840ce58e65",
+      "sourceUrl": "https://docs.stripe.com/.well-known/skills/stripe-pay/SKILL.md"
+    },
+    "stripe-projects": {
+      "source": "https://docs.stripe.com/skills",
+      "sourceType": "remote",
+      "skillPath": "skills/stripe/stripe-projects/SKILL.md",
+      "installedAt": "2026-09-25T11:30:19.416Z",
+      "updatedAt": "2026-09-25T11:30:19.416Z",
+      "skillFolderHash": "1158431187d711dedf55d51894aab956e4eba45f",
+      "sourceUrl": "https://docs.stripe.com/.well-known/skills/stripe-projects/SKILL.md"
+    },
+    "upgrade-stripe": {
+      "source": "https://docs.stripe.com/skills",
+      "sourceType": "remote",
+      "skillPath": "skills/stripe/upgrade-stripe/SKILL.md",
+      "installedAt": "2026-09-25T11:30:19.416Z",
+      "updatedAt": "2026-09-25T11:30:19.416Z",
+      "skillFolderHash": "469d9f7ca013647ce56a9419207def98f43a7277",
+      "sourceUrl": "https://docs.stripe.com/.well-known/skills/upgrade-stripe/SKILL.md"
     }
   },
   "dismissed": {
