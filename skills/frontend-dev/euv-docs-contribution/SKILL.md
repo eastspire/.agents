@@ -1,6 +1,6 @@
 ---
 name: euv-docs-contribution
-description: Modifying euv-dev/euv-docs — a Rust + euv WASM markdown docs site. Covers parser limitations (image title dropped, data: URL with UTF-8 SVG breaks, setext heading levels), EN+ZH parity rule, no-version-numbers-in-prose rule, fork+PR workflow via gh-pr-creation-workflow, build pipeline (euv build + wasm-bindgen + python3 http.server), Playwright verification. Use when the user says "改 euv-docs", "euv-docs 文档", "markdown features", or references the euv-docs live URL https://euv-dev.github.io/euv-docs/. Triggers: euv-docs, euv-dev/euv-docs, euv docs site, euv markdown docs.
+description: Modifying euv-dev/euv-docs — a Rust + euv WASM markdown docs site. Covers parser limitations (image title dropped, data: URL with UTF-8 SVG breaks, setext heading levels), EN+ZH parity rule, no-version-numbers-in-prose rule, branch+PR workflow via gh-pr-creation-workflow, build pipeline (euv build + wasm-bindgen + python3 http.server), Playwright verification. Use when the user says "改 euv-docs", "euv-docs 文档", "markdown features", or references the euv-docs live URL https://euv-dev.github.io/euv-docs/. Triggers: euv-docs, euv-dev/euv-docs, euv docs site, euv markdown docs.
 license: MIT
 ---
 
@@ -71,26 +71,47 @@ cd pkg && python3 -m http.server 5188 &
 
 **Important**: `euv build` produces only the consumer bundle (`euv_docs.js` + `euv_docs_bg.wasm`). The `euv.js` / `euv_bg.wasm` framework runtime files in `www/pkg/` come from a separate manual step (CI or upstream-bundle sync) — they are NOT built by `euv build`. Do not assume a clean `euv build` regenerates them.
 
-## PR workflow (fork + PR via gh-pr-creation-workflow)
+## PR workflow (branch + PR + auto-delete-branch)
 
-`euv-dev/euv-docs` is an **organization repo under `euv-dev/`** — Track 2 in the user's contribution model:
+`euv-dev/euv-docs` is an eastspire-owned org repo — uses the unified
+single-track flow (2026-09-25). Branch off `master`, push the branch
+straight to upstream, open a PR, and `gh pr merge --delete-branch` cleans
+up the head branch the moment the squash lands. No fork, no
+`--head eastspire:` prefix (the branch lives on the upstream repo
+itself). See `gh-pr-creation-workflow` for the canonical reference.
 
 ```bash
 cd ~/github/euv-dev/euv-docs
-git checkout master && git pull upstream master   # MUST start from clean upstream master
-git checkout -b <branch>
+git fetch origin
+git checkout master && git pull --ff-only origin master   # MUST start from clean origin/master
+git checkout -b <type>/<scope>-<slug>-YYYY-MM-DD
 git add <files>
 git -c user.name=eastspire -c user.email=eastspire@users.noreply.github.com \
   commit -m "<type>(<scope>): <subject>"
 git push -u origin <branch>
-gh pr create --repo euv-dev/euv-docs --base master --head eastspire:<branch> \
+gh pr create --repo euv-dev/euv-docs --base master --head <branch> \
   --title "<type>(<scope>): <subject>" --body-file /tmp/pr-body.md
-gh pr merge <N> --repo euv-dev/euv-docs --squash --delete-branch --body-file /tmp/pr-body.md
+gh pr checks --watch                    # STOP at green, wait for user "merge it"
+gh pr merge <N> --repo euv-dev/euv-docs --squash --delete-branch
+git fetch origin master && git checkout master && git reset --hard origin/master
+git branch -d <branch>
 ```
 
-Full PR rules (English body, conventional commits, body sections, never auto-merge if downstream depends, etc.) live in `gh-pr-creation-workflow` and `rust-pr-validation-checklist` — this skill only documents the euv-docs-specific overrides.
+`delete_branch_on_merge=true` is set at the repo level for `euv-dev/euv-docs`
+(verified 2026-09-25 batch update), so `--delete-branch` removes the head
+branch on the upstream repo automatically. Verify with
+`gh repo view euv-dev/euv-docs --json deleteBranchOnMerge` before relying
+on auto-delete.
 
-**Critical pitfall**: open new branches from clean `upstream/master`, NOT from a previous un-merged PR's branch. PRs opened off an unmerged base show diffs that include the unmerged PR's commits. See `git-standards` / `gh-pr-creation-workflow` for the full lesson.
+Full PR rules (English body, conventional commits, body sections, never
+auto-merge if downstream depends, etc.) live in `gh-pr-creation-workflow`
+and `rust-pr-validation-checklist` — this skill only documents the
+euv-docs-specific overrides.
+
+**Critical pitfall**: open new branches from clean `origin/master`, NOT
+from a previous un-merged PR's branch. PRs opened off an unmerged base
+show diffs that include the unmerged PR's commits. See `git-standards` /
+`gh-pr-creation-workflow` for the full lesson.
 
 ## Deploy chain
 

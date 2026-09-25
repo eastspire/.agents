@@ -49,6 +49,26 @@ fi
 echo "Using: $AUTH"
 ```
 
+### Pitfall: `git credential.helper` may use a non-default store file
+
+`git config --get credential.helper` may return a custom store path (e.g. `store --file=/tmp/hermes/git-cred`), not the standard `~/.git-credentials`. The default-path branch above will fall through silently and `GITHUB_TOKEN` stays unset. **Read the helper config first and pass the path explicitly to the extraction script:**
+
+```bash
+# 1. Read credential store path from git config (handles both store and store --file=X forms)
+HELPER=$(git config --global --get credential.helper)
+case "$HELPER" in
+  *store*)
+    file_path=$(echo "$HELPER" | sed -nE 's/.*--file=([^[:space:]]+).*/\1/p')
+    [ -z "$file_path" ] && file_path="$HOME/.git-credentials"
+    if [ -f "$file_path" ]; then
+      GITHUB_TOKEN=$(uv run python "${HERMES_HOME:-$HOME/.hermes}/skills/github/github-auth/scripts/git-credential-token.py" "$file_path")
+    fi
+    ;;
+esac
+```
+
+**Confirmed 2026-09-25 on this host**: `git config --global credential.helper` returned `store --file=/tmp/hermes/git-cred`, which the default-path branch in the snippet above missed. Symptom was `gh auth status` reporting "not logged in" despite a valid `ghp_…` token sitting in `/tmp/hermes/git-cred`. The `GH_TOKEN="$(grep -oE 'https://[^@]+@github\.com' /tmp/hermes/git-cred | sed '...' gh auth status` shortcut works because `gh` re-parses the value and accepts the raw token string — but the python extraction script needs the explicit path.
+
 ### Extracting Owner/Repo from the Git Remote
 
 Many `curl` commands need `owner/repo`. Extract it from the git remote:
@@ -239,49 +259,76 @@ git checkout -b feat/my-change origin/main  # or: git pull origin main --allow-u
 
 Once you have a real `git` repo with the base branch checked out, continue with the normal `git push -u origin HEAD` flow above.
 
-### Eastspire-Owned Orgs — Skip the Fork Decision (2026-09-05 revision)
+### Eastspire-Owned Orgs — Unified Branch + PR Workflow (2026-09-25 revision)
 
-When the target repo belongs to an org where the user (`eastspire`) has admin/maintain permission, the workflow depends on the org:
+Effective 2026-09-25 (user request "更新 skill 所有我的仓库和我的组织下的
+代码提交直接基于源仓库主分支牵出新的分支提交 PR，而不是 fork 仓库，PR 合并
+之后自动删除历史分支，保证分支干净"), ALL eastspire-owned namespaces
+use the same branch + PR flow. The previous 3-track scheme
+(`eastspire/*` and `docs-pages/*` direct-push master, everything else
+fork-first) is retired. See `gh-pr-creation-workflow` for the canonical
+single-track reference.
 
-| Org | Workflow | Why |
+| Org | Workflow | Notes |
 | --- | --- | --- |
-| `eastspire/*` (personal) | **Direct push to master, no fork, no PR** | Self-account; PR review would be self-approval |
-| `docs-pages/*` | **Direct push to master, no fork, no PR** (2026-09-05) | eastspire is the entire admin team; no external reviewers |
-| `euv-dev/*` | Branch + push direct (upstream) + open PR | eastspire is admin, but each repo has a non-eastspire maintainer |
-| `hyperlane-dev/*` | same as `euv-dev/*` | same |
-| `crates-dev/*` | same as `euv-dev/*` | same |
-| Third-party (e.g. `tokio-rs/serde`) | `gh repo fork` + branch + push to fork + open PR | eastspire has no admin role |
+| `eastspire/*` (personal, non-fork) | Branch off default + push to upstream + open PR + `--delete-branch` | Self-account; PR review is self-approval but enforced for branch hygiene |
+| `hyperlane-dev/*` | same as `eastspire/*` | eastspire is admin, repo has non-eastspire maintainer |
+| `euv-dev/*` | same | same |
+| `crates-dev/*` | same | same |
+| `docs-pages/*` | same (was direct-push no-PR before 2026-09-25) | eastspire is the entire admin team |
+| Third-party (e.g. `tokio-rs/serde`) | `gh repo fork` + branch + push to fork + open PR | eastspire has no admin role — legacy Track 2 |
+
+All eastspire-owned repos have `delete_branch_on_merge=true` set at the
+repo level (verified 2026-09-25 batch update across 64 repos), so
+`gh pr merge --squash --delete-branch` removes the head branch on the
+upstream repo the moment the squash commit lands. Verify with
+`gh repo view <owner>/<repo> --json deleteBranchOnMerge` before relying
+on auto-delete.
 
 ```bash
-# 1. (optional but cheap) verify track via remote + owner
+# 1. Verify remote + permission
 git remote -v
-# origin ssh://git@github.com/<owner>/<repo>.git
-# If <owner> in {eastspire, docs-pages} → Track 1 (push master)
-# If <owner> in {euv-dev, hyperlane-dev, crates-dev} → Track 2 (branch + push + PR)
-# Else → Track 2 via gh repo fork
+# origin ssh://git@github.com/<owner>/<repo>.git  (single remote)
 
-# Optional: API permission check for Track 2
 PERM=$(gh api repos/<owner>/<repo>/collaborators/eastspire/permission --jq .permission 2>/dev/null)
 case "$PERM" in
-  admin|maintain|write) echo "✓ $PERM — direct branch push OK (Track 2)" ;;
+  admin|maintain|write) echo "✓ $PERM — direct branch push OK" ;;
   *)                   echo "⚠ $PERM — fall back to gh repo fork path" ;;
 esac
 
-# 2a. Track 1 — personal + docs-pages
-git add -A
-git -c user.name=eastspire -c user.email=eastspire@users.noreply.github.com commit -m "..."
-git push origin master
-
-# 2b. Track 2 — eastspire-owned org with active maintainer OR third-party
-git checkout -b <scope>/<descr>-YYYY-MM-DD origin/master
-# ... make changes, git commit ...
+# 2. Branch off clean default + commit + push + PR (eastspire-owned)
+git fetch origin
+git checkout <default> && git pull --ff-only origin <default>
+git checkout -b <type>/<scope>-<slug>-YYYY-MM-DD
+# ... make changes ...
+git -c user.name=eastspire -c user.email=eastspire@users.noreply.github.com \
+  commit -m "<type>(<scope>): <subject>"
 git push -u origin <branch>
-gh pr create --base master --head <branch> --title "..." --body-file /tmp/pr-body.md
+gh pr create --repo <owner>/<repo> --base <default> --head <branch> \
+  --title "<type>(<scope>): <subject>" --body-file /tmp/pr-body.md
+gh pr checks --watch             # STOP at green, wait for user "merge it"
+
+# 3. After user approves merge — squash + delete-branch (clean history)
+gh pr merge <N> --repo <owner>/<repo> --squash --delete-branch
+git fetch origin <default> && git checkout <default> && git reset --hard origin/<default>
+git branch -d <branch>
 ```
 
-Why this matters: `gh repo fork` on a user-owned repo fails with `cannot be forked. A single user account cannot own both a parent and fork` (verified on `eastspire/.agents`). For the three maintainer-orgs (`hyperlane-dev`, `crates-dev`, `euv-dev`), forking either errors out or produces a meaningless same-account fork — so always push the branch direct to upstream and open the PR from there. For `docs-pages/*` specifically, **don't open a PR at all** as of 2026-09-05; the user confirmed the docs site is fully self-administered and the PR ceremony is pure overhead.
+Why this matters: `gh repo fork` on a user-owned repo fails with
+`cannot be forked. A single user account cannot own both a parent and
+fork` (verified on `eastspire/.agents`). For the three maintainer-orgs
+(`hyperlane-dev`, `crates-dev`, `euv-dev`), forking either errors out
+or produces a meaningless same-account fork — so always push the branch
+direct to upstream and open the PR from there. The 2026-09-25
+simplification collapses the previous "direct push master for personal +
+docs-pages" track into the same flow because the user wants PR
+ceremony + branch hygiene across the entire eastspire-owned set,
+including the personal admin namespaces.
 
-For the full decision tree see `gh-pr-creation-workflow`. For the historical context of `docs-pages` having a Contents-API workaround (pre-2026-09-05), see the older revisions of this file or `gh-pr-creation-workflow` §"Exception". The exception is no longer needed.
+For the full decision tree see `gh-pr-creation-workflow`. For the
+historical context of the 3-track scheme that existed 2026-08-28 →
+2026-09-25, see the older revisions of this file or
+`gh-pr-creation-workflow` §"History".
 
 ### Cross-Org / No-Write Permission (the "fork first" path)
 
