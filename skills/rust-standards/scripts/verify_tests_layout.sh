@@ -33,9 +33,16 @@ done
 
 echo
 echo "=== §14.5 check 2: no comments in tests/**/*.rs files ==="
+# Per rust-standards §14.5 (2026-09-12 round 3, 2026-09-26 strengthening):
+# tests/ files MUST have ZERO comments — no //, no ///, no //!.
+# Test fn name = documentation; assertion messages express the
+# expected behavior.  All three forms banned.
 for f in $(find core/tests engine/tests ui/tests cli/tests -name "*.rs" 2>/dev/null); do
   if [ -f "$f" ]; then
-    hits=$(grep -nE "^\s*//[^/]" "$f" 2>/dev/null)
+    # Catch //, ///, and //! uniformly.  The previous regex `^\s*//[^/]`
+    # accidentally excluded `///` (round-3 clarification actually bans
+    # all three forms).  Use a 3-alternative match instead.
+    hits=$(grep -nE "^\s*(//|///|//!)" "$f" 2>/dev/null)
     if [ -n "$hits" ]; then
       echo "FAIL: comments in $f:"
       echo "$hits" | head -5

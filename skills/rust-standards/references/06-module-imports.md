@@ -19,6 +19,49 @@
     - 私有 `use {external_crate_1::*, external_crate_2::Symbol, ...}` 在后
     - **单条 `use external_crate::Symbol;` 也要并入 `use {...}` 块**,不要写成独立的 `use ...;` 行后跟 `use {...}` 块。例如 `use log::SetLoggerError;` 应合并进 `use {clap::Parser, log::SetLoggerError, serde::Serialize, ...}`,而不是独占一行放在 `use std::{...}` 之后 / `use {...}` 块之前。
 
+### §6.1 lib.rs std/external imports MUST be `pub use`, not private `use`
+
+**Hard rule(2026-09-26 实测)**:lib.rs 中**任何 sub-file 也要用的 std / external crate 符号都必须用 `pub use`**(不能是 private `use`)。原因:sub-file 的 `use super::*;` 只看得到父模块 glob 暴露的 `pub use` 出来的符号,private `use std::...;` 只在 lib.rs 内部可见,sub-file 完全看不到 → "cannot find type X in scope"。
+
+**反例**(实测,review reject):
+```rust
+// lib.rs ❌ — HashMap / Display / from_utf8 只在 lib.rs 内部可见
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    str::from_utf8,
+};
+```
+```rust
+// sub-file.rs ❌ — Display / HashMap 找不到
+use super::*;  // ← super::* 看不到 lib.rs 的 private use
+use std::fmt::Display;  // ← 已经在 lib.rs,但 private 所以这里再 use 会 unused_imports
+```
+
+**正确写法**(lib.rs `pub use std`):
+```rust
+// lib.rs ✅
+pub use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fmt::Display,
+    str::from_utf8,
+    string::FromUtf8Error,
+    vec::IntoIter,
+};
+```
+```rust
+// sub-file.rs ✅ — super::* 继承 lib.rs 的 pub use,所有符号可见
+use super::*;
+```
+
+**特殊例外**:lib.rs 自己**仅内部用**的符号可以 private `use`(例如 lib.rs 自己拼一个 `use {crate_a::*, crate_b::*};` 块用于自己展开一些 helper)。但只要任何 sub-file 可能用到,必须 `pub use`。
+
+**Verification**(写完 sub-file 后跑):
+```bash
+# sub-file 用到的每个外部符号,确认 lib.rs 有 pub use
+grep -E "^pub use " <crate>/src/lib.rs | head
+```
+
 ### §6.1 常见违规(2026-09-14 euv PR #235 实测)
 
 1. **private use 写在 pub use 之前**(step 6 必须在 step 2-5 之后)。

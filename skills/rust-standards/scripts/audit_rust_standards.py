@@ -24,7 +24,7 @@ for the master-pattern exceptions the script cannot statically detect):
 11. r# on non-keyword file (R1.4)
 12. implicit Vec::new() without type annotation (R5.1)
 13. #![cfg(test)] in test fn.rs (R14.2)
-14. comments in test files (R14.5)
+14. comments in test files (R14.5) [DEPRECATED — see check 28]
 15. pure &Foo helper in fn.rs should be impl method (R1.3.1)
 16. column-0 decl type mismatch in keyword files (R1.3a, raw-string-aware)
 17. sub-file body uses external crate full path (R6.4-pitfall-b)
@@ -50,7 +50,20 @@ DEFAULT_TARGET = '.'
 
 CHECKS = [
     ('non-keyword prod files', '''cd {{target}}
-git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -vE "/tests/|/lib\\.rs$|/raw_html\\.rs$|/main\\.rs$|/bin/[^/]+\\.rs$|(^|/)build\\.rs$" | while read f; do
+# Per §1.3: every .rs file under src/ (excluding tests/, /lib.rs,
+# raw_html.rs, /main.rs, /bin/<name>.rs, /build.rs) MUST use one of
+# the 9 keyword basenames (const / static / fn / enum / struct /
+# trait / impl / type / mod). Anything else (e.g. `parser/wire.rs`)
+# is forbidden — see hyperlane refactor (2026-09-26) where a
+# freshly added `wire.rs` slipped past because audit only inspected
+# `git diff`, not untracked files.
+#
+# Combine `git diff` (committed/added in HEAD vs base) with
+# `git ls-files --others --exclude-standard` (untracked) so newly
+# added files during the same session are caught before commit.
+diff_files=$(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null)
+untracked_files=$(git ls-files --others --exclude-standard -- "*.rs" 2>/dev/null)
+printf "%s\\n%s\\n" "$diff_files" "$untracked_files" | grep -vE "^(|$)" | sort -u | grep -vE "/tests/|/lib\\\\.rs$|/raw_html\\\\.rs$|/main\\\\.rs$|/bin/[^/]+\\\\.rs$|(^|/)build\\\\.rs$" | while read f; do
   [ -f "$f" ] || continue
   bn=$(basename "$f")
   case "$bn" in
@@ -188,15 +201,12 @@ for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep 
   fi
 done
 '''),
-    ('comments in test files (R14.5)', '''cd {{target}}
-# Per rust-standards §14.5 (2026-09-12 user clarification):
-# tests/ files MUST have zero comments. The test fn name is the
-# documentation; assertion messages express the expected behavior.
-# This applies to:
-#   - file-level //! headers
-#   - per-fn /// doc comments
-#   - fn-body inline // comments
-# Blank lines between #[test] fns are fine; only //-prefixed lines fail.
+    ('comments in test files (R14.5) [DEPRECATED — see check 28]', '''
+# DEPRECATED: this is the older regex-based check using `^\s*//[^/]`
+# which incorrectly excluded `///` (round-3 user clarification
+# actually bans all three forms).  Replaced by check 28 via
+# verify_no_test_comments.py.  Kept here as a redundant backstop
+# that catches `//` and `//!` only.
 for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/tests/.*\\.rs$"); do
   [ -f "$f" ] || continue
   hits=$(grep -nE "^\s*//[^/]" "$f" 2>/dev/null)
@@ -648,6 +658,160 @@ for f in files:
             closes -= 1
 sys.exit(0 if hits == 0 else 1)
 PY
+'''),
+    ('Cargo.toml dep block order (§13.7 round 4)', '''
+# Per references/13-dependency.md §13.7 (round 4, 2026-09-26):
+#   [dependencies] / [dev-dependencies] / [build-dependencies] /
+#   [workspace.dependencies] must be ordered:
+#     * LOCAL first (workspace members via [workspace] members or
+#       value containing workspace = true / path = "...").
+#     * EXACTLY ONE blank line separating local group from third-party
+#       group. No blank lines within either group.
+#     * Within each group: entry full length ascending (whitespace-
+#       agnostic; computed by verify_dep_order.py as
+#       len(re.sub(r"\\s+", "", "<entry-joined>"))), ties broken by
+#       dep key ASCII lex.
+#
+# The companion script `verify_dep_order.py` implements this. Its
+# exit code is the only source of truth for pass/fail. We pipe its
+# stdout through `grep -v` to drop the success-path trailer line
+# (`N files checked, 0 violations`) — that line would otherwise be
+# counted as a hit by the audit wrapper. The actual violation lines
+# (file paths + actual vs expected) MUST flow through unfiltered.
+# Repos with no Cargo.toml print "No Cargo.toml files found ..." to
+# stderr and exit 2 — also filtered out (not a violation).
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_dep_order.py" "{{target}}" 2>/dev/null \
+    | grep -v -E '^[0-9]+ files checked, 0 violations$|^OK: 0 Cargo.toml'
+exit_code=${PIPESTATUS[0]}
+test "$exit_code" -ne 0 && echo "FAIL: verify_dep_order.py exited $exit_code"
+exit "$exit_code"
+'''),
+
+    # check 22 — §17 CI never bumps versions / never writes `version =`
+    # (2026-09-26 added). Companion script: verify_ci_no_bump.py.
+    ('CI workflow forbids version bumps and version writes (§17)', '''
+# Forbid any `.github/workflows/*.yml` step that bumps a Cargo.toml
+# version (cc bump / crate bump with --patch/--minor/.../--release /
+# --target-version) or rewrites a `version =` line via sed -i / perl -pi
+# / python3 -c / awk >. Read-only `grep ... | sed -E 's/.../.../'`
+# extraction of `$VERSION` for tag/commit-message is allowed.
+# Allowlist: `# ci-allow-version-write: <reason>` on the line just
+# above the violation exempts it (tight coupling).
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_ci_no_bump.py" "{{target}}" \
+    | grep -v -E '^(OK: [0-9]+ workflow|INFO: no .github/workflows)'
+exit_code=${PIPESTATUS[0]}
+test "$exit_code" -ne 0 && echo "FAIL: verify_ci_no_bump.py exited $exit_code"
+exit "$exit_code"
+'''),
+
+    # check 23 — §1.3 keyword file purity (R1.3a) + first-line use super::*
+    # (2026-09-26 user tightening).  Companion script:
+    # verify_keyword_file_purity.py.  Replaces / extends the older
+    # column-0 decl check (#16) and adds the first-line + use-centralized
+    # checks for keyword files.
+    ('keyword file purity + first-line use super::* (§1.3 / §6.3)', '''
+# Per rust-standards §1.3 + §6.3 (2026-09-26 user tightening):
+#   - Each keyword file (const.rs / static.rs / fn.rs / enum.rs /
+#     struct.rs / trait.rs / impl.rs / type.rs / mod.rs) under src/
+#     MUST be the only declaration kind it contains.
+#   - First non-comment line MUST be `use super::*;` (the previous
+#     exemption allowing direct `///` doc comments on enum.rs /
+#     struct.rs / type.rs is RETIRED).
+#   - No `use crate::xxx;` / `use std::xxx;` / `use external::xxx;`
+#     / `use super::specific_path;` outside the leading super::*.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_keyword_file_purity.py" "{{target}}" \\
+    | grep -v -E '^=== keyword-file purity:'
+exit_code=${PIPESTATUS[0]}
+test "$exit_code" -ne 0 && echo "FAIL: verify_keyword_file_purity.py exited $exit_code"
+exit "$exit_code"
+'''),
+
+    # check 24 — §9.2 fn parameter style: no `impl Trait` in parameters.
+    # (2026-09-26 user tightening).  Companion script:
+    # verify_no_impl_trait_params.py.
+    ('no impl Trait in fn parameters (§9.2)', '''
+# Per rust-standards §9.2: fn parameters must use generic + where
+# clause, not `impl Trait`.  Example:
+#   fn parse<T: FromStr>(...)  ❌  inline bound
+#   fn parse<T>(...) where T: FromStr  ✅
+#   fn f(x: impl AsRef<str>)  ❌  impl param
+#   fn f<T>(x: T) where T: AsRef<str>  ✅
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_impl_trait_params.py" "{{target}}" \\
+    | grep -v -E '^=== no-impl-trait-fn-params:'
+exit_code=${PIPESTATUS[0]}
+test "$exit_code" -ne 0 && echo "FAIL: verify_no_impl_trait_params.py exited $exit_code"
+exit "$exit_code"
+'''),
+
+    # check 25 — §2.1 / §2.2 doc-comment format conformance.
+    # (2026-09-26 user tightening).  Companion script:
+    # verify_doc_comment_format.py.
+    ('doc-comment format conformance (§2.1 / §2.2)', '''
+# Per rust-standards §2.1 + §2.2:
+#   - Every non-#[test] fn / impl block in src-adjacent code must
+#     carry at least one `///` line above it.
+#   - Every fn with non-self parameters OR a non-()/Self return type
+#     must also carry `# Arguments` / `# Returns` sections per the
+#     §2.2 template.
+#   - Argument list items use `- `Type` - description` form.
+#   - Returns list items use `- `Type`: description` form.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_doc_comment_format.py" "{{target}}" \\
+    | grep -v -E '^=== doc-comment format:'
+exit_code=${PIPESTATUS[0]}
+test "$exit_code" -ne 0 && echo "FAIL: verify_doc_comment_format.py exited $exit_code"
+exit "$exit_code"
+'''),
+
+    # check 26 — §6.1 / §6.3 / §6.4 module-imports centralized.
+    # (2026-09-26 user tightening).  Companion script:
+    # verify_module_imports_centralized.py.  Audits lib.rs (private
+    # `use` for std/external must be `pub use`), mod.rs (no // comments
+    # + last-line use super::*), and keyword sub-files (only `use
+    # super::*;` allowed + no long-path use anywhere).
+    ('module imports centralized in lib.rs / mod.rs (§6.1 / §6.3 / §6.4)', '''
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_module_imports_centralized.py" "{{target}}" \\
+    | grep -v -E '^=== module-imports centralized:'
+exit_code=${PIPESTATUS[0]}
+test "$exit_code" -ne 0 && echo "FAIL: verify_module_imports_centralized.py exited $exit_code"
+exit "$exit_code"
+'''),
+
+    # check 27 — §6.1 lib.rs / mod.rs three-stage import order.
+    # (2026-09-26 user tightening).  Companion script:
+    # verify_lib_rs_order.py.
+    ('lib.rs / mod.rs three-stage import order (§6.1)', '''
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_lib_rs_order.py" "{{target}}" \
+    | grep -v -E '^(=== |OK: 0 lib)'
+exit_code=${PIPESTATUS[0]}
+test "$exit_code" -ne 0 && echo "FAIL: verify_lib_rs_order.py exited $exit_code"
+exit "$exit_code"
+'''),
+
+    # check 28 — §14.5 no comments in test files.  Replaces the older
+    # regex-based check 14 (which used `^\s*//[^/]` and accidentally
+    # excluded `///`).  Companion script: verify_no_test_comments.py.
+    # Catches //, ///, and //! uniformly per round-3 user clarification.
+    ('no comments in test files (§14.5)', '''
+# Per rust-standards §14.5 (2026-09-12 round 3 user clarification,
+# 2026-09-26 strengthening):
+#   Tests have ZERO comments — no file-level //!, no per-fn ///,
+#   no fn-body //.  Test fn name = documentation; assertion
+#   message = expected behavior.  All three forms banned.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_test_comments.py" "{{target}}" \
+    | grep -v -E '^=== no-comments-in-tests:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_test_comments.py exited $exit_code" >&2
+fi
+exit "$exit_code"
 '''),
 ]
 

@@ -287,5 +287,69 @@ pub struct Args { ... }
 
 合并后**语义正确**(lombok-macros 都是 proc-macro derive,放进同一个 `#[derive(...)]` 完全合法),但偏离示例格式。两种写法都通过 audit / clippy / fmt 幂等检查,只是表面不一致。
 
+### 陷阱 F — 字段已存在时手写同名 setter 会跟 Lombok setter 撞名(无限递归)
+
+当 `#[derive(Setter)]` 已经给字段 `x` 生成了 `fn set_x(&mut self, val: T) -> &mut Self`,**不要**再在同一 `impl X` 块里写同名同签名的手写 `pub fn set_x(...)` — Lombok 的 setter 已经存在了,手写的会触发 *E0591* `duplicate definitions with name set_x`。
+
+如果想给已有字段加 ergonomic wrapper(比如接受 `Into<T>` 而不是 `T` 的泛型版本),**重命名手写的**而不是再写 `set_x`,否则 Lombok 已生成的同名 setter 跟你手写的撞名:
+
+```rust
+// ❌ 错误: 编译 E0591 duplicate definitions
+#[derive(Setter)]
+pub struct Request {
+    pub body: RequestBody,    // Lombok 生成 set_body(&mut self, val: Vec<u8>)
+}
+
+impl Request {
+    pub fn set_body<B: Into<Vec<u8>>>(&mut self, body: B) -> &mut Self {
+        self.set_body(body.into());   // 同时也是无限递归: 调自己
+        self
+    }
+}
+```
+
+**✅ 正确 — 用 Lombok 字段注解 `#[set(type(...))]` 改 setter 签名**,或重命名手写版:
+
+```rust
+#[derive(Setter)]
+pub struct Request {
+    #[set(type(AsRef<[u8]>))]    // Lombok 改 setter 签名接受 &[u8]
+    pub body: RequestBody,
+}
+```
+
+`#[set(type(AsRef<str>))]` / `#[set(type(AsRef<[u8]>))]` 适用于 `String` / `Vec<u8>` 等 `AsRef<...>` 实现的类型,生成的 setter 直接接收借用,无需 `.to_owned()`。
+
+**如果 Lombok 不能用字段注解解决问题**(比如想要 multi-arg 集合操作 `set_header<K, V>(k, v)`),**必须用不同方法名**(`with_body` / `set_header` —— 字段是 `headers` 集合,所以 `set_header` 不撞字段 setter):
+
+```rust
+// ✅ 正确: header 字段 set_header 不存在,Lombok 没生成同名 setter
+impl Request {
+    pub fn set_header<K, V>(&mut self, k: K, v: V) -> &mut Self
+    where K: AsRef<str>, V: AsRef<str>,
+    { ... }
+}
+```
+
+**判断准则**: 写手写方法前 `grep -nE 'fn set_<name>' target/.../deps/*.rmeta` 看 Lombok 已生成了什么 setter,或直接看 `cargo expand --lib` 的展开结果。
+
+### 陷阱 G — `pub use r#fn::*;` 重新导出 `pub(crate)` 项是 no-op
+
+子模块把 `pub(crate)` 函数集中到 `mod.rs` 用 `pub use r#fn::*;` 暴露时,**编译器认为是 no-op**(visibility 不匹配,不会真的 re-export),触发 `unused_imports` warning。
+
+```rust
+// type/src/request/parser/mod.rs
+mod r#fn;
+
+// ❌ 错误: glob import doesn't reexport anything with visibility `pub`
+//    because no imported item is public enough
+pub use r#fn::*;
+
+// ✅ 正确: 匹配子项 visibility
+pub(crate) use r#fn::*;
+```
+
+**根因**: `pub use` 只能 re-export visibility ≤ `pub` 的项;`pub(crate)` 项的 `pub use` 不会把它们提升到 `pub`,但也不会触发任何"过强 visibility"错误 — 只是没有 re-export 任何东西,产生 unused_imports warning。**匹配 visibility**:子模块 internal API 用 `pub(crate) use r#fn::*;`,要对外公开才用 `pub use r#fn::*;`。
+
 **对策**:写完后跑 `cargo fmt --all && cargo fmt --all -- --check` —— 如果 `cargo fmt` 改动了 `#[derive]` 行,**接受** 合并后的版本,不要写 `.rustfmt.toml` 配置强行保留两行(formatting config 跨 crate 不通用,会污染下游项目)。
 

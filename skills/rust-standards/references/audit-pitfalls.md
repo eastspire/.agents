@@ -1,6 +1,6 @@
 # Audit script false-positive catalog
 
-`scripts/audit_rust_standards.py` checks 20 categories of rust-standards
+`scripts/audit_rust_standards.py` checks 24 categories of rust-standards
 violations in a single pass. Several categories cannot be checked
 statically because the master repo has pattern exceptions that look like
 violations to a non-master-aware script. This document enumerates every
@@ -42,63 +42,23 @@ Per R14.1b, integration test mod.rs files in `core/tests/<sub>/` use
 are a separate compile crate. Master pattern: every line in
 `core/tests/<sub>/mod.rs` ends with `use super::*;` without `pub`.
 
-## 5. Direct `///` doc comment on `enum.rs` / `struct.rs` / `type.rs`
-   without `use super::*;` first — NOT a violation
+## 5. ~~Direct `///` doc comment on `enum.rs` / `struct.rs` / `type.rs` without `use super::*;` first~~ RETIRED 2026-09-26
 
-Master pattern allows `enum.rs` / `struct.rs` / `type.rs` to open with
-a `///` doc comment if the type does not need to reference any symbol
-from the parent module. Example:
+> User tightening 2026-09-26: all 9 keyword sub-files MUST open with `use super::*;`. The previous exemption that allowed direct `///` on `enum.rs` / `struct.rs` / `type.rs` (and `//!` on any keyword file) is **retired**. Now any keyword sub-file whose first non-comment line is not `use super::*;` is a violation per check 23 (`scripts/verify_keyword_file_purity.py`).
 
-```rust
-/// The phase of a `SuspenseState`.
-///
-/// - `Pending` — the underlying data is still loading.
-#[derive(Clone, Debug)]
-pub enum SuspensePhase { ... }
-```
+If you see this entry cited by an old comment or PR description, treat it as obsolete — the rule has flipped.
 
-The audit script's category 7 (sub-file first line) reports these as
-"violations" because the first non-comment line is `#[derive(...)]`,
-not `use super::*;`. Manually confirm the file doesn't reference any
-parent-module symbol via the `use super::*;` chain before fixing.
+## 6. ~~`//!` module-level doc comment as first line~~ RETIRED 2026-09-26
 
-## 6. `//!` module-level doc comment as first line — NOT a violation
+> Same retirement as §5: keyword files may NOT open with `//!`. Audit check 23 catches this.
 
-Module-level `//!` doc comments are allowed on **any** sub-file as the
-first lines. The audit script's category 7 reports these as
-"violations" because the first non-comment line is past the doc block
-and may not be `use super::*;`. The script tries to handle this by
-looking at the first non-blank, non-comment line — if your file opens
-with `//!` and then has a `use super::*;` after a blank line, it is
-correct.
+## 7. ~~`//` comment explaining "intentionally NOT imported super::*"~~ RETIRED 2026-09-26
 
-## 7. `//` comment explaining "intentionally NOT imported super::*" — NOT a violation
+> Same retirement as §5. Some files like `core/src/reactive/use_async/struct.rs` deliberately skipped `use super::*;` because the module defines its own trait and uses fully-qualified `core::...` paths. The previous audit-pitfall accepted this as not-a-violation. **Per 2026-09-26 user tightening, this is now a violation** — every keyword sub-file must use `use super::*;`. Refactor: import the parent symbols you need instead of fully-qualified `core::xxx` paths.
 
-Some files like `core/src/reactive/use_async/struct.rs` deliberately
-skip `use super::*;` because the module defines its own trait and uses
-fully-qualified `core::...` paths. The file opens with a `//` comment
-explaining this. Audit script category 7 reports it; manually verify
-the comment before fixing.
+## 7a. ~~Direct `///` doc comment on `const.rs` / `static.rs` / `fn.rs` / `trait.rs` / `impl.rs` without `use super::*;` first~~ RETIRED 2026-09-26
 
-## 7a. Direct `///` doc comment on `const.rs` / `static.rs` / `fn.rs`
-    / `trait.rs` / `impl.rs` without `use super::*;` first — NOT a
-    violation
-
-Master pattern treats every keyword-only sub-file the same way
-`audit-pitfalls #5` already covers `enum.rs` / `struct.rs` /
-`type.rs`: when the file defines only items in its dedicated keyword
-(constants / statics / fns / traits / impls) and does not need any
-parent-module symbol, it may open with a `///` doc comment directly.
-A repo-wide grep for the first non-comment line across
-`example/src/**/const.rs` returns 26 files in master, none of which
-start with `use super::*;` — confirming the pattern is universal.
-
-The audit script category 7 used to misreport these. As of
-2026-08-28 it now matches by `basename` and skips every
-keyword-only sub-file (`const.rs` / `static.rs` / `fn.rs` /
-`enum.rs` / `struct.rs` / `trait.rs` / `impl.rs` / `type.rs`).
-When in doubt, manually confirm the file doesn't reference any
-parent-module symbol via the `use super::*;` chain before fixing.
+> Same retirement as §5. The previous exception that allowed keyword-only sub-files to open with `///` (instead of `use super::*;`) is **retired**. Per 2026-09-26 user tightening, every keyword sub-file MUST open with `use super::*;`, no exceptions. Audit check 23 (`scripts/verify_keyword_file_purity.py`) catches this uniformly.
 
 ## 7b. `mod r#async;` / `mod r#await;` / `mod r#try;` / `mod r#dyn;`
     in any mod.rs — NOT a violation
@@ -1316,17 +1276,18 @@ User 原话:
 
 This nuked the prior "master-exception" exemption (§14.4 master pattern `// These tests live inline` comment as a marker). ALL inline `#[cfg(test)] mod tests` blocks are forbidden across the whole codebase. Tests for `pub` items move to `<crate>/tests/<feature>/fn.rs`; tests for `pub(crate)` items are deleted.
 
-### Round 3 (2026-09-12): §14.5 — no comments in tests
+### Round 3 (2026-09-12, strengthened 2026-09-26): §14.5 — no comments in tests
 
 User 原话:
 > "单测不需要任何注释,删除所有单测注释"
+> "单侧文件禁止出现注释,这是强要求,更新到脚本,//和//!都不能有"
 
-Tests have zero comments — no file-level `//!`, no per-fn `///`, no fn-body inline `//`. Test fn name = documentation; assertion messages = expected behavior.
+Tests have ZERO comments — no file-level `//!`, no per-fn `///`, no fn-body inline `//`. Test fn name = documentation; assertion messages = expected behavior. **All three comment forms are banned with no exceptions.**
 
-### Audit rule 16 implementation + false-positive traps
+### Audit rule 14 implementation (deprecated, replaced by rule 28)
 
 ```bash
-# Real implementation in audit_rust_standards.py (rule 16):
+# Old implementation (audit_rust_standards.py rule 14 — DEPRECATED):
 for f in $(git diff --name-only origin/master HEAD -- "*.rs" 2>/dev/null | grep -E "/tests/.*\\.rs$"); do
   hits=$(grep -nE "^\s*//[^/]" "$f" 2>/dev/null)
   if [ -n "$hits" ]; then
@@ -1338,10 +1299,19 @@ done
 
 The regex `^\s*//[^/]` matches:
 - `// normal comment` — FAIL (correct)
-- `//path/with/slashes` — FAIL (false positive — a `//` URL fragment in a comment or string would also match, but tests shouldn't contain URL fragments anyway)
-- `/// doc comment` — does NOT match (good — the regex requires `[^/]` after `//`, so `///` becomes `//` + `/` = second char is `/`, doesn't match)
+- `//! inner doc` — FAIL (next char `!` is not `/`) ✓
+- `/// outer doc` — does NOT match (next char IS `/`, `///` excluded — **WRONG per round 3**)
 
-Note: rule 16 does NOT separately detect `///` or `//!` — they fall under the same rule because the pattern requires the next char after `//` to NOT be `/`. So `///` and `//!` are excluded (good — they're handled separately by rule 5/§14.4).
+### Audit rule 28 (new comprehensive check)
+
+```bash
+# New: verify_no_test_comments.py catches all three comment forms.
+python3 ~/.hermes/skills/rust-standards/scripts/verify_no_test_comments.py <repo>
+```
+
+Regex `^\s*(//|///|//!)` matches **all three** comment prefixes unconditionally. Each violation reported as `<file>:<line>: forbidden comment in test file (§14.5): <text>`. Exits 0 if clean, 1 if any violation.
+
+The old rule 14 is kept as a DEPRECATED redundant backstop that only catches `//` and `//!` (still useful for git-diff scoped PR review since rule 28 scans the whole tree). Rule 28 is the authoritative check.
 
 If rule 16 fires on a test file, the action is: **delete every comment line**. There are NO exemptions. Reformat test fn names if they're ambiguous; add `.clone()` to `assert_eq!` calls instead of explaining "we compare owned values". Use the assertion message parameter for any necessary clarification:
 
@@ -1736,3 +1706,291 @@ Reasons:
   `git diff origin/master..HEAD -- '*/tests/*/fn.rs'` first.
 
 **Reference**: `references/14-testing.md §14.7` for the full prose.
+
+## 44. §13.7 排序规则第四轮变更(2026-09-26,length+lex)
+
+`verify_dep_order.py` 在 2026-09-26 升级为第四轮规则:**本地 vs 三方分组,组内按 entry 完整长度升序 + 长度相同按 dep key 字典序**。前 3 轮规则版本:
+
+- 第一轮 (2026-09-14):块内 (key 长度, 字典序)
+- 第二轮 (2026-09-14):(len, lex) + workspace.dependencies alphabetic,无分组空行
+- 第三轮 (2026-09-14):本地 vs 三方分组 + 组内 alphabetic + 唯一空行在组边界
+- **第四轮 (current, 2026-09-26):本地 vs 三方分组 + 组内 (entry 完整长度, key 字典序) + 唯一空行在组边界**
+
+**用户原话**:「toml依赖导入需要严格遵守顺序,首先本地依赖是同一组,外部依赖是一组,不同组之间需要空行分割,同组之间按照完整的长度(含特性等字段)升序排序,一样的长度按照字典序升序」。
+
+**脚本实现要点**:
+
+- `expected_order_with_blank` 内:排序 key 从 `lambda kv: kv[0]`(纯字典序)改为 `lambda kv: (_entry_chars(kv[1]), kv[0])`。
+- `_entry_chars(raw_lines)`:把每个非空行 `.strip()`,用 `" ".join(...)` 拼起来,再 `re.sub(r"\s+", "", ...)` 去所有空白,返回 `len`。这样 `serde = { version = "1.0.229", features = ["derive"] }` 长度是 46,`toml = "0.9.12"` 长度是 14,与 tablo formatter(默认 `=` 两侧空格、4 空格缩进)无关。
+- 双向验证 fixture:compliant `demo-cli < demo-core < demo-engine < demo-macros, clap < serde < serde_json < tokio` 排列 = exit 0;violated 打散 = exit 1 且 actual/expected 反向可见。
+
+**euv 单仓实测结果**(2026-09-26,在第四轮规则下):
+
+| 文件 | 当前轮(第三轮 alphabetic)顺序 | 期望(第四轮 length+lex)顺序 |
+|---|---|---|
+| `euv/Cargo.toml [dependencies]` | `euv-core, euv-macros` 本地 → `alloc, console, js-sys, lombok, wasm, wasm-futures, web-sys` | `euv-core, euv-macros` 本地 → `js-sys, web-sys, wasm, lombok, alloc, wasm-futures, console` |
+| `euv/Cargo.toml [workspace.dependencies]` | 7 个本地 alphabetic → 27 个三方 alphabetic | 7 个本地按 path 长度排(`euv < euv-ui < euv-cli < euv-core < euv-engine < euv-macros < euv-example`)→ 三方按 entry 长度排(`log < toml < quote < chrono < ignore < js-sys < if-addrs < hyperlane < serde_json < lombok < proc-macro2 < color-output < hyperlane-cli < wasm-bindgen < alloc-no-stdlib < compare_version < serde-wasm-bindgen < wasm-bindgen-test < wasm-bindgen-futures < console < clap < serde < syn < qrcode < notify < tokio < web-sys`) |
+| `euv/cli/Cargo.toml [dependencies]` | 全三方 alphabetic | 全三方按 entry 长度排 |
+
+**为什么这个变更值得记录到 audit-pitfalls**:第三轮 → 第四轮的迁移是破坏性的,任何 euv / hyperlane / crates-dev / docs-pages 仓跑 `verify_dep_order.py` 都会大量 FAIL,**仓主需要在第四轮迁移前接受一次性大批量重排**(每个 dep 块的条目都按 entry 长度重排,涉及的 PR 数量级是一次重排)。不放在 audit-pitfalls.md 记录,未来 session 在 review 旧 PR 时会以为 `verify_dep_order.py` 是 bug。
+
+**注意**:workspace root 与单 crate root 行为差异。`is_local` 依赖 `[workspace] members` 列表解析;fixture 不写 `[workspace]` 时,本地组会被认为是空、整块当三方处理。真实仓上不会撞到这里(workspace.toml 总是带 `[workspace]` 段)。
+
+
+## 45. audit shell template wraps a `.py` script with `bash <script.py>` instead of `python3 <script.py>` — 2026-09-26 `verify_dep_order.py` 接入实测
+
+**Symptom**: Audit check 21 calls `verify_dep_order.py` and the wrapper hangs with `exit code = 127` and stderr `syntax error near unexpected token '('`.看上去像是 shell 报错,但实际上——
+
+**Root cause**: 在 audit check 21 的 `CHECKS.append` shell template 里写了 `bash "{{audit_script_dir}}/verify_dep_order.py" "{{target}}"`,把 Python 脚本喂给 bash 当 shell 脚本执行。bash 看到脚本里的中文双引号 docstring `"完整的长度..."` 立刻 syntax error,exit 127。
+
+**Wrong**:
+```bash
+bash "{{audit_script_dir}}/verify_dep_order.py" "{{target}}"
+```
+
+**Right**:
+```bash
+python3 "{{audit_script_dir}}/verify_dep_order.py" "{{target}}"
+```
+
+脚本头部已有 `#!/usr/bin/env python3` shebang,但 `bash <script.py>` 不读 shebang —— bash 永远把后缀是 `.py` 的文件也当 bash parse。**audit wrap 一个 Python 脚本必须显式 `python3 <script.py>`,不可省**。
+
+**Detection**:
+- audit 跑出 `exit 127` + stderr `syntax error near unexpected token` —— 100% 是 wrap 成 `bash *.py` 了
+- audit 跑出 `exit 2` 且找不到 toml —— 可能是 `cwd=` 不对 或 `find` 路径过滤问题(见 §46)
+
+**Verification**: 双向 fixture 自测 compliant→0 + violated→1,数据可见,exit 0/1,不是 127。
+
+## 46. `find -not -path '*/tmp/*'` 误过滤 `/tmp/...` 测试根 — 2026-09-26 `verify_dep_order.py` 接入实测
+
+**Symptom**: 接 audit check 21 双向 fixture 自测时,临时的 `/tmp/dep_order_test_*` 仓根被 `find` 跳过,`verify_dep_order.py` 报 `exit 2`(内部 `if not files: return 2`)。
+
+**Wrong**:
+```bash
+find str(root) -name Cargo.toml -not -path '*/target/*' -not -path '*/tmp/*'
+```
+
+`-not -path '*/tmp/*'` 匹配任何路径里出现 `/tmp/` —— 包括合法 `/tmp/dep_order_test_compliant/Cargo.toml`,整个测试根都被过滤掉。
+
+**Right**(命名空间粒度):
+```bash
+find str(root) -name Cargo.toml -not -path '*/target/*' -not -path '*/tmp/test_*'
+```
+
+`-path '*/tmp/test_*'` 只匹配 `tmp/test_xxx/...`(cc / crate-cli 的 test-helper fixture),不会误伤 `/tmp/<fixture-root>/...`。
+
+**两条规则**:
+1. 任何 verifier script 的 `find`/`walk`/glob 过滤,不要写 `*/tmp/*` 这种全名空间 broad 匹配
+2. 用 verifier 仓根做 fixture 测试时,fixture 路径不能用 verifier 不希望过滤的子串(`/tmp/`、`/target/`、`*/.cargo/registry/*`);否则过滤器把 fixture 自己也过滤掉,verifier 报"0 files",看起来像 verifier bug。
+
+## 47. verifier → audit wrapper 的 stdout 过滤与 exit-code 传递契约 — 2026-09-26 check 21 接入实测
+
+**Symptom**: 接入 verifier 到 audit 时,如果 verifier exit 0 也打印 status line(例如 `N files checked, 0 violations`),audit 把它当成 violation hit 显示,变成 false-fail。
+
+**契约**(audit 默认把任何非空 stdout 当 FAIL 看待,见 §43 + §35-B):
+
+```bash
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_<rule>.py" "{{target}}" \
+    | grep -v -E '^[0-9]+ files checked, 0 violations$'
+exit_code=${PIPESTATUS[0]}
+test "$exit_code" -ne 0 && echo "FAIL: verify_<rule>.py exited $exit_code"
+exit "$exit_code"
+```
+
+三个关键点:
+
+1. `grep -v -E` 过滤**只是**成功路径尾随行(`0 violations`),让违规文件路径 + actual/expected diff 原样抛给 audit 显示
+2. `${PIPESTATUS[0]}` 捕获 verifier 的 exit code(不是 `grep` 的,也不是 `head` 的)
+3. `exit "$exit_code"` 把 verifier 的真实 exit 透传给 audit runner(`run_check` 数 `r.stdout` 但 `audit_rust_standards.main` 看最终 subprocess 的 returncode)
+
+**常见错误**:
+- 用 `bash -c "...; echo PASS"` 而 verifier 失败时`; echo "FAIL: ..."` 替换 stdout 但 exit 0 —— audit 看 stdout 知道是 fail,但 exit 0 让 main 当 PASS
+- 直接 `python3 verify.py 2>/dev/null` 吃掉 verifier 的真实错误日志
+- 把 `tail -1` 加在 pipeline 末尾覆盖了真实 exit code
+
+**Detection**: 接入任何 verifier 到 audit 后,**必须双向 fixture 自测**:
+- compliant 仓:audit check N 输出 PASS,suite 计数 +1(通过)
+- violated 仓:audit check N 输出 FAIL,suite 计数不增;FAIL message 包含实际违规文件的行号
+
+然后跑完整 audit `python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo>` 看 `SUMMARY: N/M PASS`,N = 通过的项数,M = 总项数。
+
+## 48. verifier 与 auto-fixer 必须共用一套 parse 逻辑(2026-09-26 fix_dep_order.py 接入实测)
+
+**Symptom**: verify 报 "实际顺序 = [...], 期望顺序 = [...],但我手动排好的 fix 写盘后,fix 再跑一次 verifier 报 FAIL(actual vs expected 不一致)——明明 verify 与 fix 用的是同一份 round 4 规则。
+
+**Root cause**: verifier 自己一份 parse 逻辑(Cargo.toml → 4 类块 → entry list),fix 又写一份 parse 逻辑(从 ASCII 文本重建 block);当 entry 跨多行(tokio features `[ ... ]` 跨 6-10 行)或 entry 内部有 bracket(`notify = { ... features = [ ... ] }`),两套 parsers 对"一个 entry 的边界"看法不同 → fix 用它自己的 parser 决定"完成 entry 边界"的位置,写出 fix 内容但 verifier 用它的 parser 重新 tokenize 后认为多/少了 entry → mismatch。
+
+**Prevention — verifier 模块必须 expose parse API + auto-fixer re-import**:
+
+```python
+# scripts/fix_dep_order.py 头部
+import importlib.util
+VERIFY_SCRIPT = Path(__file__).resolve().parent / "verify_dep_order.py"
+_SPEC = importlib.util.spec_from_file_location("verify_dep_order", VERIFY_SCRIPT)
+assert _SPEC is not None and _SPEC.loader is not None
+_verify = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_verify)
+
+KEY_PATTERN = _verify.KEY_PATTERN
+parse_block = _verify.parse_block
+_entry_chars = _verify._entry_chars
+find_cargo_tomls = _verify.find_cargo_tomls
+read_local_crate_names = _verify.read_local_crate_names
+```
+
+**之后 fix 脚本仅在下列点偏离 verifier**:
+- 排序逻辑:verifier 排序后用作 expected,fix 排序后用作 fix 后 actual
+- entry 文本提取与重组:verifier 把 block 切成 (key, lines) tuples 后丢掉 lines;fix 拿到 tuples 后重排 lines,按 round 4 规则组装 block 文本
+
+**这套规则适用于任何 structural-config 校验**:
+- `verify_*.py` 提供 `parse_*` / `expected_*` 函数
+- `fix_*.py` import `verify_*.py` 的函数,只做"重排 + 重组"
+- 任何"verifier 与 rewriter 各自实现一遍 parse"的代码 = review reject,合并到一个 parser
+
+**Detection**: fix 跑完后再跑 verify,应 exit 0;循环 `fix && verify && fix && verify` 第二次必须 no-op(幂等)。若不幂等 → 两套 parsers 分歧,立即合并到一个 verifier 模块。
+
+## 50. Long rust-refactor sessions: commit incrementally or worktree gets auto-pruned and 6 turns of work vanish (2026-09-26)
+
+**Symptom**: A session that does 6+ turns of cross-cutting Rust refactor (Request/Response API redesign, parser module split, field flatten, etc.) on a `git worktree` branch can lose **all uncommitted work** if:
+
+- The user follows the "user owns merge decisions" rule and the agent never `git commit`s during the refactor (defers to user at end)
+- Another agent run on the same machine does `git worktree prune` on a parent shell, or the `.worktrees/<name>` directory is wiped by cleanup/session tooling
+- The branch's HEAD still points at the base commit because nothing was committed
+
+`git fsck --unreachable --no-reflogs` returns 0 unreachable commits and `git reflog --all` shows the worktree path's HEAD reset to base. **The refactor is gone**, not recoverable from git.
+
+**Concrete loss** (this session, refactor of `hyperlane-type::Request`):
+- 9 files modified across 6 turns (~1500 LOC)
+- 0 commits made during refactor (deferred per "user owns merge decisions")
+- Worktree directory disappeared between sessions
+- Branch `refactor/request-api-align-core` still at `499ebb5` (base); no new commits
+- 0 unreachable blobs / unreachable commits — reflog cleared
+
+**Rule** (durable lesson for any future rust-refactor session):
+
+1. **After every completed refactor slice** (each coherent change set: "parser module split", "host field removal", "headers VecDeque flatten", etc.) run:
+   ```bash
+   git add <files>
+   git commit -m "refactor(<scope>): <slice-name>
+
+   <what changed + why>
+
+   Co-authored-by: agent"
+   ```
+   Push or not — doesn't matter; the commit is the recovery point.
+
+2. **If the user really wants one squashed PR at end**, at minimum `git stash` after each slice:
+   ```bash
+   git stash push -u -m "<slice-name>" -- <files>
+   git worktree add .worktrees/<refactor> <branch>
+   cd .worktrees/<refactor>
+   git stash pop
+   ```
+   The stash survives worktree prune because stash reflog is global, not per-worktree.
+
+3. **Verify recovery before continuing**:
+   ```bash
+   git -C <worktree-path> rev-parse HEAD  # should match base + N
+   git -C <worktree-path> status --short  # should be empty between commits
+   ```
+   If HEAD is at base and `git status --short` is empty after slice N, the slice didn't commit — re-commit or stash before next turn.
+
+**Why this is hard rule, not optional**:
+
+- User's "user owns merge decisions" rule is about the **PR**, not the local commit granularity. `git commit` on a feature branch (not master) doesn't violate that rule — user still reviews + merges the squashed / rebased PR. Local commits are safety checkpoints.
+- A refactor touching 5+ files is structurally a 5+ slice task. Bundling all into one commit at end means one bash slip / worktree prune / git reset wipes the entire session.
+- Re-doing 6 turns of refactor from memory is impossible — specific patch blocks, exact code, exact Lombok attribute syntax can't be re-derived.
+
+**Recovery if the disaster already happened**:
+
+- Check `git fsck --unreachable --no-reflogs` first — if any unreachable blobs/commits exist, recover via `git stash list` + `git show <unreachable-sha>:<path>`.
+- Check the agent's session_search (compacted history may have file contents).
+- Otherwise: stop, tell the user honestly what was lost, ask if they have a backup or want to restart from scratch with the incremental-commit rule applied.
+
+**When this rule does NOT apply**:
+
+- Single-file edits / 1-2 turn tasks — `git commit` after each is still cheap insurance, but the disaster window is narrow enough that worktree prune is unlikely to land.
+- Worktree-free workflows (editing directly on master or single non-worktree branch) — `git commit` is still preferable but no worktree-prune failure mode exists.
+- Truly atomic single-commit tasks (rename one symbol across 30 files in one commit) — one commit at the end is fine, because the change is atomic and a stale worktree's HEAD still has the right files.
+
+## 49. Check 22 (§17) — `verify_ci_no_bump.py` 接入 audit 实战 (2026-09-26)
+
+新增 §17:CI 流水线不允许 bump / 写 `version =` 行。配套 verifier `scripts/verify_ci_no_bump.py` 在三仓( ctares / hyperlane / euv )首次接入时的实测 pitfall 列表。
+
+### 49.1 — `python3 -c` 内嵌 regex 跨多层 shell + python 转义(2026-09-26 实测)
+
+CI 工作流的 inline python 脚本(如 `docs/Cargo.toml` version 镜像脚本)会把 regex `version\s*=\s*\"` 通过 bash 单/双引号 → python `r'...'` 再传到 `re.sub`。每一层都可能再加一层 backslash escape:
+
+```bash
+# 第 1 层:原始 regex 文本
+version\s*=\s*"
+
+# 第 2 层:bash 双引号包裹,无转义
+"import re; re.sub(r'version\s*=\s*\"[^\"]*\"', ...)"
+
+# 第 3 层:bash 单引号包裹,无转义
+'import re; re.sub(r"version\s*=\s*\"[^\"]*\"", ...)'
+
+# 第 4 层(罕见):heredoc + bash escape,会被加倍
+<<EOF
+VERSION="\$VERSION" python3 -c "...re.sub(r'^(version\\s*=\\s*\\"[^\\"]*\\")',...)"
+EOF
+# 在 yml 文件中实际写入的字节是:
+# version\\s*=\\s*\\"  ← 两个反斜杠
+# 甚至 version\\\\s*=\\\\s*=\\\\"  ← 四个反斜杠(多层嵌套)
+```
+
+**正确做法**:verifier 的 `PYTHON_VERSION_LITERAL_RE` 不要尝试精确匹配 `\s` `*` `\"` 等子串;改用宽松模式 `version\s*[^\"']*?\s*=\s*[^\"']*?[\"']`,接受 0-多个反斜杠 + 任意非引号字符 + 最终引号。配合上游 python-write-keyword(`write_text` / `re.sub(` / `.replace(` 等)的存在,误报率几乎为 0。
+
+### 49.2 — allowlist marker 必须 tightly-coupled(2026-09-26 实测)
+
+verifier 支持 `# ci-allow-version-write: <reason>` 注释豁免某行违规。最初设计允许 marker 在 violation 上方 6 行内匹配,实测中:
+
+- 6 个 `echo` 之后接 marker 接 python invocation 的 fixture 里,marker 距 violation **正好 1 行**(第 13 行的 marker,第 14 行的 python)→ 仍被豁免。
+- 但若 marker 上方还有几行 echo(脚本扩展等),marker 距离 violation 变成 2+ 行 → 仍被豁免(误报 PASS)。
+
+**正确做法**:把 marker 距离缩到「紧挨 violation 的上一行」(`lines[lineno - 2]` 即 0-indexed `lineno - 2`)。任何 2 行及以上的间隔都不豁免,迫使 author 把 marker 紧贴 violation 写,不易漏看。
+
+### 49.3 — `cc` / `crate` 是同一个工具的两种 binary name(2026-09-26 实测)
+
+crate-cli 在不同发布版本里 binary name 是 `cc`(老版本)或 `crate`(新版本,per `crate-cli v0.2.5` cargo install list 显示 `cc`,但 `0.2.8` 已改)。**正确做法**:verifier 用 `\b(?:cc|crate)\s+bump\b` 同时匹配两种 binary,不要硬编码。
+
+### 49.4 — `sed -i` 与 read-only `sed -E` 必须区分(2026-09-26 实测)
+
+CI workflow 里有两类 `sed` 调用:
+
+```bash
+# 读:VERSION=$(grep ... | sed -E 's/^version = "([^"]+)".*/\1/')  # 提取,允许
+# 写:sed -i 's/version = ".*"/version = "9.9.9"/' Cargo.toml        # 改写,禁止
+# 写:sed ... > Cargo.toml                                           # 改写,禁止
+# 写:sed ... | tee Cargo.toml                                       # 改写,禁止
+```
+
+**正确做法**:`SED_VERSION_WRITE_RE` 只匹配 `sed -i` / `perl -pi` / `> file` / `| tee file` 这四种写盘模式,不匹配 `$()` 替换里的只读 sed。配上 `SED_VERSION_LITERAL_RE = \bversion\b`,只在「写盘 + 涉及 version」两个条件都满足时违规。
+
+### 49.5 — euv docs/Cargo.toml mirror script: removed, version now human-maintained (2026-09-26)
+
+`euv-dev/euv/.github/workflows/rust.yml` originally had an inline
+python step mirroring root's `version =` into the non-workspace-member
+`docs/Cargo.toml`:
+
+```bash
+VERSION="$VERSION" python3 -c "import re,pathlib,os; p=pathlib.Path('docs/Cargo.toml'); t=p.read_text(); p.write_text(re.sub(r'^(version\\s*=\\s*\\\"[^\\\"]*\\\")', lambda m: m.group(1) + os.environ.get('VERSION','0.0.0') + m.group(2), t, count=1, flags=re.M))"
+```
+
+The user deleted this script in preference of having authors update
+`docs/Cargo.toml` by hand in the same PR that bumps root. After
+deletion the euv workflow has zero `version =` writes and verifier
+returns exit 0 cleanly. Trade-off documented in
+`rust-workspace-release` "Non-workspace-member manifests" sub-section.
+
+The allowlist-marker path (`# ci-allow-version-write: docs mirror`)
+was the alternative; the user rejected it because it required adding a
+comment to the workflow, which conflicted with the same user's "no
+explanatory comments in CI" rule (`rust-workspace-release` "Keep CI
+workflows free of explanatory comments" sub-section).
+
+If a new repo shows the same shape, the decision is repo-local — ask
+the user which side of the trade-off they prefer; do not default.
+
