@@ -119,19 +119,64 @@ def _is_format_macro(line: str) -> bool:
     for m in re.finditer(r"\b(\w+)!\s*\(", line):
         macro = m.group(1)
         if macro in FORMAT_MACROS:
-            # Check if a string literal appears in the macro's
-            # arg list before any non-string arg
             after = line[m.end():]
-            # Find first string literal position
             str_match = STRING_LITERAL.search(after)
             if not str_match:
                 continue
-            # Find first `,` position
             comma_match = re.search(r",", after)
+            if macro in {"write", "writeln"}:
+                # write!/writeln! take the writer as the first arg, so the
+                # format string is the second arg (after the first comma).
+                if comma_match is None:
+                    continue
+                second_comma = re.search(r",", after[comma_match.end():])
+                if str_match.start() > comma_match.end() and (
+                    second_comma is None
+                    or str_match.start() < comma_match.end() + second_comma.start()
+                ):
+                    return True
+                continue
             if comma_match is None or str_match.start() < comma_match.start():
                 # Format string is the first arg — exempt
                 return True
     return False
+
+
+def _exempt_format_string_lines(lines: list[str]) -> set[int]:
+    """Return 1-based line numbers holding the format string of a
+    multi-line format-macro call (rustfmt puts each arg on its own
+    line, so the format string may not share a line with the macro).
+
+    For write!/writeln! the format string is the second arg (writer
+    first); for all other format macros it is the first arg.  Arg
+    counting assumes one arg per line, which is how rustfmt wraps."""
+    exempt: set[int] = set()
+    macro_re = re.compile(r"\b(\w+)!\s*\(")
+    for idx, line in enumerate(lines):
+        for m in macro_re.finditer(line):
+            macro = m.group(1)
+            if macro not in FORMAT_MACROS:
+                continue
+            after = line[m.end():]
+            if STRING_LITERAL.search(after):
+                continue
+            depth = 1 + after.count("(") - after.count(")")
+            if depth <= 0:
+                continue
+            target_arg = 1 if macro in {"write", "writeln"} else 0
+            arg_index = 1 if after.strip() else 0
+            j = idx + 1
+            while j < len(lines) and depth > 0:
+                current = lines[j]
+                depth += current.count("(") - current.count(")")
+                content = current.strip()
+                if content:
+                    if arg_index == target_arg and STRING_LITERAL.search(current):
+                        exempt.add(j + 1)
+                        break
+                    arg_index += 1
+                j += 1
+    return exempt
 
 
 def audit_one(path: Path) -> list[str]:
@@ -139,8 +184,10 @@ def audit_one(path: Path) -> list[str]:
         text = path.read_text()
     except (OSError, UnicodeDecodeError):
         return []
+    lines = text.splitlines()
+    exempt_lines = _exempt_format_string_lines(lines)
     violations: list[str] = []
-    for i, line in enumerate(text.splitlines(), start=1):
+    for i, line in enumerate(lines, start=1):
         # Skip const.rs (the canonical home)
         if path.name == "const.rs":
             continue
@@ -149,6 +196,8 @@ def audit_one(path: Path) -> list[str]:
             continue
         # Skip format-macro format strings
         if _is_format_macro(line):
+            continue
+        if i in exempt_lines:
             continue
         # Find string literals on this line
         for m in STRING_LITERAL.finditer(line):

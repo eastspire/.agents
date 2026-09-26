@@ -1050,6 +1050,53 @@ if [ "$exit_code" -ne 0 ]; then
 fi
 exit "$exit_code"
 '''),
+
+    # check 38 — §6.5 `use ... as ...` import rename forbidden
+    # (2026-09-26 user directive).  User original: "类型导入禁止使用
+    # as 重命名...如果类型冲突才在使用的地方使用最短可区分的命名
+    # 空间".  Any `as <ident>` inside a use statement (any visibility)
+    # is a violation; conflicts are resolved by qualifying at the
+    # usage site with the shortest distinguishable namespace
+    # (e.g. `fmt::Result`, `io::Error`), never by aliasing the import.
+    #
+    # Companion script: verify_no_import_rename.py tracks use
+    # statements including grouped multi-line blocks.
+    ('no `as` rename in use statements (§6.5)', '''
+# Per rust-standards §6.5 (2026-09-26, user 原话): "类型导入禁止使用
+# as 重命名,如果类型冲突才在使用的地方使用最短可区分的命名空间"
+# Companion script: verify_no_import_rename.py.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_import_rename.py" "{{target}}" \
+    | grep -v -E '^=== no-import-rename:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_import_rename.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 38 — §17.3 / §17.12 direct `self.field` access forbidden
+    # (2026-09-26 user directive).  User original: "禁止通过self直接
+    # 操作字段,使用Data宏的get和set".  All production field reads /
+    # writes go through Data-macro (or §17.11 hand-written) accessors.
+    # Legal self.field positions: accessor bodies (get_*/set_*/
+    # try_get_*), Debug/Display impl blocks, #[cfg(test)] / tests/.
+    #
+    # Companion script: verify_no_self_field_access.py tracks fn /
+    # trait-impl / cfg(test) ranges via brace counting.
+    ('no direct `self.field` access (§17.3 / §17.12)', '''
+# Per rust-standards §17.3 / §17.12 (2026-09-26, user 原话): "禁止通过
+# self直接操作字段,使用Data宏的get和set"
+# Companion script: verify_no_self_field_access.py.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_self_field_access.py" "{{target}}" \
+    | grep -v -E '^=== no-self-field-access:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_self_field_access.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
 ]
 
 

@@ -34,8 +34,25 @@ Reuses parser logic from doc_comment_audit.py but is a pure verifier
         ///
         /// explanation
       Specifically: each section header is preceded by `///` (no `///`
-      block fragments), arguments list is one `- \`Type\` - description`
-      per line, returns list is one `- \`Type\`: description` per line.
+      block fragments), arguments list is one `- `Type` - description`
+      per line, returns list is one `- `Type`: description` per line.
+
+  Layer 4 — Signature type match (2026-09-26 user strengthening, "需要
+      针对文档注释加强校验").  For `# Arguments`, each list item's
+      backtick-quoted type MUST equal the corresponding parameter's
+      type-in-signature (the type literal appearing in `fn foo(p: T)`,
+      including leading `&` and inline `` ` ``).  For `# Returns`, the
+      single backtick-quoted type MUST equal the return type signature.
+      This prevents the historical drift where authors wrote
+      `- `Argument` - description` when the signature was actually
+      `- `InternalAttribute` - description`.  The brief description
+      lines (prose) preceding the sections must be English (the rule
+      was always implicit per §2.7); this is not separately checked
+      here because prose-language detection is outside the verifier's
+      scope, but the structural requirement (prose lines MUST precede
+      the first `#` section header) IS enforced: a doc block whose
+      first non-blank `///` line is `/// # Arguments` (no prose
+      before) is flagged.
 
 Exits 0 if clean, 1 if any violation.  Lists one violation per line.
 
@@ -111,9 +128,15 @@ def _find_fn_locs(lines: list[str]) -> list[int]:
 
 def _extract_doc_block(lines: list[str], below_idx: int) -> tuple[int, int] | None:
     """Return (start, end) inclusive for the `///` block ending just
-    before `below_idx` (0-based line indices)."""
+    before `below_idx` (0-based line indices).
+
+    Attribute lines (`#[...]`) between the doc block and the fn are
+    skipped, since idiomatic Rust places doc comments above attributes.
+    """
     j = below_idx - 1
-    while j >= 0 and lines[j].strip() == "":
+    while j >= 0 and (
+        lines[j].strip() == "" or lines[j].lstrip().startswith("#[")
+    ):
         j -= 1
     if j < 0 or not lines[j].lstrip().startswith("///"):
         return None
@@ -124,8 +147,34 @@ def _extract_doc_block(lines: list[str], below_idx: int) -> tuple[int, int] | No
     return start, end
 
 
-def _fn_signature_full(lines: list[str], fn_idx: int) -> tuple[str, list[str], str]:
-    """Return (name, non_self_params, return_type)."""
+def _split_top_commas(params_str: str) -> list[str]:
+    depth = 0
+    parts: list[str] = []
+    last = 0
+    for i, ch in enumerate(params_str):
+        if ch in "([{<":
+            depth += 1
+        elif ch in ")]}>":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(params_str[last:i])
+            last = i + 1
+    parts.append(params_str[last:])
+    return parts
+
+
+def _fn_signature_types(lines: list[str], fn_idx: int) -> tuple[str, list[str], str]:
+    """Return (name, raw_param_types, raw_return_type).
+
+    `raw_param_types` is the list of bare-type strings for every
+    non-self parameter, exactly as written in the signature
+    (whitespace-trimmed, but `&` and `` ` `` preserved).  This is
+    what Layer 4 matches against the doc-comment's backtick-quoted
+    type literal.
+
+    `raw_return_type` is the bare return-type string for non-()/
+    Self/no-return cases, with `&` and `` ` `` preserved.
+    """
     ln = lines[fn_idx]
     m = _FN_PATTERN.match(ln)
     if not m:
@@ -181,47 +230,75 @@ def _fn_signature_full(lines: list[str], fn_idx: int) -> tuple[str, list[str], s
         k += 1
     params_str = sig[paren_start2 + 1:k - 1]
     params_list = [p.strip() for p in _split_top_commas(params_str)]
-    non_self = [p for p in params_list if p not in {"", "&self", "&mut self", "self", "mut self"}]
+    raw_types: list[str] = []
+    for p in params_list:
+        if p in {"", "&self", "&mut self", "self", "mut self"}:
+            continue
+        colon = p.find(":")
+        if colon == -1:
+            raw_types.append(p.strip())
+        else:
+            raw_types.append(p[colon + 1:].strip())
     after = sig[k:]
     m2 = re.search(r"->\s*([^{=;]+)", after)
     ret_str = ""
     if m2:
         ret_raw = m2.group(1).strip().rstrip(",")
         ret_raw = re.sub(r"\{.*$", "", ret_raw, flags=re.DOTALL).strip()
-        ret_clean = ret_raw.replace("`", "").replace("&", "").strip()
-        ret_clean = ret_clean.split("where")[0].split(";")[0].strip()
+        ret_clean = ret_raw.split("where")[0].split(";")[0].strip()
         ret_str = ret_clean
         if ret_clean in ("()", "Self", ""):
             ret_str = ""
-    return name, non_self, ret_str
+    return name, raw_types, ret_str
 
 
-def _split_top_commas(params_str: str) -> list[str]:
-    depth = 0
-    parts: list[str] = []
-    last = 0
-    for i, ch in enumerate(params_str):
-        if ch in "([{<":
-            depth += 1
-        elif ch in ")]}>":
-            depth -= 1
-        elif ch == "," and depth == 0:
-            parts.append(params_str[last:i])
-            last = i + 1
-    parts.append(params_str[last:])
-    return parts
+def _fn_signature_full_legacy(lines: list[str], fn_idx: int) -> tuple[str, list[str], str]:
+    """Legacy wrapper kept for Layers 1/2/3 — strips `&` / `` ` `` /
+    whitespace from types.  Layer 4 uses `_fn_signature_types`
+    directly instead so it can compare against the raw signature."""
+    name, raw_types, ret_str = _fn_signature_types(lines, fn_idx)
+    norm_types = [t.replace("`", "").replace("&", "").strip() for t in raw_types]
+    ret_norm = ret_str.replace("`", "").replace("&", "").strip()
+    if ret_norm in ("()", "Self", ""):
+        ret_norm = ""
+    return name, norm_types, ret_norm
 
 
 def _format_arg_line(s: str) -> bool:
-    """Per §2.2: arg list is `- \`Type\` - description`.  Each line
+    """Per §2.2: arg list is `- `Type` - description`.  Each line
     must match `^/// - `[^`]+` - .+`."""
     return bool(re.match(r"^/// - `[^`]+` - .+", s))
 
 
 def _format_return_line(s: str) -> bool:
-    """Per §2.2: returns is `- \`Type\`: description`.  Each line must
-    match `^/// - `[^`]+`: .+`."""
-    return bool(re.match(r"^/// - `[^`]+`: .+", s))
+    """Per §2.2 (2026-09-26 user strengthening): returns list is
+    either `- `Type` - description` (dash form, per user's `eq`
+    example, where the separator is ` - ` after the type) or
+    `- `Type`: description` (colon form, per user's
+    `try_get_internal_attribute` example, where the separator is
+    `: ` after the type — no space between the closing backtick
+    and the colon).  Both separators are accepted.  Each line must
+    match `^/// - `[^`]+` ?(-|:) .+`."""
+    return bool(re.match(r"^/// - `[^`]+` ?(-|:) .+", s))
+
+
+def _has_prose_before_first_section(doc_text: str) -> bool:
+    """Layer 4 sub-check (2026-09-26 user strengthening): the doc
+    block must contain at least one English-prose `///` line BEFORE
+    the first `/// # Arguments` (or other `/// #`) section header.
+    A doc block that opens with `/// # Arguments` and no prose
+    before it fails this check.
+
+    Prose = a `///` line that is neither empty nor a section
+    header (`# XXX`).
+    """
+    for raw in doc_text.splitlines():
+        s = raw.strip()
+        if s.startswith("/// #"):
+            return False
+        if s.startswith("///") and s not in {"///", "///!"}:
+            return True
+    return False
 
 
 def audit_one(path: Path) -> list[str]:
@@ -234,7 +311,6 @@ def audit_one(path: Path) -> list[str]:
     test_regions = _scan_test_regions(lines)
     violations: list[str] = []
 
-    # Layer 1 — bare fn.
     for fn_idx in fn_locs:
         if fn_idx in test_regions:
             continue
@@ -245,27 +321,31 @@ def audit_one(path: Path) -> list[str]:
                 f"{path}:{fn_idx + 1}: fn `{name}` missing `///` doc comment (§2.1)"
             )
             continue
-        # Layer 2 — section completeness.
         doc_start, doc_end = doc
         doc_text = "\n".join(lines[doc_start:doc_end + 1])
-        name, non_self, ret_str = _fn_signature_full(lines, fn_idx)
-        # Strict section header check: `/// # Arguments` (possibly trailing ws).
-        has_args = bool(re.search(r"^///\s*#\s*Arguments\s*$", doc_text, re.MULTILINE))
-        has_returns = bool(re.search(r"^///\s*#\s*Returns\s*$", doc_text, re.MULTILINE))
-        if non_self and not has_args:
+        name, raw_param_types, raw_ret_type = _fn_signature_types(lines, fn_idx)
+        _, norm_param_types, norm_ret_type = _fn_signature_full_legacy(lines, fn_idx)
+
+        has_args = bool(re.search(r"^\s*///\s*#\s*Arguments\s*$", doc_text, re.MULTILINE))
+        has_returns = bool(re.search(r"^\s*///\s*#\s*Returns\s*$", doc_text, re.MULTILINE))
+
+        # Layer 2 — section completeness (presence checks).
+        if norm_param_types and not has_args:
             violations.append(
                 f"{path}:{fn_idx + 1}: fn `{name}` has non-self params but "
                 f"missing `# Arguments` section (§2.2)"
             )
-        if ret_str and not has_returns:
+        if norm_ret_type and not has_returns:
             violations.append(
                 f"{path}:{fn_idx + 1}: fn `{name}` returns non-() but "
                 f"missing `# Returns` section (§2.2)"
             )
 
         # Layer 3 — format inside sections.
+        # Layer 4 — signature type match (drives off the same scan).
         in_args = False
         in_returns = False
+        seen_arg_types: list[str] = []
         for j in range(doc_start, doc_end + 1):
             s = lines[j].strip()
             if s.startswith("/// # Arguments"):
@@ -283,12 +363,74 @@ def audit_one(path: Path) -> list[str]:
                         f"{path}:{j + 1}: `# Arguments` line format violation "
                         f"(must be `- `Type` - description`): {s!r}"
                     )
+                    continue
+                # Layer 4 — extract backtick-quoted type from this
+                # `- `Type` - description` line and compare against
+                # the raw signature type for the corresponding
+                # parameter.
+                m_t = re.match(r"^/// - `([^`]+)` - ", s)
+                if m_t:
+                    doc_type = m_t.group(1).strip()
+                    seen_arg_types.append(doc_type)
             if in_returns and s.startswith("/// -"):
                 if not _format_return_line(s):
                     violations.append(
                         f"{path}:{j + 1}: `# Returns` line format violation "
-                        f"(must be `- `Type`: description`): {s!r}"
+                        f"(must be `- `Type` - description` or `- `Type`: description`): {s!r}"
                     )
+                    continue
+                # Layer 4 — extract backtick-quoted return type and
+                # compare against the raw signature return type.
+                # Match either separator: `- `T` - desc` or
+                # `- `T`: desc` (note: colon form has NO space
+                # between the closing backtick and the colon).
+                m_t = re.match(r"^/// - `([^`]+)` ?(-|:) ", s)
+                if m_t and raw_ret_type:
+                    doc_type = m_t.group(1).strip()
+                    sig_type = raw_ret_type.strip()
+                    if doc_type != sig_type:
+                        violations.append(
+                            f"{path}:{j + 1}: `# Returns` type literal "
+                            f"`{doc_type}` does not match fn signature return "
+                            f"type `{sig_type}` (§2.2 Layer 4)"
+                        )
+
+        # Layer 4 (cont.) — every seen arg type must appear in the
+        # raw signature param types (set comparison; order-insensitive
+        # since the signature is the source of truth, not the doc).
+        if seen_arg_types:
+            sig_type_set = {t.strip() for t in raw_param_types}
+            for doc_type in seen_arg_types:
+                if doc_type not in sig_type_set:
+                    violations.append(
+                        f"{path}:{fn_idx + 1}: fn `{name}` `# Arguments` type "
+                        f"literal `{doc_type}` does not match any parameter "
+                        f"type in the signature `{raw_param_types}` "
+                        f"(§2.2 Layer 4)"
+                    )
+            # Also flag missing args: every distinct signature type
+            # must appear at least once in the doc block (set
+            # semantics — `fn f(a: u32, b: u32)` requires only one
+            # `- `u32` - ...` line in the doc, not two).
+            sig_type_seen = {t for t in seen_arg_types if t in sig_type_set}
+            missing = sig_type_set - sig_type_seen
+            if missing:
+                violations.append(
+                    f"{path}:{fn_idx + 1}: fn `{name}` `# Arguments` does not "
+                    f"cover all signature types; missing: {sorted(missing)} "
+                    f"(signature has `{raw_param_types}`, doc has "
+                    f"`{seen_arg_types}`) (§2.2 Layer 4)"
+                )
+
+        # Layer 4 sub-check — prose before first section.
+        if has_args or has_returns:
+            if not _has_prose_before_first_section(doc_text):
+                violations.append(
+                    f"{path}:{fn_idx + 1}: fn `{name}` doc comment has no "
+                    f"prose `///` line before first `#` section header; "
+                    f"brief description must precede `# Arguments` / "
+                    f"`# Returns` (§2.2)"
+                )
     return violations
 
 
