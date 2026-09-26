@@ -28,7 +28,7 @@ metadata:
 
 Use this skill whenever you:
 
-- Edit any `pub c_xxx { ... }` block in `ui/src/style/class/fn.rs` (the 358-class registry).
+- Edit any `pub c_xxx { ... }` block in `ui/src/style/class/fn.rs` (the class registry;grep -cE "^\s+pub c_" 实地查看当前 count)。
 - Edit any `pub c_xxx(bg, fg)` parameterized class in the same file.
 - Edit `ui/src/style/var/fn.rs` (the `c_theme_light` / `c_theme_dark` token sets).
 - Edit a local `example/src/style/class/fn.rs` page-scoped class block.
@@ -37,7 +37,7 @@ Use this skill whenever you:
 
 Do not load for pure Rust logic, `html!` macro usage, `Signal` reactivity, euv-engine, hyperlane, or backend code — those have their own skills.
 
-- You edited any `pub c_xxx { ... }` block in `ui/src/style/class/fn.rs` (the 358-class registry).
+- You edited any `pub c_xxx { ... }` block in `ui/src/style/class/fn.rs` (the class registry;`wc -l` and `grep -cE "^\s+pub c_"` 看实际行数 / class 数)。
 - You edited any `pub c_xxx(bg, fg)` parameterized class in the same file.
 - You edited `ui/src/style/var/fn.rs` (the `c_theme_light` / `c_theme_dark` token sets).
 - You edited a local `example/src/style/class/fn.rs` page-scoped class block.
@@ -50,7 +50,7 @@ Do not load for pure Rust logic, `html!` macro usage, `Signal` reactivity, euv-e
 
 | File | Why it matters |
 | --- | --- |
-| `ui/src/style/class/fn.rs` | 358 global `pub c_xxx { ... }` blocks, all in one file. Every `display:` / `border:` / `padding:` / `var!(...)` lives here. |
+| `ui/src/style/class/fn.rs` | global `pub c_xxx { ... }` blocks, all in one file. Count by `grep -cE "^\s+pub c_" ui/src/style/class/fn.rs`. Every `display:` / `border:` / `padding:` / `var!(...)` lives here. |
 | `ui/src/style/var/fn.rs` | 2 vars! blocks: `c_theme_light` / `c_theme_dark`. Token names are referenced via `var!(name)` → `var(--name)`. |
 | `ui/src/component/<name>/view/fn.rs` | Each `euv_*` component's html! body — confirms which class the component actually applies (some components mix 2-3 classes). |
 | `example/src/page/<name>/view/fn.rs` | The demo page that renders the component. Default: 30/32 pages render once on `/<page>` route. |
@@ -421,7 +421,7 @@ iterations.
 
 ## Related skills
 
-- `euv-ui-standards` — full class catalogue + design tokens (358 classes; load for naming)
+- `euv-ui-standards` — full class catalogue + design tokens(`grep -cE "^\s+pub c_" ui/src/style/class/fn.rs` 看当前 count;load for naming)
 - `euv-standards` — macro syntax + 28 euv-ui components (load for component API)
 - `rust-pr-validation-checklist` — generic Rust PR checks (cargo build / test / fmt / clippy); does **not** cover the wasm-pack + Playwright steps here
 - `mobile-web-debugging` — for runtime browser-layer CSS issues not caught by class! edits (env()/safe-area etc.)

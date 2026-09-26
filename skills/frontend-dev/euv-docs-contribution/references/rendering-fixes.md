@@ -494,3 +494,137 @@ asyncio.run(main())
 ```
 
 If any assertion fails, fix and re-run before opening the PR.
+
+---
+
+## 8. Audit-first workflow when one page has a layout bug
+
+When the user reports a layout bug on a single page (e.g. "essay/09-19.html has a big H1↔H2 gap"), do not patch one CSS rule and stop. The bug class almost always hits every page sharing the same doc_layout — audit every page first, classify the gaps, then fix uniformly.
+
+### 8.1 Audit procedure (JS in browser console against a running SPA)
+
+`python3 -m http.server` the `dist/` (or `www/`) directory, open the page in the browser, then run a loop in `js(...)` that hashes to every route and reads `getBoundingClientRect()`:
+
+```javascript
+(function(){
+  const out = [];
+  const routes = [
+    '#/essay/public/2025/09-19.html',
+    '#/essay/public/2026/07-05.html',
+    '#/essay/public/2026/03-05.html',
+    '#/essay/public/2026/06-09.html',
+    // … every essay route listed in the sidebar's a.c_euv_sidebar_link
+  ];
+  for (const r of routes) {
+    location.hash = r;
+    // wait one tick for hashchange → router → re-render
+  }
+  // then iterate
+})();
+```
+
+A robust single-shot version — fire all routes in sequence with a small `setTimeout` between each, appending to a workspace array, then read it back once:
+
+```python
+# browser_exec — see the euv-docs-styling skill for the hash-routing workflow
+import time, json
+results = []
+for name, hash in targets:
+    js("window.location.hash = '" + hash + "'")
+    time.sleep(1.0)
+    js("window.scrollTo(0, 0)")
+    js("document.querySelector('main')?.scrollTo?.(0, 0)")
+    info = js("""(() => {
+      const h1 = document.querySelector('.c_docs_page_title');
+      const article = document.querySelector('article.md-body');
+      const firstBlock = article && (article.querySelector('h1, h2, h3, h4, p, ul, ol, blockquote, pre, table, img'));
+      const r = (el) => { const b = el && el.getBoundingClientRect(); return b ? {top:+b.top.toFixed(1), bottom:+b.bottom.toFixed(1)} : null; };
+      return JSON.stringify({
+        h1: h1 && h1.textContent, h1Rect: r(h1),
+        articleRect: r(article),
+        firstBlock: firstBlock && firstBlock.tagName,
+        firstBlockRect: r(firstBlock)
+      });
+    })()""")
+    d = json.loads(info)
+    if d.get('h1Rect') and d.get('firstBlockRect'):
+        gap = d['firstBlockRect']['top'] - d['h1Rect']['bottom']
+        results.append((name, gap, d['firstBlock'], d.get('h1')))
+for name, gap, tag, title in sorted(results, key=lambda x: -x[1]):
+    print(f"{name:<10} gap={gap:>6.1f}px  first={tag}  title={title!r}")
+```
+
+Sort by `gap` descending — the worst offenders are at the top. The tag column (`H2`, `P`, `BLOCKQUOTE`) tells you which margin rule is dominating: `H2` → `1.8em` margin-top (43.2px at 24px font-size); `P`/`BLOCKQUOTE` → `1em` margin-top (16px); `IMG` → no margin but `data-loaded` race (separate pitfall).
+
+### 8.2 The `space-between + min-height: 100vh` trap on short pages
+
+Override 4 (kill first-heading margin-top) addresses ONE cause. The OTHER cause is `c_euv_doc_content` itself:
+
+```css
+/* in ui/src/style/class/fn.rs */
+c_euv_doc_content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;   /* ← the culprit on short pages */
+    min-height: 100vh;
+}
+```
+
+When H1 + article + tail fit inside one viewport (`article.scrollHeight + tailH < 100vh`), `space-between` distributes the surplus equally between the three flex children. The middle child (article) gets pushed upward; the user sees 80–110px of whitespace above the article even with Override 4 applied.
+
+**Measured audit of essay pages on a 1280×577 viewport:**
+
+| Page | Article height (px) | First-block tag | Total H1↔firstBlock gap | Source of the gap |
+|---|---|---|---|---|
+| `07-05` | 142 | H2 | **147.8** | `space-between` push (104px) + H2 `margin-top: 1.8em` (43px) |
+| `09-19` | 6337 | H2 | 59.2 | H2 `margin-top: 1.8em` only (article overflows viewport → `space-between` no-op) |
+| `06-09` | ~6000 | H2 | 59.2 | same |
+| `06-08` | ~5000 | H2 | 59.2 | same |
+| `03-05` | ~1500 | P | 48 | TIP container + `P { margin-top: 1em }` |
+| `07-08` | ~2000 | P | 32 | `P { margin-top: 1em }` |
+| `07-12` | many | BLOCKQUOTE | 32 | `BLOCKQUOTE { margin-top: 1em }` |
+
+The math: on `07-05`, viewport 577, H1=54 + article=142 + tail≈188 = 384px, surplus 193px split evenly = ~88px above article + ~88px below, plus the `c_docs_page_title` `margin-bottom: 1rem` (16px) and H2 `margin-top: 1.8em` (43.2px) = 147.8px.
+
+### 8.3 Fix — disable `space-between` for the article flex item (site-local CSS)
+
+Override 4 already kills the `margin-top`. Add a second rule that also neutralises the `space-between` push without touching the upstream `c_euv_doc_content` rule:
+
+```rust
+// in src/lib.rs site-local CSS, after EUV_MD_CSS
+Css::inject_css("\
+  .c_euv_doc_content { justify-content: flex-start !important; } \
+  .c_docs_page_title { margin-bottom: 0 !important; } \
+  .c_euv_doc_content > article > *:first-child { margin-top: 0 !important; } \
+  .c_euv_doc_content > article h1:first-of-type, \
+  .c_euv_doc_content > article h2:first-of-type, \
+  .c_euv_doc_content > article h3:first-of-type, \
+  .c_euv_doc_content > article h4:first-of-type, \
+  .c_euv_doc_content > article h5:first-of-type, \
+  .c_euv_doc_content > article h6:first-of-type { margin-top: 0 !important; padding-top: 0 !important; } \
+");
+```
+
+**Trade-off:** changing `justify-content` from `space-between` to `flex-start` means pagination+footer no longer pin to the viewport bottom on short pages — they sit directly under the article. This matches VuePress / Docusaurus default behaviour. The user previously REJECTED `position: sticky` on the footer (see `euv-docs-styling` pitfall), but normal-flow positioning is not the same as fixed-positioning and is the standard SPA-docs choice.
+
+### 8.4 Verification after fix
+
+Re-run the §8.1 audit loop. Expected outcome:
+
+| Page | Pre-fix gap | Post-fix gap |
+|---|---|---|
+| `07-05` | 147.8 | 0–8 (H1↔H2 sitting on consecutive lines) |
+| `09-19`, `06-09`, `06-08` | 59.2 | 0–8 |
+| `03-05` | 48 | 16 (P `margin-top: 1em`) |
+| `07-08`, `07-12` | 32 | 16 |
+
+Acceptance: every page gap ≤ 16px (the smallest intrinsic margin on a body block) AND `c_euv_doc_tail` (pagination + footer) renders in normal flow directly below the article — probe with `article.getBoundingClientRect().bottom < document.querySelector('.c_euv_doc_tail').getBoundingClientRect().top` AND the tail's `top` minus viewport height is < 50px when content is shorter than viewport.
+
+### 8.5 Pitfall — the "essay/*.html" path is a source path, not a build artifact
+
+`euv-docs` produces ONE `index.html` + `pkg/euv_docs.{js,_bg.wasm}`. Every doc route is hashed from that single index. There is no `dist/essay/public/2025/09-19.html`, no per-page static HTML, no SSR. When the user writes "essay/public/2025/09-19.html" they mean the **source markdown** at `docs/essay/public/2025/09-19.md`. The build artifact for that route is `dist/index.html` (or `www/index.html`) reached via `#/essay/public/2025/09-19.html`.
+
+Diagnostic: `find dist -name '*.html' | wc -l` returns 1 (just `index.html`). Image and asset directories (`dist/essay/09-19/IMG_*.jpg`) DO exist because they are copied verbatim from the source tree, but no HTML files are produced per page.
+
+To reproduce a visual bug on a specific essay: serve `dist/`, open `http://127.0.0.1:<port>/`, then `location.hash = '#/essay/public/2025/09-19.html'` and wait for the WASM router to resolve it. Do NOT try to open `dist/essay/public/2025/09-19.html` directly — the file does not exist.
