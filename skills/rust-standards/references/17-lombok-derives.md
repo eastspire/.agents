@@ -289,3 +289,68 @@ pub struct Args { ... }
 
 **对策**:写完后跑 `cargo fmt --all && cargo fmt --all -- --check` —— 如果 `cargo fmt` 改动了 `#[derive]` 行,**接受** 合并后的版本,不要写 `.rustfmt.toml` 配置强行保留两行(formatting config 跨 crate 不通用,会污染下游项目)。
 
+## 17.11 Lombok `#[derive(Getter, Setter)]` 静默失效时的手写 accessor 三件套(2026-09-26 hyperlane request crate 实测)
+
+§17.3 假定 Lombok 的 `#[derive(Data)]` / `#[derive(Getter, Setter)]` 会自动生成 `get_*` / `set_*` 方法。**实测 hyperlane `request/src/response/struct.rs` 中 `#[derive(Getter, Setter)]` 标注在 `HttpResponse` 上,但 `cargo check` 后 impl 块中没有任何 `get_status_code` / `set_status_code` 之类的方法被生成** —— Lombok 的 getter/setter 生成对某些字段类型(尤其嵌套 `HashMap` / `Vec<u8>` / 自定义 struct)的支持不完整,会**静默失败**(编译通过,但零产出)。
+
+**症状判定**:
+```bash
+# 在目标 struct 上标了 #[derive(Data)] / #[derive(Getter, Setter)] 之后,
+# 运行下面命令,期望看到 set_<field> / get_<field> 至少一处:
+grep -nE '^    pub fn (set|get)_' <crate>/src/<module>/<struct>/struct.rs
+# 如果 0 行命中,但 struct 顶部确实有 Lombok derive —— Lombok 静默失效
+```
+
+**强制规则(2026-09-26 user 钦定,user 原话:"request里所有字段避免直接self访问,使用self的get和set")**:即使 Lombok derive 标注到位,所有跨 impl block 的字段读写**必须**经过 `get_<field>` / `set_<field>` 方法,**禁止** `self.field` 直接读写。Lombok 静默失效时**必须手写** accessor 三件套:
+
+```rust
+// 1. clone getter (返回 owned T,用于 fn 调用传值场景)
+pub fn get_field(&self) -> FieldType { self.field.clone() }
+
+// 2. ref getter (返回 &T,用于只读借场景)
+pub fn get_field_ref(&self) -> &FieldType { &self.field }
+
+// 3. mut getter (返回 &mut T,用于就地改写,典型场景 self.field.X -= 1)
+pub fn get_field_mut(&mut self) -> &mut FieldType { &mut self.field }
+
+// 4. setter (返回 &mut Self 给 fluent chain 用,沿用现有命名风格)
+pub fn set_field(&mut self, value: FieldType) -> &mut Self {
+    self.field = value;
+    self
+}
+```
+
+**命名契约**(跨 crate 一致):
+- `get_<field>` → owned clone(签名 `-> FieldType`,不接引用,**不**是 `&FieldType`)
+- `get_<field>_ref` → `&FieldType`(Lombok 也用 `_ref` 后缀,需手工命名对齐)
+- `get_<field>_mut` → `&mut FieldType`(Lombok 同样后缀)
+- `set_<field>(&mut self, value: FieldType) -> &mut Self`
+
+**实施步骤**(从 `self.field` 直读改写为 accessor):
+1. **判定**:在 impl.rs 用 `grep -nE 'self\.(field_a|field_b)'` 列出所有直接字段访问。
+2. **构造 accessor 三件套**:在 struct.rs 的 `impl` 块顶部集中加入 `get_*` / `get_*_ref` / `get_*_mut` / `set_*` 方法。**不要逐字段散落**到 impl.rs 各处 —— 集中后 reader 一眼能找到访问面。
+3. **替换读**:`self.field` → `self.get_field_ref()`(或 `self.get_field()` 当 fn 接收 owned 时);`self.field.X` → `self.get_field_ref().X`;`self.field.bytes` → `self.get_body_ref().as_slice()` 等方法替代。
+4. **替换写**:`self.field = value` → `self.set_field(value)`(沿用 fluent `&mut Self` 链);`self.field.X -= 1` → `self.get_field_mut().X -= 1`。
+5. **builder 中的链式调用**:如果 builder 通过 `&mut HttpRequest` 字段直写(`self.request.config.X = Y`),改写为 `self.request.get_config_mut().X = Y`(**不**是 `set_config(config); config.set_X(Y)` —— 后者拆成两行多一次 clone)。
+6. **验证**:`cargo check --workspace --all-targets` exit 0,`cargo clippy --workspace --all-targets` 0 warning,`grep -nE 'self\.(method|url|headers|body|config|tmp)' <file>` 仅命中 setter 内部的 `self.field = value` 表达式。
+
+**Pitfall(setter 内部允许直写,impl.rs 其他位置不允许)**:`pub fn set_field(&mut self, value: T) -> &mut Self { self.field = value; self }` 内部的 `self.field = value` 是**允许**的直写 —— 这是 setter 的实现,没法用 setter 调用 setter 自身。如果改成 `self.set_field(value); self`,则无限递归。这是唯一允许 `self.field` 直写的位置。
+
+**Pitfall(`get_*` 返回 owned 而非 `&T`,误用触发 borrow 错)**:手写 `get_field()` **永远**返回 owned `T`(clone 一次);不要写成 `&FieldType`。如果调用方需要 `&FieldType`,**用 `get_field_ref()`**。这样命名对齐 Lombok 用户的预期(Lombok 的 `get_*` 返回 owned,`get_*_ref` 返回 ref)。**反例**:`fn header_bytes(&self) -> Vec<u8> { let mut header = self.headers.clone(); ... }` 改成 `let mut header = self.get_headers();` 是正确 owned clone;若改成 `let mut header = self.get_headers_ref();` 则是借用 + clone,触发"cannot borrow as mutable"。
+
+**Pitfall(Lombok 静默失效但标了 derive,不要"补 derive 期望它工作")**:常见的失败模式是发现问题后,在 derive 链上再叠加 `#[derive(Data, New, Getter, Setter)]` 期望 Lombok 这次生成 —— **不会**。Lombok 对某些类型组合(`HashMap<_,_>` 字段 + `Getter` 同时在)的处理就是空展开。验证:`cargo expand --lib <module>` 看实际生成的 impl 块 —— 如果 0 行 `pub fn get_*,` 命中,确认 Lombok 失效,**手写 accessor 是唯一修复路径**,不要在 derive 上叠参数期望 Lombok 工作。
+
+## 17.12 业务代码读 vs Lombok 自动生成读 —— 在哪里允许 `self.field` 直读
+
+`self.field` 直读**仅在以下 3 个场景合法**,**所有其他场景必须用 accessor**:
+
+1. **Lombok 生成的 impl 块内部**(包括 `new` 构造、`Debug` / `Display` 实现、`Getter` 实际生成的 `&self.field` body)。
+2. **手写 setter 的实现 body** —— `self.field = value;` setter 没法调 setter 自身。
+3. **`#[cfg(test)] mod tests` 块内部** —— test helper 是生产代码看不到的;**不**走生产 accessor,以避免 setter 副作用。
+
+**严禁** `self.field` 直读的位置:
+- 生产 impl 块内的业务方法(impl `<Struct> { fn business_method(&self) { let x = self.field; ... } }`)
+- 跨 impl block 的字段访问(`impl A { fn foo(&self, b: &B) { use b.field; } }` 也不行,b 也要有 getter)
+- builder / 工厂方法内部的字段组装(`fn build(&mut self) { self.field = read_field(); }` 必须改成 `self.set_field(read_field())`)
+
+**反向引证**(2026-09-26 hyperlane request/):session 中 35 处 `self.headers` / `self.body` / `self.config` / `self.tmp` / `self.url` 直读全部重写为 accessor,build 与 clippy 干净,12/12 test pass。这是项目级强制规则,新加字段**默认**先写 accessor 三件套,不要先写完 `self.field` 直读再"以后"重构。

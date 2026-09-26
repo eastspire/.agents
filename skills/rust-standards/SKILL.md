@@ -138,6 +138,8 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | Lombok `get_*` 实际返回 `&T` / 调用方必须 `*` 解引用 / `copy` 修饰符无效 | [17-lombok-derives.md §17.8](references/17-lombok-derives.md) |
 | `CustomDebug` 与 `Debug` 互斥(双 impl 冲突) | [17-lombok-derives.md §17.9](references/17-lombok-derives.md) |
 | `cargo fmt` 合并相邻 `#[derive]` 行(项目规范示例 vs 实际 formatter 行为) | [17-lombok-derives.md §17.10](references/17-lombok-derives.md) |
+| Lombok `#[derive(Getter, Setter)]` 静默失效 + 手写 accessor 三件套(get/get_ref/get_mut/set)的命名契约与替换流程 | [17-lombok-derives.md §17.11](references/17-lombok-derives.md) |
+| `self.field` 直读的 3 个合法场景(Lombok impl 内部 / 手写 setter body / `#[cfg(test)]`)与生产代码严禁位置 | [17-lombok-derives.md §17.12](references/17-lombok-derives.md) |
 
 ## 可复用模板
 
@@ -219,7 +221,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
    - **Pitfall**(2026-09-26 加强): `let x = Vec::new();` 是合法 Rust 代码但项目禁止,因为 reader 必须跳到 `Vec::new()` 返回类型才能推断 `x` 类型。正确写法是 `let x: Vec<u32> = Vec::new();`——直接给类型,reader 不需要二次推理。clippy 没有 `let_underscore_must_use` 之类的规则覆盖这个,所以靠项目级 audit。
 7. **泛型约束必须用 `where`**,不允许 `fn f<T: Bound>()` 直接写(参见 09.2)。
    - **Pitfall(fn 体禁止空行)**: 项目约定(§9.1 第10项)函数体内不允许出现空行(代码之间紧贴)。section break 通过注释(`// Phase 1: ...`)而非空行表达,每个独立语句紧贴上一行。例外:`#[cfg(test)] mod tests { ... }` 块内 `#[test] fn xxx` 之间的 1 行空行作为 test 分隔保留(无注释、test 紧邻时方便阅读)。**euv fmt / cargo fmt 不会自动删除 fn 内空行**,这是 manual review 项。验证:`awk '/^    fn <test_name>/{f=1} f && /^    }$/{f=0; print "---"; next} f' <file>` 看每个 fn 内是否真无空行;或写新 fn 后 `cargo fmt --check` 看是否 diff。
-8. **struct / enum 优先用 lombok-macros 派生** `Data` + `New` + `CustomDebug`,禁止手写 getter(参见 17)。
+8. **struct / enum 优先用 lombok-macros 派生** `Data` + `New` + `CustomDebug`,禁止手写 getter(参见 17)。**Lombok `#[derive(Getter, Setter)]` / `#[derive(Data)]` 静默失效时(`grep -nE '^    pub fn (set|get)_' <struct.rs>` 0 命中),手写 accessor 三件套**(get_<field> / get_<field>_ref / get_<field>_mut / set_<field>),命名与 Lombok 风格对齐,详见 [17.11](references/17-lombok-derives.md);`self.field` 直读仅在 Lombok impl 内部 / 手写 setter body / `#[cfg(test)]` 块 3 处合法,详见 [17.12](references/17-lombok-derives.md)。
 9. **不引入新第三方依赖**优先于 `Cargo.toml` 整洁度(参见 13.1)。
 10. **proc-macro crate 必须** `[lib] proc-macro = true;`,且 `#[proc_macro_attribute]` 全在 `lib.rs` 中实现(参见 16.1)。
 11. **测试目录** `tests/` 用 `mod xxx;`(子模块名不带 `r#`),开头 `use crate_name::*;`(参见 14.1)。**绝对禁止为测试改 API visibility**(2026-09-12 user 原话:"没有暴露的api的单测")——`pub(crate)` item = 没有测试,整块 `#[cfg(test)] mod tests` 删除,**不保留 inline**(2026-09-12 user 第二轮原话:"src里所有单测删除...如果不是pub那就忽略")。`pub` item 的测试 = 移到 `<crate>/tests/<feature>/fn.rs`,不能改 visibility 让 tests/ 看得到(详见 14.4)。**测试文件禁止任何注释**(2026-09-12 user 第三轮原话:"单测不需要任何注释")——文件头 `//!` / 每 fn `///` / fn 体内 inline `//` 一律删除,测试 fn 名字即文档(详见 14.5)。
