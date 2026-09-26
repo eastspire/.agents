@@ -19,22 +19,34 @@ for the master-pattern exceptions the script cannot statically detect):
  6. mod.rs missing trailing use super::* (R6.2)
  7. sub-file first line not use super::* (R6.3)
  8. #[cfg(test)] in production (R14.5)
- 9. mod visibility prefix on mod decl (R6.2)
-10. #[allow(...)] in production tree (R14)
-11. let binding without explicit type (R5.1)
-12. #[inline] in WASM cdylib crate (R12)
  9. long-path use crate::xxx in sub-files (R6.3)
 10. inline generic bounds (R9.2)
 11. r# on non-keyword file (R1.4)
-12. implicit Vec::new() without type annotation (R5.1)
+12. implicit Vec::new() without type annotation (R5.1, collection-only)
 13. #![cfg(test)] in test fn.rs (R14.2)
-14. comments in test files (R14.5)
+14. comments in test files (R14.5, DEPRECATED — see check 28)
 15. pure &Foo helper in fn.rs should be impl method (R1.3.1)
 16. column-0 decl type mismatch in keyword files (R1.3a, raw-string-aware)
 17. sub-file body uses external crate full path (R6.4-pitfall-b)
-18. fn.rs hardcoded byte/string literals (R1.3c literal purity)
+18. fn.rs hardcoded byte/string literals (R1.3c literal purity, fn.rs-only)
 19. fn-body blank lines (R9.1 §9.1 item 10)
 20. tests/<sub>/fn.rs non-super use (R14.7)
+21. Cargo.toml dep block order (§13.7 round 4)
+22. CI workflow forbids version bumps and version writes (§17)
+23. keyword file purity + first-line use super::* (§1.3 / §6.3)
+24. no impl Trait in fn parameters (§9.2)
+25. doc-comment format conformance (§2.1 / §2.2) — REMOVED 2026-09-26, see check 35
+26. module imports centralized in lib.rs / mod.rs (§6.1 / §6.3 / §6.4)
+27. lib.rs / mod.rs three-stage import order (§6.1)
+28. no comments in test files (§14.5)
+29. mod.rs `mod` declaration must be bare (§6.2)
+30. no `#[allow(...)]` in production (§14)
+31. explicit type annotations for let bindings (§5.1, collection-only)
+32. no `#[inline]` in cdylib crates (§12)
+33. all `let` bindings have explicit type annotation (§5.1, comprehensive)
+34. closure parameters have explicit type annotation (§5.2)
+35. non-test fn has compliant doc comment (§2.1 / §2.2, authoritative)
+36. hardcoded strings live in `const.rs` (§1.3c strengthened)
 
 Each check prints either "PASS: N. <category>" or "FAIL: N. <category>: <count>
 hits" followed by up to 5 sample lines.
@@ -655,8 +667,7 @@ for f in files:
 sys.exit(0 if hits == 0 else 1)
 PY
 '''),
-<<<<<<< Updated upstream
-=======
+
     ('Cargo.toml dep block order (§13.7 round 4)', '''
 # Per references/13-dependency.md §13.7 (round 4, 2026-09-26):
 #   [dependencies] / [dev-dependencies] / [build-dependencies] /
@@ -753,27 +764,11 @@ fi
 exit "$exit_code"
 '''),
 
-    # check 25 — §2.1 / §2.2 doc-comment format conformance.
-    # (2026-09-26 user tightening).  Companion script:
-    # verify_doc_comment_format.py.
-    ('doc-comment format conformance (§2.1 / §2.2)', '''
-# Per rust-standards §2.1 + §2.2:
-#   - Every non-#[test] fn / impl block in src-adjacent code must
-#     carry at least one `///` line above it.
-#   - Every fn with non-self parameters OR a non-()/Self return type
-#     must also carry `# Arguments` / `# Returns` sections per the
-#     §2.2 template.
-#   - Argument list items use `- `Type` - description` form.
-#   - Returns list items use `- `Type`: description` form.
-cd {{target}}
-python3 "{{audit_script_dir}}/verify_doc_comment_format.py" "{{target}}" \\
-    | grep -v -E '^=== doc-comment format:'
-exit_code=${PIPESTATUS[0]}
-if [ "$exit_code" -ne 0 ]; then
-    echo "FAIL: verify_doc_comment_format.py exited $exit_code" >&2
-fi
-exit "$exit_code"
-'''),
+    # check 25 — moved to check 35 (consolidated; see 2026-09-26
+    # third iteration).  verify_doc_comment_format.py is the
+    # authoritative verifier; previously also wired here as
+    # check 25.  Removed to avoid running the same script twice.
+    # (2026-09-26 user tightening).
 
     # check 26 — §6.1 / §6.3 / §6.4 module-imports centralized.
     # (2026-09-26 user tightening).  Companion script:
@@ -917,7 +912,112 @@ if [ "$exit_code" -ne 0 ]; then
 fi
 exit "$exit_code"
 '''),
->>>>>>> Stashed changes
+
+    # check 33 — §5.1 all `let` bindings MUST have explicit type
+    # annotations.  Companion to check 31 (which only catches
+    # collection constructors specifically).  This is the
+    # comprehensive form: every `let`, including `let _ = ...`,
+    # must declare its type.  User original (2026-09-26 third
+    # iteration): "let 的类型必须要显示标注 (包含 let _ = )".
+    ('all `let` bindings have explicit type annotation (§5.1)', '''
+# Per rust-standards §5.1 (2026-09-26 third iteration, user 原话):
+#   "let 的类型必须要显示标注 (包含 let _ = )"
+# Every `let <name> = <expr>;` MUST declare the binding's type via
+# `let <name>: T = <expr>;`.  Bare `let x = 5;` is forbidden.
+# Likewise `let _ = expr;` is forbidden; use `let _: T = expr;`.
+# Companion script: verify_let_type_annotations.py.
+# Exempts: tests/ (R14.7 self-contained), `if let` / `while let`
+# pattern guards, Rust 2024 let-chains (the regex won't match).
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_let_type_annotations.py" "{{target}}" \
+    | grep -v -E '^=== let-bindings-explicit-type:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_let_type_annotations.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 34 — §5.2 closure parameters MUST have explicit type
+    # annotations.  User original (2026-09-26 third iteration):
+    #   "闭包参数需要显示标注"
+    # `|x| x * 2` is forbidden; use `|x: u32| x * 2`.  Exempts:
+    # `||` (empty), `|..|` (rest), `|(a, b): &(T, U)|` (tuple
+    # destructure with type annotation on whole tuple).
+    ('closure parameters have explicit type annotation (§5.2)', '''
+# Per rust-standards §5.2 (2026-09-26 third iteration, user 原话):
+#   "闭包参数需要显示标注"
+# Every closure parameter must have explicit `: T` annotation.
+# `|x| x + 1` is forbidden; use `|x: u32| -> u32 { x + 1 }`.
+# Companion script: verify_closure_type_annotations.py.
+# Exempts: tests/, empty `||`, rest `|..|`, ref patterns
+# `|&x: &T|`, tuple destructuring with type `(pat): T`.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_closure_type_annotations.py" "{{target}}" \
+    | grep -v -E '^=== closure-params-explicit-type:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_closure_type_annotations.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 35 — §2.1 non-test fn / impl MUST have `///` doc
+    # comment with proper Layer 1+2+3 format.  User original
+    # (2026-09-26 third iteration): "非单侧的 fn 必须要符合格式
+    # 的文档注释".  Tests are exempt (R14.5 forbids all comments
+    # in test files; thus no doc-comment there either).
+    ('non-test fn has compliant doc comment (§2.1 / §2.2)', '''
+# Per rust-standards §2.1 + §2.2 (2026-09-26 third iteration,
+# user 原话): "非单侧的 fn 必须要符合格式的文档注释".
+#   Layer 1 (existence): every non-test fn / impl method needs
+#     at least one `///` line above it.
+#   Layer 2 (completeness): every fn with non-self params OR
+#     non-() return must have `# Arguments` / `# Returns` section.
+#   Layer 3 (format): the doc-comment template structure is
+#     exactly `# Arguments` + `- `Type` - description` /
+#     `# Returns` + `- `Type`: description`.
+# Tests are exempt (R14.5 says test files have ZERO comments).
+# Companion script: verify_doc_comment_format.py (already
+# existed pre-this-round, but is now wired as the §2.1/§2.2
+# authoritative verifier — check 25).  This check 35 is the
+# EXPLICIT strengthened entry per user iteration.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_doc_comment_format.py" "{{target}}" \
+    | grep -v -E '^=== doc-comment format:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_doc_comment_format.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 36 — §1.3c strengthened (2026-09-26 third iteration):
+    # hardcoded string literals (≥ 4 non-trivial chars) MUST live
+    # in `const.rs`.  User original: "硬编码字符串必须要维护到
+    # const.rs".  Exempts: const.rs itself, tests/, attribute
+    # lines (`#[doc = "..."]` / `#[serde(rename = "...")]`),
+    # format-macro format strings (`println!("...")`).
+    ('hardcoded strings live in `const.rs` (§1.3c)', '''
+# Per rust-standards §1.3c strengthened (2026-09-26 third
+# iteration, user 原话): "硬编码字符串必须要维护到 const.rs".
+# Every hardcoded string literal (≥ 4 non-trivial chars) in any
+# non-const file MUST live in `const.rs` as a `pub const`.  This
+# is the comprehensive form of the existing check 18 (which
+# only covers fn.rs byte/char/multi-char literals).  Companion
+# script: verify_hardcoded_strings.py.  Exempts: const.rs
+# itself (canonical home), tests/ (R14.7 self-contained), attr
+# lines (#[doc = "..."], #[serde(rename = "...")]), and format
+# macro format strings (`println!("...")`).
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_hardcoded_strings.py" "{{target}}" \
+    | grep -v -E '^=== hardcoded-strings-to-const:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_hardcoded_strings.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
 ]
 
 

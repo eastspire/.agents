@@ -1736,8 +1736,6 @@ Reasons:
   `git diff origin/master..HEAD -- '*/tests/*/fn.rs'` first.
 
 **Reference**: `references/14-testing.md §14.7` for the full prose.
-<<<<<<< Updated upstream
-=======
 
 ## 44. §13.7 排序规则第四轮变更(2026-09-26,length+lex)
 
@@ -2125,4 +2123,125 @@ Implementation:
 Bidirectional fixture test: 0/3 violations (all 3 inline variants
 caught).
 
->>>>>>> Stashed changes
+
+
+---
+
+## §58-§61 — 2026-09-26 third iteration (user-driven, checks 33-36)
+
+User 原话 (2026-09-26 第三轮):
+
+> "let 的类型必须要显示标注 (包含 let _ = )"
+> "闭包参数需要显示标注"
+> "非单侧的 fn 必须要符合格式的文档注释"
+> "硬编码字符串必须要维护到 const.rs"
+
+This iteration adds 4 new verification scripts (checks 33-36) covering
+4 hard rules the user explicitly added in this round.  All scripts
+pass bidirectional fixture self-tests before audit wiring (same
+protocol as §49-§57).
+
+### §58 — verify_let_type_annotations.py (check 33, §5.1 comprehensive)
+
+User explicitly added §5.1 in this round:
+"let 的类型必须要显示标注 (包含 let _ = )" — every `let` binding,
+including `let _ = ...`, MUST declare its type.
+
+This is the **comprehensive** successor to `verify_explicit_type_annotations.py`
+(check 31), which only catches collection constructors specifically.
+The new script catches ALL `let` bindings without `: T` annotation:
+
+- `let x = 5;` — violation
+- `let s = "hello";` — violation
+- `let v = vec![1, 2, 3];` — violation
+- `let _ = fs::remove();` — violation (per user explicit)
+- `let _: T = expr;` — ok
+- `if let Some(x) = ...` — exempt (pattern guard, not let stmt)
+- Rust 2024 let-chains `if let X = ... && let Y = ...` — exempt
+  (regex won't match second `let` in chain)
+
+Bidirectional fixture test: 0/5 violations.
+
+Real-workspace findings:
+- ctares: 34 hits.
+- euv: 333 hits.
+
+### §59 — verify_closure_type_annotations.py (check 34, §5.2)
+
+User explicitly added §5.2: "闭包参数需要显示标注".  Closure
+parameters must have explicit `: T` annotation.  Implementation
+heuristic:
+
+- Regex `\|(?P<params>[^|=][^|]*?)\|` finds closures.  Empty
+  `||` (operator) is excluded by the `[^|=]` first-char requirement.
+- Param splitter `_split_top_commas()` walks the captured string
+  character-by-character, tracking `<>`/`()`/`{}` depth, splitting
+  only on top-level commas.
+- Each param is checked via `_has_explicit_type()`:
+  - `..` (rest pattern) — exempt
+  - `&pat: T` or `&mut pat: T` — ok
+  - `(pat): T` (tuple destructure with type) — ok
+  - bare `name` or `_name` without `: T` — violation
+  - `name: T` — ok
+- The script handles `|x: &u32|`, `|(a, b): &(u32, u32)|`, and
+  `|&x: &T|` correctly.
+
+Bidirectional fixture test: 0/5 violations (including tuple
+destructuring without type).
+
+Real-workspace findings:
+- ctares: 102 hits.
+- euv: 179 hits.
+
+### §60 — verify_doc_comment_format.py (check 35, §2.1 / §2.2 authoritative)
+
+User explicitly added §2.1: "非单侧的 fn 必须要符合格式的文档注释".
+The existing check 25 (also `verify_doc_comment_format.py`) was
+de-duplicated; this check 35 is the AUTHORITATIVE entry per user
+iteration.
+
+Test files are exempt because R14.5 forbids ALL comments in test
+files; thus no `///` doc comments there either.  Non-test fn /
+impl method must have `///` doc comment with:
+
+- Layer 1 (existence): at least one `///` line above fn/impl.
+- Layer 2 (completeness): `# Arguments` section if non-self params,
+  `# Returns` section if non-() return.
+- Layer 3 (format): argument items use `- \`Type\` - description`
+  form, return items use `- \`Type\`: description` form.
+
+Bidirectional fixture test: 0/3 violations.
+
+Real-workspace findings: ctares 1048 hits, euv 3151 hits.  These
+are large-scale coverage gaps — projects need a sustained
+doc-comment addition campaign.  Per pitfall §39a, use the
+`doc_comment_audit.py` fixer (`--write`) to bulk-add template
+doc-comments before manual review.
+
+### §61 — verify_hardcoded_strings.py (check 36, §1.3c strengthened)
+
+User explicitly added §1.3c strengthened: "硬编码字符串必须要维护到
+const.rs".  This is the **comprehensive** successor to the
+fn.rs-only byte/char/multi-char check 18.  Catches ALL string
+literals (≥ 4 non-trivial chars) in any non-const file.
+
+Implementation:
+
+- Regex `r"([^"\\]|\\.){4,}"` finds string literals.
+- Per-line filter:
+  - `const.rs` itself — exempt (canonical home).
+  - `tests/` — exempt (R14.7 self-contained).
+  - Lines starting with `#[` — exempt (attribute lines like
+    `#[doc = "..."]` / `#[serde(rename = "...")]`).
+  - Format macro format strings — exempt via
+    `_is_format_macro()` heuristic: finds `<macro>!(<str>...)`
+    where the string is the FIRST positional argument.
+  - Otherwise — violation.
+
+Bidirectional fixture test: 0/4 violations.
+
+Real-workspace findings: ctares 447 hits, euv 3384 hits.  This is
+the largest single-class violation; will require sustained
+const-extraction work, especially for `eprintln!`/`println!`
+arguments (which are exempt but adjacent code may have other
+hardcoded strings).
