@@ -182,15 +182,36 @@ def _check_forbidden_decl(
 
 
 def _check_first_line_super(path: Path, text: str) -> list[str]:
-    """First non-comment line must be `use super::*;`."""
+    """First non-comment line, IF a use, must be `use super::*;`.
+
+    Per rust-standards §6.3 (2026-09-26 sixth iteration,
+    user original): "不是所有文件都必须要需要使用 use super::*,
+    可以不要 use, 对于 lib.rs, mod.rs 之外的 rs 文件, 是不允许
+    出现 use::super::* 和没有 use 之外的其他写法的".
+
+    Translation: sub-files (not lib.rs / mod.rs) MAY have
+    `use super::*;` as their first line OR may have no `use`
+    at all.  No other `use` form is allowed.
+
+    So: if first non-comment line is a `use` statement, it
+    must be `use super::*;`.  If first non-comment line is
+    not a `use` (e.g. is `mod`, `pub`, `fn`, `struct`, etc.
+    directly), that's also OK (sub-files CAN skip use).
+    """
     first = _first_non_comment_line(text)
     if first is None:
         return []  # empty file — nothing to check
     line_no, line_text = first
-    if line_text.strip() != USE_SUPER_STAR:
+    stripped = line_text.strip()
+    # If first line is not a `use` statement, file skips use — OK.
+    if not stripped.startswith("use "):
+        return []
+    # First line IS a `use` — must be `use super::*;`.
+    if stripped != USE_SUPER_STAR:
         return [
-            f"{path}:{line_no}: first non-comment line must be "
-            f"'{USE_SUPER_STAR}' but is {line_text.strip()!r}"
+            f"{path}:{line_no}: first `use` line in sub-file MUST be "
+            f"'{USE_SUPER_STAR}' (the only allowed form) or omitted; "
+            f"got: {stripped!r}"
         ]
     return []
 

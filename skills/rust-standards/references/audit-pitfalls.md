@@ -2406,3 +2406,61 @@ Real-workspace findings (euv): 5 lib.rs files violate:
 The historical "audit-pitfalls §17 lib.rs `//!` doc comment IS
 allowed" entry is marked DEPRECATED — see that section for the
 full evolution narrative.
+
+
+---
+
+## §63 — 2026-09-26 sixth iteration (user-driven, §6.3 use rule relaxation)
+
+User 原话 (2026-09-26 第六轮):
+
+> "不是所有文件都必须要需要使用 use super::*, 可以不要 use, 对于
+>  lib.rs, mod.rs 之外的 rs 文件, 是不允许出现 use::super::* 和没
+>  有 use 之外的其他写法的"
+
+This iteration reverses the historical "first line MUST be `use super::*;`"
+rule for sub-files (any .rs file other than lib.rs / mod.rs).  After this
+change:
+
+  ✅ File with NO `use` at all          — OK
+  ✅ File with `use super::*;` (anywhere) — OK
+  ❌ File with `use crate::xxx;`         — violation
+  ❌ File with `use std::xxx;`           — violation
+  ❌ File with `use external::xxx;`      — violation
+  ❌ File with `use super::specific;`    — violation (must be `*` or omit)
+  ❌ File with `use crate::*;`           — violation (must be `use super::*;`)
+
+Implementation:
+
+- Modified `_check_first_line_super()` in
+  `scripts/verify_keyword_file_purity.py`:
+    OLD: first non-comment line MUST be `use super::*;` (mandatory)
+    NEW: if first non-comment line is a `use`, it MUST be `use super::*;`;
+         if first non-comment line is NOT a `use` (file skips use), OK.
+- `_check_use_centralized()` unchanged — still enforces no `use crate::`,
+  `use std::`, `use super::specific_path`, `use external::` outside the
+  leading `use super::*;`.
+
+Bidirectional fixture test on `/tmp/use-rule-test`:
+  - sub1/fn.rs with `use super::*;` first → 0 violations
+  - sub2/fn.rs with NO `use` → 0 violations
+  - sub2/fn.rs with `use crate::Bar;` first → 2 violations (1st-line +
+    centralized)
+  - sub2/fn.rs with `use std::collections::HashMap;` → 1 violation
+    (centralized only — first-line check exempts because file has
+    `use super::*;` already elsewhere)
+
+Real-workspace findings:
+  - euv:   9 violations (down from 358 — most sub-files were missing
+    first-line `use super::*;` per old rule; new rule is much more
+    permissive)
+  - ctares: 16 violations (down from 176 for same reason)
+  - Remaining violations are all **wrong** use forms (e.g. `use
+    std::cell::RefCell;` in `euv/ui/src/component/camera/hook/impl.rs:2`,
+    `use super::r#enum::Color;` in ctares color-output impl.rs, `use
+    crate::*;` in gtl/src/cmd/fn.rs), not first-line misses.
+
+Documentation:
+- SKILL.md hard rule 5 rewritten with the new allow-list / deny-list.
+- references/06-module-imports.md §6.3 updated from "第一行 必须是"
+  to "第一行 **可以省略** `use super::*;`".

@@ -67,10 +67,24 @@ warning: glob import doesn't reexport anything with visibility `pub` because no 
 
 ## 6.3 子文件(fn.rs / struct.rs / impl.rs 等)
 
-- **第一行** 必须是 `use super::*;`
-  - 例外:`const.rs` 因为只放顶层常量且不需要父模块符号,可省略 `use super::*;`,但项目惯例是也保留
-- 后续自由声明,**不允许**出现 `use crate::xxx;`、`use super::具体路径;` 这类长路径导入
-- 必须通过 `use super::*;` 间接访问父模块 re-export 的符号(与 `mod.rs` 中的 re-export 配合使用)
+- **第一行** **可以省略 `use super::*;`**(2026-09-26 第六轮 user 放宽)。即:
+  - ✅ 文件**无** `use` —— OK(例如 `pub fn foo() {}` 直接开头)
+  - ✅ 文件**首行** `use super::*;` —— OK
+  - ✅ 文件**体内任何位置** `use super::*;` —— OK
+  - ❌ 文件**有** use 但**不是** `use super::*;` —— 违规
+- 后续自由声明,**不允许**出现 `use crate::xxx;`、`use std::xxx;`、`use super::具体路径;`、`use external_crate::xxx;`、`use crate::*;` 这类长路径或具体路径导入(任何非 `use super::*;` 形式的 use 都违规)
+- 必须通过 `use super::*;`(或干脆**不**写 use,完全在文件内本地声明所有东西)来访问父模块符号
+
+> **历史**(2026-09-26 之前): 旧 §6.3 强制要求子文件首行必须是 `use super::*;`,
+> 不能省略。第六轮 user 原话: "不是所有文件都必须要需要使用 use super::*,
+> 可以不要 use, 对于 lib.rs, mod.rs 之外的 rs 文件, 是不允许出现 use::super::*
+> 和没有 use 之外的其他写法的", 明确放宽 "可以不要 use"。本节已同步更新。
+>
+> 验证脚本 `scripts/verify_keyword_file_purity.py`:
+> - `_check_first_line_super` —— 检测首行是否是 `use` 但**不是** `use super::*;`(放宽到 "有 use 时必须是 use super::*;")
+> - `_check_use_centralized` —— 扫描整文件捕所有 `use\s+(crate::|super::(?![*])|std::|[a-zA-Z_]\w*::)` 形式
+>
+> 被 `audit_rust_standards.py` check 23 调用。
 
 > 模板见 `templates/sub-file.md`
 
