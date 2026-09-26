@@ -1,512 +1,54 @@
 ---
 name: euv-standards
-description: '**euv 框架完整 API + 坑表 — 与 euv 框架打交道时必加载**。version 0.24.x, edition 2024。涵盖:7 个 crate 布局、`html!`/`class!`/`vars!`/`var!`/`#[component]`/`#[watch]`/`#[computed]` 过程宏真实签名、28 个 euv-ui 组件（带 view/）+ 358 个 design class + 2 个 theme var 集合、Signal/VirtualNode 响应式系统、`App::mount()` 入口、下游工具仓(euv-docs / euv-cli) engine 版本 pin 铁律、crates.io + GitHub Release 流水线模板。'
+description: '**euv 框架工作区规范 — 涉及 euv monorepo 跨 crate 操作时加载**。Layer-2 skill,与 `euv`(入口)+ `euv/references/api-*.md`(API 速查)互补。本 skill 只讲跨 crate 的事:`[workspace.package]` 单一版本号 + sync_workspace_version CI job + monorepo 7 个 crate 互依赖图 + `crate-cli` 工具分工 + version bump 铁律 + engine 版本 pin 规则。**版本号 + class 数 + 模块数 + page 数全部以实地 grep / ls 为准** — skill 不维护这些动态数字。**当且仅当任务不涉及 euv monorepo 跨 crate 操作**(纯写 component / 纯写 hook / 纯写 engine)才不需要加载本 skill,直接用 `euv` 入口。'
+license: MIT
 ---
 
-# euv 框架完整规范 (verified 2026-08)
+# euv-standards — Monorepo 跨 crate 规范
 
-> ⚠️ **本文所有数字/签名都实地验证自 `/root/github/euv-dev/euv/` 源码。**不要凭训练数据推断。验证方法见末尾。
+> **本 skill 只讲 euv monorepo 跨 crate 操作**(workspace / 版本 / 工具 / CI)。具体的 `Signal` / `VirtualNode` / `#[component]` / `html!` / engine 模块 API 在 `euv/references/api-*.md`,反复踩过的坑(过去 §12 表格)已迁移到 `euv/references/pitfalls.md`。
 
-## 1. Workspace 布局 (7 个 crate)
+## 0. Layer-2 入口 — 何时加载本 skill
+
+- ✅ **需要加载**:涉及 euv monorepo 跨 crate 操作 — bump version / 改 `[workspace.dependencies]` / crates.io publish / engine version pin / 跨仓 workflow / euv-docs 流程
+- ❌ **不需要加载**:纯写 component / hook / engine module — 直接 `euv` 入口 + `euv/references/api-*.md`
+
+> **坑表已迁移**:旧 §12 表格(22+ 个反复踩过的坑)已搬到 `euv/references/pitfalls.md`,本 skill 不再包含具体坑表(否则重复)。
+
+## 1. Workspace 布局 (7 个 crate,docs/ 也是 member)
 
 ```
 euv/
-├── Cargo.toml          # workspace root, members = [...]
+├── Cargo.toml          # workspace root, members = [core, macros, cli, ui, engine, example, docs]
 ├── core/               # euv-core: VirtualNode / Signal / App 核心
-├── macros/             # euv-macros: 7 个 proc_macro
+├── macros/             # euv-macros: 8 个 proc_macro (html / class / watch / computed / vars / var / unsafe_no_inline + #[component] proc_macro_attribute)
 ├── src/                # euv: re-export = euv_core::* + euv_macros::*
-├── ui/                 # euv-ui: 28 组件 + 358 class + 2 theme vars
-├── engine/             # euv-engine: 渲染引擎
+├── ui/                 # euv-ui: 组件(查 ls -d ui/src/component/*/view)+ design class + 2 theme vars
+├── engine/             # euv-engine: 渲染引擎 (模块数 grep -cE "^mod [a-z_]+;" engine/src/lib.rs, 含 lighting + raytracing)
 ├── cli/                # euv-cli: CLI 工具
-└── example/            # euv-example: 25 个 page 演示
+├── docs/               # euv-docs: WASM 文档站生成器 (crate 名 euv-docs, 同 monorepo)
+└── example/            # euv-example: page 演示 (数 ls example/src/page/ | wc -l)
 ```
 
 依赖关系:`euv` = `euv-core` + `euv-macros`(纯 re-export,无源码)。
 任何 euv 项目在 `Cargo.toml` 写 `euv = "0.13"` + `euv-ui = "0.13"` 即可拿到全部能力。
 
-## 2. 7 个过程宏(实地验证自 `macros/src/lib.rs`)
-
-| 宏               | 形态                 | 用途                                                                 |
-| ---------------- | -------------------- | -------------------------------------------------------------------- |
-| `html! { ... }`  | proc_macro           | JSX 风格虚拟 DOM,产出 `VirtualNode`                                  |
-| `class! { ... }` | proc_macro           | CSS class 工具函数集合(编译时展开)                                   |
-| `vars! { ... }`  | proc_macro           | 主题 var 集合块,产生 `pub fn c_xxx()` 多个                           |
-| `var! { ... }`   | proc_macro           | 单个主题 var(单数)                                                   |
-| `watch`          | proc_macro           | 副作用绑定(底层,在 `html!` 内部使用)                                 |
-| `computed`       | proc_macro           | 派生 signal(底层)                                                    |
-| `#[component]`   | proc_macro_attribute | 标记 `pub fn euv_xxx(node: VirtualNode<EuvXxxProps>) -> VirtualNode` |
-
-`html!` 内部实际用到了 `watch` / `computed`(它们由 html! 触发,不直接手写)。
-
-## 3. `#[component]` 组件契约(必须遵守)
-
-每个组件函数都是同一个签名(从 button 实际看到):
-
-```rust
-#[component]
-pub fn euv_button(node: VirtualNode<EuvButtonProps>) -> VirtualNode {
-    let EuvButtonProps { variant, label, onclick, disabled }
-        : EuvButtonProps = node.try_get_props().unwrap_or_default();
-    let children: VirtualNode = node.get_child_node();
-    // ... 用 html! 构造
-}
-```
-
-**硬性规则**:
-
-1. 函数名必须 `pub fn euv_<lowercase>(node: VirtualNode<Props>) -> VirtualNode`
-2. Props 结构体字段名对应 `html!` 里的属性 key
-3. **子节点** 通过 `node.get_child_node()` 拿到,不是 Props 字段
-4. 解构时一定要 `unwrap_or_default()`,提供 fallback
-5. `html!` 内 prop 语法:**冒号 + 空格 + 值**,如 `class: c_xxx()`、`onclick: handler`
-
-## 4. `html!` 宏语法(真实可用的子集)
-
-**元素**:
-
-```rust
-html! {
-    div { class: c_card() children }
-    button { class: c_btn_primary() disabled: true onclick: h }
-    img { src: "x.png" alt: "x" }
-    input { value: sig.get() placeholder: "..." }
-}
-```
-
-**控制流(都已验证可用)**:
-
-```rust
-html! {
-    div {
-        if cond { span { "yes" } } else { span { "no" } }
-        for x in items.iter() {
-            li { {x} }
-        }
-        match route_signal.get().as_str() {
-            "/about" => { page_about {} }
-            _ => { page_not_found {} }
-        }
-    }
-}
-```
-
-**插值 `{}`**: 任何要嵌入表达式的位置用 `{expr}`,包括 prop 值(`class: {dynamic_class()}`)。
-
-**调用组件**:
-
-```rust
-euv_button { variant: EuvButtonVariant::Primary label: "OK" onclick: h }
-euv_modal { open: sig children }
-```
-
-**裸组件**(`euv_card {}`)和带子节点(`euv_modal { open: sig }  children  `)都可。
-
-## 5. `class!` 宏 — 358 个 design class
-
-文件:`ui/src/style/class/fn.rs`(3789 行,单宏调用)。
-
-**形态**:
-
-```rust
-class! {
-    pub c_euv_button_primary_md { /* CSS */ }
-    pub c_euv_button_outline_md { /* CSS */ }
-    pub c_card { /* ... */ }
-    // ... 共 358 个
-}
-```
-
-**调用**:在 `html!` 内 `class: c_euv_button_primary_md()`(注意是**函数调用**不是字符串,带空括号)。
-
-**数字验证命令**:
-
-```bash
-grep -cE "^[[:space:]]+pub c_" /tmp/euv/ui/src/style/class/fn.rs
-# → 358
-```
-
-> ❌ 旧版 skill 写"304"/"306",实测 358(0.18.x,含 §3.F 站点组件 + c_euv_* 系列)。**永远以源码为准**。
-
-## 6. `vars!` / `var!` — 2 个 theme 集合
-
-文件:`ui/src/style/var/fn.rs`,只有 2 个 `pub c_*` 顶层:
-
-- `c_theme_light`(白底黑字)
-- `c_theme_dark`(黑底白字)
-
-但每个集合内部有几十个 token,像 `background`、`foreground`、`border`、`accent`、`muted-foreground` 等。
-
-```rust
-vars! {
-    pub c_theme_light {
-        background: "#ffffff";
-        foreground: "#000000";
-        border: "#000000";
-        // ...
-    }
-    pub c_theme_dark {
-        background: "#000000";
-        foreground: "#ffffff";
-        // ...
-    }
-}
-```
-
-## 7. 28 个 euv-ui 组件(实地列表,`ls -d ui/src/component/*/view`)
-
-```
-alert / badge / button / card / checkbox / debug / doc_layout / drawer /
-dropdown / field / header / hero / info / input / loading / logo / markdown /
-modal / navbar / nav / pagination / result / router / sidebar / tag / toc /
-vconsole / virtual_list
-```
-
-> 纯 hook 工具组件(无 `view/`,不进 euv_* 渲染树):`browser / camera / layout / theme / touch`。
-
-每个组件文件结构(以 button 为例):
-
-```
-component/button/
-├── mod.rs            # pub use view::*;
-└── view/
-    ├── mod.rs        # pub use {enum::*, fn::*, struct::*}
-    ├── enum.rs       # pub enum EuvButtonVariant { Primary, Outline }
-    ├── fn.rs         # #[component] pub fn euv_button(...)
-    └── struct.rs     # pub struct EuvButtonProps { ... }
-```
-
-带 hook 的组件(9 个)多一层 `hook/`:
-
-- `browser / camera / input / layout / router / theme / touch / vconsole / virtual_list`
-
-**注意区分**:
-
-- `euv_button` ← **库组件**(在 `euv-ui` 里,所有页面共用)
-- 自定义组件(如 example 里的 `nav_item`)`pub(crate) fn` + 用 `euv_nav_item { ... }` 包装库组件
-
-## 8. 响应式:Signal + watch + computed
-
-**Signal 创建**(在 App 启动时):
-
-```rust
-let count: Signal<i32> = App::use_signal(0);
-let (count, set_count) = App::use_signal(0);  // 二元组形式
-```
-
-**读**:`count.get()`(返回 `i32`)
-**写**:`set_count.set(5)` 或 `count.set(5)`
-
-**派生**:
-
-```rust
-let doubled: Signal<i32> = computed! { count.get() * 2 };
-```
-
-**副作用**:
-
-```rust
-watch! { [count]; /* 当 count 变化时执行 */ };
-```
-
-> ⚠️ `watch!` 经常在闭包/条件内需要传 `&[count]` 这种形式,**实际项目里推荐用 `html!` 内的 `for`/`if`/`match` 直接响应**,手动 watch 容易触发死循环。
-
-## 9. App 入口
-
-```rust
-use euv::*;
-
-#[wasm_bindgen]
-pub fn main() {
-    console_error_panic_hook::set_once();
-    inject_app_global_css();  // 注入 euv-ui 的全局 CSS
-    App::mount("#app", app);
-}
-```
-
-`App::mount(selector, render_fn)` 签名(实地:`core/src/app/impl.rs`):
-
-```rust
-pub fn mount<S, F>(selector: S, render_fn: F)
-where S: Into<String>, F: Fn() -> VirtualNode + 'static
-```
-
-**`app` 渲染函数约定**:
-
-```rust
-pub(crate) fn app() -> VirtualNode {
-    html! { /* 根节点 */ }
-}
-```
-
-## 10. 路由(基于 signal 的极简路由)
-
-`example/src/component/router/view/fn.rs` 实地模式:
-
-```rust
-#[component]
-pub(crate) fn page_router(node: VirtualNode<PageRouterProps>) -> VirtualNode {
-    let PageRouterProps { route_signal } = node.try_get_props().unwrap_or_default();
-    html! {
-        div { class: c_page_router()
-            match { route_signal.get().as_str() } {
-                "/" | "/about" => { page_about {} }
-                "/animation" => { page_animation {} }
-                _ => { page_not_found {} }
-            }
-        }
-    }
-}
-```
-
-> ⚠️ **没有 React Router 那种 `<Routes>` 声明**。路由就是 `match`,URL 变化由你自己驱动 `route_signal.set(...)`。
-
-## 11. Props 结构体实际样例
-
-```rust
-#[derive(Clone, CustomDebug, Default)]
-pub struct EuvButtonProps {
-    pub variant: EuvButtonVariant,
-    pub label: &'static str,
-    #[debug(skip)]
-    pub onclick: Option<Rc<dyn Fn(Event)>>,
-    pub disabled: Signal<bool>,
-}
-```
-
-要点:
-
-- 必须 `#[derive(Default)]`(因为 `try_get_props().unwrap_or_default()` 兜底)
-- 事件 handler 类型:`Option<Rc<dyn Fn(Event)>>`
-- 响应式 prop 用 `Signal<T>`,不是裸 `T`
-- `#[debug(skip)]` 跳过 `Rc<dyn Fn(...)>`,避免 `Debug` 报错
-
-## 12. 常见坑表(实战踩过)
-
-| 坑                                                                                                                                   | 解决                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `class:` 后忘记 `()`(写成 `c_xxx`)                                                                                                   | **`class!` 宏展开的全是 fn,必须调用**:`c_xxx()`                                                                                                                                                                                                                                                                                                                                                      |
-| `onclick: h` 而 `h` 是 `Fn()` 不是 `Fn(Event)`                                                                                       | 事件 handler 一律 `Fn(Event) -> ()`                                                                                                                                                                                                                                                                                                                                                                  |
-| `node.get_child_node()` 返回 `Empty`                                                                                                 | 用 `match children { Empty => Text("..."), other => other }` 兜底                                                                                                                                                                                                                                                                                                                                    |
-| 写 `<div className="x">` (React 习惯)                                                                                                | euv 是 `class: c_xxx()`,无 className                                                                                                                                                                                                                                                                                                                                                                 |
-| 写 `class: "static-string"`                                                                                                          | 编译会过但绕过了 design system,**不推荐**                                                                                                                                                                                                                                                                                                                                                            |
-| `Signal` 写 `let s: Signal<i32> = ...;` 然后传值                                                                                     | Signal 必须 clone 或传引用,不能 move                                                                                                                                                                                                                                                                                                                                                                 |
-| 在 `class!` 块里写嵌套选择器                                                                                                         | 仅支持伪类/伪元素(`hover`/`before`,拼成 `.c_x:hover`);**后代选择器不支持**,见本条下方专项                                                                                                                                                                                                                                                                                                            |
-| 路由刷新丢 state                                                                                                                     | 路由 state 必须在 `App::mount` 之前 `use_signal` 一次                                                                                                                                                                                                                                                                                                                                                |
-| `match` 在 `html!` 里大小写写错                                                                                                      | 关键字 `match`(小写),分支用 `=>` 不是 `->`                                                                                                                                                                                                                                                                                                                                                           |
-| 给组件加额外字段想放 children                                                                                                        | **错**。children 永远走 `node.get_child_node()`,**不是 props**                                                                                                                                                                                                                                                                                                                                       |
-| 在 `class!` 里写后代选择器(`.parent h1`)                                                                                             | **不支持**。element selector block(`h1 { ... }`)序列化时与父类名**直接拼接无空格**(`.c_fooh1`,无效选择器)。需要后代/排版样式时用 `Css::inject_css(raw_css)` 注入原始 CSS(verified 0.14.2,`macros/src/class/fn.rs` flatten_selector_blocks 拼接 + `core` inject_style 无空格)                                                                                                                         |
-| `html!` 子位置写 `{ foo(x) }` 带参函数调用                                                                                           | 宏解析报 `expected `,``。在 html! 外预计算 `let node = foo(x);`,然后裸标识符嵌入 `node`                                                                                                                                                                                                                                                                                                              |
-| `html!` 里裸文本以 `": "` 结尾(如 `"Page not found: "`)后接 `{ expr }`                                                               | proc macro panic `"..." is not a valid identifier`。合并成单个 `{ format!("Page not found: {x}") }`                                                                                                                                                                                                                                                                                                  |
-| `html!` 里 `match prev { ... }`(scrutinee 不带花括号)                                                                                | 报 `expected `,` following match arm`。必须写 `match { expr } { ... }`                                                                                                                                                                                                                                                                                                                               |
-| `match { prev }` / `if { active }` 里 prev/active 是 Option/bool 等**非 Signal** 局部变量                                            | 单段标识符在 `{}` 内被自动重写为 `.get()` → `Option`/`bool` 无 `get` 方法编译失败。解法:(a) 条件类名改用函数指针 `let cls: fn() -> &'static Css = if active { c_a } else { c_b };` + `class: cls()`;(b) 或写成多段表达式如 `if { heading.level == 3u8 }`(多 token 不触发 auto-get)                                                                                                                   |
-| 给 task list / 条件属性写 `checked: if { c } { "checked" } else { "" }`                                                              | HTML 里 `checked=""` 也算 checked。拆两个分支分别渲染带/不带该属性的元素                                                                                                                                                                                                                                                                                                                             |
-| `class!` 里写 `media("(max-width: 767px)") { ... }` 调用形式                                                                         | **静默丢弃**(编译过但生成的 CSS 没有 @media 规则,媒体查询全部失效)。必须用块形式 `@media ((max-width: 767px)) { ... }`(euv-ui 全部 348 个 class 的写法;生成的 CSS 条件就是双层括号,浏览器接受)。排查法:运行时 `document.styleSheets` 里找类名对应的 `@media` 规则是否存在(verified 0.14.3,euv-docs)                                                                                                  |
-| 根 `app()` 的 html! 是纯静态树(没有任何 reactive `if`/`match`/`for`)                                                                 | **整个应用的 signal 订阅全部失效**:`Mount::setup` 直接 `render_fn()` 一次,只有 reactive `if`/`match`/`for` 才创建 DynamicNode;signal.get() 读在没有 DynamicNode 的静态子树里不订阅任何节点,路由/主题切换零 DOM 更新。必须镜像官方 example 的根模式:`html! { if { cond_reading_signal } { shell_a {...} } else { shell_b {...} } }`(verified 0.14.3:静态根下 hashchange 事件触发但 docs 组件不重渲染) |
-| reactive `if { cond }` 的 cond 是不读 signal 的裸 prop/局部 bool                                                                     | 条件闭包**捕获首次渲染的值**,之后 prop 变了也不更新(如侧边栏在首页隐藏后永远不回来)。cond 里必须直接读 signal:`if { !route_is_home(&route_signal.get()) }`(verified 0.14.3)                                                                                                                                                                                                                          |
-| 组件标签上写 `key:`(如 `my_comp { key: x }`)                                                                                         | `key` 被当成 props 字段 → `E0560 struct has no field named key`。要按 key 强制重挂载组件,外面包一层 `div { key: x style: "display: contents" my_comp {...} }`                                                                                                                                                                                                                                        |
-| 经历无关的重渲染(如切主题)后,再切路由,页面部分内容变陈旧                                                                             | diff 路径下嵌套 Dynamic 子树可能不刷新。用上面的 keyed `display:contents` 包装强制 remount(verified 0.14.3,euv-docs:切主题 2 次后 en→zh 路由,侧边栏变中文但正文停在英文)                                                                                                                                                                                                                             |
-| 文档/长内容布局出现水平溢出(pre/长 inline code 撑破)                                                                                 | flex 链 `min-width: auto` 让内容 min-content 穿透。给 flex 容器逐级补 `min-width: "0px"`(body > main > main_inner > content 整条链)                                                                                                                                                                                                                                                                  |
-| 组件 prop 传 `Vec<T>` 后在 reactive `if` 的 html! 块里 `items.iter()`                                                                | **借用逃逸编不过**(FnMut 闭包引用不能逃逸)。`items.into_iter().map(...).collect::<Vec<VirtualNode>>()` 在 html! **外面**构建好,再整体插值;可见性切换用 `class: if { signal } { c_x_open() } else { c_x_closed() }` 常挂载方案(verified 0.15.1,euv_dropdown)                                                                                                                                          |
-| reactive `if { open } { ...children... }` 包住 `node.get_child_node()` 的 children                                                   | `E0507`:VirtualNode 非 Copy,不能 move 进 FnMut。同样改常挂载 + 响应式 class(verified 0.15.1,euv_drawer)                                                                                                                                                                                                                                                                                              |
-| 非 workspace 项目(crates.io 依赖)里 `euv_button {}` 等组件标签报 `AttrValueAdapter` trait 错                                         | euv < 0.15.2 的 `html!` 组件注册表只扫本 crate + path 依赖;**升 euv ≥ 0.15.2**,注册表会扫 `$CARGO_HOME/registry/src/*/<name>-<version>/src`(无 build.rs 的 crate 缓存落在 `$TMP/euv_registry_<hash>/`)                                                                                                                                                                                               |
-| euv 仓** minor 版本升级**(如 0.15.x→0.16.0）后本地 `cargo check` 报 `failed to select a version for the requirement euv = "^0.15.3"` | workspace 内 path-dep 钉了 `^0.15.3`,minor bump 超出区间；patch bump 不受影响。**本地复现 CI `sync_workspace_version` 的 sed 并随 PR 提交**（根 `workspace.dependencies` 各 euv* version + 各 member `package.version`),CI sync 变 no-op；之后 `cargo generate-lockfile` 再验证                                                                                                                      |
-| 文档站/长页面切换主题后**一屏以下区域配色不对**（暗色模式下页面底部一大片白）                                                        | `c_app_root` 是 `height: 100%` 的视口锁定 app 壳（example 内部容器滚动）；文档站若是 document 滚动，根元素只有 1 视口高，主题 `background` 到 1 视口高度就断了。两种修法：(a) 根 class 覆盖 `height: "auto"`（保留 `min-height: "100%"`)；(b) **对齐 example：根保持 100%，内容放进 `c_app_main`/`c_mobile_main` 内部滚动容器**（euv-docs PR #9 采用，同时根治）。亮色模式白底看不出，暗色才暴露（verified 0.16.0/0.16.1, euv-docs PR #8/#9)                                                                                                       |
-| 文档站壳上的 locale 绑定文本（侧栏树/section label/品牌标题）切换语言后**不更新**，停留在旧语言                                        | 壳组件 mount 时从 route 算 locale，信号变化不会重建组件体（key 加在静态根 div 上也不订阅信号）；`Router::navigate` 异步生效，紧跟 `location.reload()` 会把导航冲掉。正确姿势：`location.set_hash(route)`（同步生效）**再 `location.reload()`**，整页重启按新 locale 重建（i18n 文档站标准行为，verified euv-docs PR #9)                                                                                                       |
-| 移动端 header/drawer 顶部间距直接写 `env(safe-area-inset-top)`（无条件信任 env）| **letterbox 浏览器会谎报 env**（VivoBrowser 类报 41px 造成"顶部大片空白"；PWA/沉浸式 WebView env 又是真值必须消费）——静态规则无法区分两种宿主。最终架构（PR #63,0.18.12）：`c_mobile_header`/`c_mobile_nav_drawer` 消费 `var(--euv-mobile-safe-top, 0px)`（**默认 0**，浏览器永远贴顶）；沉浸式宿主显式声明（`window.__EUV_IMMERSIVE__=true` 或 `<meta name="euv-immersive" content="true">`），框架 `UseEuvLayout::use_safe_area_fix` 实测 env 后把变量写到 `<html>`。页面永不直接信任 env()，由知道自己沉浸式的宿主声明（euv-app 注入点 = `src-tauri/src/cache/fn.rs` `on_page_load` → `webview.eval`，euv-app PR #4)                                                                                                                                                                                                                                               |
-| **`euv fmt` workspace clean 但 CI `cargo fmt --check` 报 diff** | 两个工具不一致：`euv fmt` 只重排 `class!`/`html!` 宏内部（macro-aware），impl 代码完全交给 `cargo fmt`。**Rust match arm 简单到能放一行时 `cargo fmt` 会压成 `Pattern => expr,` 单行**（PR #101 实际踩坑：原写多行 `Fragment(children) => { ... }` CI 不接受，必须合并成单行）。`euv fmt` 不会主动碰 impl 代码。**实战**：本地写完先用 `euv fmt` 跑一次，再跑 `cargo fmt`（如果装了）或参考最近 PR CI 风格确认 match arm 单行/多行一致性。 |
-| **patch tool 自带 rustfmt 报"let chains are only allowed in Rust 2024 or later"假错** | patch tool 自带的 rustfmt 是旧版（< 1.85），不支持 Rust 2024 `let chains` 语法。文件实际是合法的（CI 用 rustc 1.98 全过）。patch tool 输出 `lint.status: error` 不代表代码有问题——只要修改是局部的（patch 工具显示"Pre-existing lint errors — this edit didn't introduce new ones"）就放心提交。 |
-| **reactive `if { cond } { ButtonA } else { ButtonA'` arm-swap 后,新 arm 的 button click handler 不响应(euv 0.24.x 全版本,不只是 example timer page)** | 注册表(`/root/github/euv-dev/euv/core/src/renderer/registry/impl.rs` `dispatch_delegated_event`)通过 `data-euv-id` 在 window delegation 找到 handler slot。arm 切换触发的 re-render 走 `patch_attributes`(`core/src/renderer/render/impl.rs` `patch_attributes`),fast-path `if old_attrs == new_attrs { return; }` 会把 `Event` AttributeValue 当成 equal(因为 `AttributeValue::PartialEq` `impl Eq for AttributeValue` 显式返回 `true`),因此新 arm 派生的 `Rc<dyn Fn(Event)>` handler 永远不会被绑到 slot 里——slot 仍持有首次 mount 的 handler,第一次 click 触发老 handler,之后任何 click 都跑老 handler 而非新 arm 的 handler。**实测现象**:timer page Start 点击有效(button 文本从 Start→Pause,数字从 00:00→00:03),Pause 点击无任何反应(button 文本不变,数字继续涨)。**两种 fix 模式**:(a) **framework 层**——改 `core/src/vdom/attribute/impl.rs` `(Self::Event(_), Self::Event(_)) => true` 为 `=> false`,并把 `patch_attributes` 的 fast-path 改成 `if old_attrs == new_attrs && !new_attrs.iter().any(|a| matches!(a.get_value(), AttributeValue::Event(_)))`(本会话在 `fix/event-attr-partialeq` 分支验证过此改动能跑过 `cargo check` + `cargo clippy`,但实测仍未能修复 bug——wasm-opt 可能 strip 掉日志,根因在 patch_attributes 整个函数在某些 re-render 路径不被调用,值得继续深挖 `attach_event_listener` 为何没被 dispatch);(b) **example 层 workaround**——把 Start/Pause 合并成单一 toggle button,在 hook 层建一个 stable `Rc<dyn Fn(Event)>` toggle handler(read `running` signal 在 click 时决定 start/pause path),button 元素不再被 create/destroy(`onclick` attr identity 跨 render 稳定),label 切换走 reactive `if { !running } { "Start" } else { "Pause" }` text node patch。验证见 `references/euv-event-handler-rerender-pitfall.md`。**最简验证**:wasm build → chromium remote debug → 按钮文本变 (running signal 反转) 但 click 不更新 state,即说明新 arm handler 没绑上。 |
-| **`match { signal }` arm 切换后，旧 tab 的 page-level `Signal<bool>` 状态幸存 → 切回 tab 时 overlay / 状态错位再现** | `match` arm 切换时 `core/src/renderer/render/impl.rs:914` 走 `render_full_replace`（整 arm DOM 子树销毁重建），但**注册在 page-level `HookContext` 里的 `Signal` 不会随之清除**——`hook_context.switch_arm`（`core/src/reactive/hook/impl.rs:24`）只清 per-arm hooks/cleanups。表现：fullscreen tab A 进入全屏 → `canvas_2d_fullscreen.set(true)`（page-level signal）→ 切到 tab B（A arm DOM 被销毁）→ 切回 A（A arm 重建）→ `c_game_container_fullscreen` overlay 重现，因为 `canvas_2d_fullscreen` signal 仍然是 `true`。**修复模式**：tab 切换处理器里**先复位所有 per-tab state signal 再 `tab.set(value)`**。例：`game_2d_on_tab_select(tab, value, fullscreen)` 在闭包最前面 `fullscreen.get_canvas_2d().set(false); fullscreen.get_web_gl().set(false); fullscreen.get_web_gpu().set(false);` 再 `tab.set(value)`。其他跨 arm 持有的 boolean / enum signal（modal-open、form-state、pending-uploads）同理。诊断：复现切 tab 后残留 UI → 在 `register_popstate_guard`/tab handler 加日志确认 signal 没复位。verified PR #104 (0.18.38)。 |
-| **fixed-aspect canvas（800×450 = 16:9）放进全屏容器后，绘制的球/精灵被拉伸成椭圆** | canvas backing buffer 是固定逻辑分辨率（`GAME_2D_CANVAS_WIDTH × GAME_2D_CANVAS_HEIGHT = 800 × 450`）。如果外层 `c_game_container_fullscreen`（`width: 100%; height: 100%; position: fixed`）直接铺满 viewport，再把 `<canvas>` 用 `width: 100%; height: 100%` 嵌进去，浏览器按 viewport 比例（如 1280×800 = 1.6:1）拉伸 16:9 的 bitmap → 球变横向椭圆。**修复：插一层 16:9 letterbox wrapper**——class 必备三件套 `aspect-ratio: "16 / 9"; width: "100%"; max-width: "100%"; max-height: "100%"; height: "auto"; display: "flex"; align-items: "center"; justify-content: "center";`，**外加 `position: "relative"`**（让 `c_game_loading_overlay` 这种 `position: absolute` 的子元素以此为定位锚点，否则会逃逸到 `c_game_container_fullscreen`）。view 里 `<div class: c_letterbox()><canvas class: c_canvas() .../></div>`，原 backing 不变（仍 800×450），浏览器均匀缩放到 letterbox。generic 模式：任何"fixed-aspect bitmap/sprite 嵌入 fluid 容器"都套这个 letterbox 包装。verified PR #104 (0.18.38, euv example game_2d/game_3d 全屏模式)。 |
-| **clickable `<div>` with delegated `onclick` inside scrollable container OR fixed-position overlay is silently dead on iOS Safari（影响 `/conditional`、`/game_2d`、`/game_3d`、`/keep_alive` 等所有用 `c_tab_item_*` 的 page；以及所有用 `c_modal_overlay` / `c_vconsole_overlay` / `c_euv_drawer_overlay` / `c_mobile_overlay` 的 modal/drawer/vconsole）** | iOS WebKit 把 tap 误判为"开始滚动" → 直接 suppress synthetic `click`,`Registry::delegation("click")` 监听 window 但 iOS 根本不派发 click,所以 delegated handler 永远不被调用。Android/PC 没这个手势消歧义逻辑所以正常。`euv_button`(真 `<button>`)不受影响,iOS 把 button 当原生交互元素直接派发 click。两个变体位置: (a) **scrollable 容器内的 clickable leaf**(如 tab item)— PR #231 加 `touch-action: manipulation` 到 `c_tab_item_active` / `c_tab_item_inactive`;(b) **fixed-position overlay 背景遮罩上的 click-to-close**(如 `c_modal_overlay` 等所有 `c_*_overlay`)— PR #232 加同一对 CSS 到 `c_modal_overlay` / `c_vconsole_overlay` / `c_euv_drawer_overlay` / `c_mobile_overlay`。两个位置都要 `touch-action: manipulation` + `user-select: none`(+ `-webkit-` 前缀)——告诉 iOS 这个元素只响应 tap + 平移,不做双击缩放等待,不做滚动手势消歧,同时关掉 iOS 长按文字选择气泡。**作用域只到 leaf 元素 / overlay 类自身,绝不要写到 `c_app_main` 这种滚动容器上**(会让页面无法 pan)。Generic 模式:任何自定义 clickable `<div>`/`<span>`(不是 `<button>`/`<a href>`)且在 scrollable 容器或 fixed overlay 里都需要这两条 CSS。诊断:iOS Safari 里 tap 无 console error、无 state 变化,但在 macOS Safari 同 page 正常。完整 repro + 通用化模式 + 修复代码 + 不该做的事见 `references/euv-ios-tab-click-pitfall.md`。verified PR #231 (0.24.5, tabs) + PR #232 (0.24.6, overlays)。 |
-| **agent (自动) 在 `class!` / `html!` 宏体里塞"why 解释"块注释,user 会立刻让删 (PR #231/#232 + user 2026-09-14 明确指令)** | agent 反复踩的同一类反模式:为某次 fix 在 `class!` class body 顶部写 5-15 行的"iOS WebKit: ... rationale ..."注释;**这些注释不是文档,user 视其为 unsolicited preamble / 教学**,与对话中"禁止 lecture"同源。**Rule**:`class!` / `html!` 宏体里**只写 CSS 属性和 reactive 控制流,不加解释性注释**。必要的 why 写到 (a) commit message + PR body(那是给 reviewer 看);(b) `references/` 文件(那是给未来 agent 看)。**例外**:`class!` 块外的 `///` doc comment 或函数级 `///` 注释是项目惯例,保留;类体内 `// xxx` inline 注释一律不写。**Pre-commit 自检**:任何 `class!` block 内的 `//` 注释都该是"为什么这条 property 必须这样"的**反直觉**说明(如 `cursor: pointer` 在 `<div>` 上的兼容陷阱),否则删。PR #231 (9 行)+ PR #232 (12 行) agent 注释合计 21 行,user 一个回合清光;后续 euv 修复在 class! 里写注释前先想"如果 user 让我删,我愿意删吗?"。**2026-09-19 加深**:同样的规则应用到 `///` doc comment——user PR review 时也清掉了大量函数级 `///` 注释(`/// Renders the home page: ...`、`/// # Arguments`、`/// # Returns`、字段的 `/// The card title.` 等),只保留一句非显然的功能描述。规则升级为:**agent 写的所有注释(function-level `///`、field `///`、inline `//`)都该 self-documenting,且仅在反直觉或交叉边界时写**;显而易见的字段名/函数名不需要注释重申。"如果 user 让我删,我愿意删吗?" 这条 prompt 同样适用于所有注释,不只是宏体里的。 |
-| **下游工具仓(euv-docs / euv-cli) Cargo.toml 把 framework engine 设为 `"*"` 浮到最新可能引入 CSS API mismatch (2026-09-19 docs-pages 部署教训, euv-docs PR #40)** | 任何下游工具 crate 的 `Cargo.toml` 都应 **pin 到上游主仓规定的具体版本**(`euv-dev/euv` 当前是 `0.18` 写死,PR #13 故意 pin),而不是 `"*"`。理由:framework engine CSS 类名 + safe-area pattern + UI 组件签名跨 minor 版本会变,下游工具仓若用 `euv-ui` 组件或样式,版本浮动引入 CSS API mismatch → mobile nav / sidebar 对齐 / 主题色 / 首页边框 fallback 到旧样式 = "看起来没修复但实际是版本 mismatch"。**验证法**:查 `git log -- Cargo.toml` 在 `euv-dev/euv` 仓找 `#13` PR 注释;或 `curl -sL https://raw.githubusercontent.com/euv-dev/euv/master/Cargo.toml \| grep -E '^euv \|^euv-ui' \| head -3` 看上游 pin。**deploy 引用下游工具仓必须 pin 绝对 SHA**(`cargo install --git ... --rev <sha>`,勿用 `main` / `master`),每次 bump 都要 review 对应 PR + 上游 engine 兼容矩阵。**实战误用**:`eastspire/euv-docs@35febe7` fork 把 `euv = "0.18"` 改为 `"*"` 让 engine 跳到 0.24.x → 线上 sidebar 对齐丢失 + 首页边框全无 → 用户连续 3 轮反馈"修复全没了"。**修复** = 切回 `euv-dev/euv-docs@6c62600` (upstream, `euv = "0.18"` 官方 pin) → 立即恢复正常 sidebar / anchor / 主题色。 |
-| **GitHub Pages 仓 deploy.yml 用 `cargo install --git euv-dev/euv` 装 euv-docs CLI 时,`-p euv-docs` 报 "unexpected argument '-p' found";`--bin` 不带包名 cargo 报 "multiple packages with binaries found";正解是包名作位置参数** | `cargo install --git` 的 flag 与 `cargo build` / `cargo run` 不同:**`-p <crate>` 不支持**(`-p` 在 install 的 flag 列表里没有,得用 `-- -p` 才能传给 cargo build,但 install 自己不看),**包名是位置参数**(放最后),`--bin <name>` 仅在多 binary crate 里选具体 binary。**6 种错都试过**:(1) 只 `--bin euv-docs` → "multiple packages with binaries found: euv-cli, euv-docs";(2) 加 `-p euv-docs` → "unexpected argument '-p' found";(3) 删 `--bin` 加 `euv-docs` → OK 但 cargo 默认走 default branch 不可控;(4) 加 `--branch master` 加 `euv-docs` → OK;**正解**:`cargo install --target-dir /tmp/td --git URL --branch <b> <crate> --bin <bin> --force`。**配套**:install step 必须在 fetch step **之后** (否则 build.rs 在 euv 仓没 checkout 时 panic "site config missing");EUV_DOCS_SRC_DIR 必须**绝对路径**(`${{ github.workspace }}/...`),不能用相对(因 Actions cwd 不可靠)。完整 deploy 模板 + fetch/install/build 顺序 + force-push admin 升级模式见 `references/euv-docs-cli-deploy-pipeline.md`。 |
-
-## 13. 最小可运行模板
-
-```rust
-// lib.rs
-use euv::*;
-
-#[wasm_bindgen]
-pub fn main() {
-    console_error_panic_hook::set_once();
-    inject_app_global_css();
-    App::mount("#app", app);
-}
-
-pub fn app() -> VirtualNode {
-    let (count, set_count) = App::use_signal(0);
-    html! {
-        div { class: c_euv_button_primary_md()
-            button { onclick: move |_| set_count.set(count.get() + 1)
-                { "Count: " } { count.get() }
-            }
-        }
-    }
-}
-```
-
-## 14. 数字/事实验证脚本(用这个对账)
-
-```bash
-# 组件数(带 view/ 的)
-ls -d /tmp/euv/ui/src/component/*/view | wc -l      # → 28(另有 browser/camera/layout/theme/touch 5 个纯 hook 组件无 view/)
-
-# class 数
-grep -cE "^[[:space:]]+pub c_" /tmp/euv/ui/src/style/class/fn.rs   # → 358
-
-# vars 数
-grep -cE "^[[:space:]]+pub c_" /tmp/euv/ui/src/style/var/fn.rs     # → 2
-
-# 7 个 proc_macro
-grep -E "proc_macro" /tmp/euv/macros/src/lib.rs
-
-# 组件带 hook 的列表
-find /tmp/euv/ui/src/component -name "hook" -type d
-
-# 32 个 example page
-ls /tmp/euv/example/src/page/ | grep -v mod.rs | wc -l
-```
-
-每次大版本升级,跑一遍这些命令,数字有变就更新本文档。
-
-## 15. 与其他 skill 关系
-
-- **rust-standards**:同时必加载(任何 Rust 任务)。Rust 代码风格/错误处理/lombok 以它为准。
-- **rust-crate-use**:euv 用的第三方 crate(`lombok-macros` / `wasm_bindgen` / `web-sys` / `js-sys`)由它管。
-- **euv-ui-standards**:UI 设计规范 + 358 个 class 的具体样式含义(以 §5 实测为准)。
-- **euv-pixel-game-scaffold**:用 euv 搭游戏的脚手架(euv 实际能力不止 web,也能做 2D/3D 游戏 —— example 里有 `game_2d` / `game_3d` page)。
-
-## 16. euv-engine WebGPU renderer 真实 API(2026-08 实地补完)
-
-euv-engine 的 `WebGpuRenderer`(在 `engine/src/renderer/impl.rs` 中)是 WebGPU 的 1:1 Rust 包装层,**所有 WebGPU const 名都集中在 `const.rs`,所有方法签名都在 `impl.rs`**。
-
-### 16.1 真实 const 总数与命名约定
-
-`engine/src/renderer/const.rs` 实地有 **300+ `pub(crate) const WEBGPU_*`**,命名规则:
-
-| 前缀                   | 含义           | 例                                              |
-| ---------------------- | -------------- | ----------------------------------------------- |
-| `WEBGPU_METHOD_*`      | JS 方法名      | `WEBGPU_METHOD_MAP_ASYNC = "mapAsync"`          |
-| `WEBGPU_PROPERTY_*`    | 描述符字典 key | `WEBGPU_PROPERTY_BYTES_PER_ROW = "bytesPerRow"` |
-| `WEBGPU_MAP_MODE_READ` | u32 数值常量   | `WEBGPU_MAP_MODE_READ: u32 = 1`                 |
-
-**黄金纪律**:**先 `grep` 再加 const** — 99% 你想加的都已经存在,加重复会触发 `E0428 defined multiple times` 雪崩。
-
-```bash
-grep -oE "WEBGPU_(PROPERTY|METHOD|MAP_MODE)_[A-Z_]+" \
-  /root/projects/euv/engine/src/renderer/const.rs | sort -u
-```
-
-### 16.2 WebGpuRenderer 真实方法表(impl.rs)
-
-| 方法                                                                                               | 签名                                                        | 用途                                   |
-| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------- |
-| `get_device()`                                                                                     | `&JsValue`                                                  | 拿 `GpuDevice`                         |
-| `get_queue()`                                                                                      | `&JsValue`                                                  | 拿 `GpuQueue`                          |
-| `get_context()`                                                                                    | `&JsValue`                                                  | 拿 `<canvas>` 上下文                   |
-| `create_command_encoder(&self)`                                                                    | `&self -> JsValue`                                          | 命令编码器                             |
-| `create_buffer(&self, size, usage)`                                                                | `(u64, u32) -> JsValue`                                     | GPU buffer                             |
-| `create_sampler(&self, mag_filter, ...)`                                                           | `(u32, ...) -> JsValue`                                     | 采样器                                 |
-| `create_view(&self, texture, Option<&TextureViewDescriptor>)`                                      | `&JsValue -> JsValue`                                       | 纹理视图(本轮补完 descriptor 完整字段) |
-| `create_bind_group(&self, layout, &BindGroupDescriptor)`                                           | `&JsValue`                                                  | 绑定组                                 |
-| `create_shader_module<S: AsRef<str>>(&self, code: S)`                                              | `JsValue` (预存在,本轮**未**重定义)                         |
-| `create_shader_module_with_label(&self, wgsl, label)`                                              | `&str, &str -> JsValue` (本轮新增,带 devtools label)        |
-| `create_render_pipeline(&self, wgsl, vs_entry, fs_entry, config)`                                  | `&str, &str, &str, &RenderConfig -> JsValue`                |
-| `create_render_pipeline_full(&self, descriptor)`                                                   | `&RenderPipelineFullDescriptor -> JsValue` (本轮补完)       |
-| `create_compute_pipeline(&self, wgsl, entry)`                                                      | `&str, &str -> JsValue`                                     |
-| `begin_render_pass_full(&self, descriptor)`                                                        | `&RenderPassDescriptor -> JsValue` (本轮补完)               |
-| `begin_render_pass_to_texture(&self, texture, color, depth)`                                       | `&JsValue, &Color, Option<&DepthAttachment> -> JsValue`     |
-| `begin_compute_pass(&self, descriptor)`                                                            | `Option<&ComputePassDescriptor> -> JsValue`                 |
-| `set_pipeline(&self, pass, pipeline)`                                                              | `&JsValue, &JsValue`                                        |
-| `set_bind_group(&self, pass, index, group)`                                                        | `&JsValue, u32, &JsValue` (3 参,预存在)                     |
-| `set_bind_group_with_dynamic_offsets(&self, pass, index, group, &[u32])`                           | (本轮新增,4 参,渲染通道)                                    |
-| `set_bind_group_compute_with_dynamic_offsets(&self, pass, index, group, &[u32])`                   | (本轮新增,4 参,计算通道)                                    |
-| `set_vertex_buffer(&self, pass, slot, buffer)`                                                     | `&JsValue, u32, &JsValue`                                   |
-| `set_index_buffer(&self, pass, buffer, format)`                                                    | `&JsValue, &JsValue, &str`                                  |
-| `set_viewport(&self, pass, x, y, w, h, min_z, max_z)`                                              | (本轮新增)                                                  |
-| `set_scissor_rect(&self, pass, x, y, w, h)`                                                        | (本轮新增)                                                  |
-| `set_stencil_reference(&self, pass, reference: u32)`                                               | (本轮新增)                                                  |
-| `set_blend_constant(&self, pass, r, g, b, a)`                                                      | (本轮新增)                                                  |
-| `draw(&self, pass, vertex_count, instance_count, first_vertex, first_instance)`                    | (本轮补完参数)                                              |
-| `draw_indexed(&self, pass, index_count, instance_count, first_index, base_vertex, first_instance)` | (本轮补完参数)                                              |
-| `draw_indirect(&self, pass, buffer, offset)`                                                       | (本轮补完参数)                                              |
-| `draw_indexed_indirect(&self, pass, buffer, offset)`                                               | (本轮补完参数)                                              |
-| `dispatch(&self, pass, x, y, z)`                                                                   | 计算 pass 调度                                              |
-| `end_render_pass(&self, pass)`                                                                     | `&JsValue`                                                  |
-| `finish_command_encoder(&self, encoder)`                                                           | `&JsValue -> JsValue`                                       |
-| `submit(&self, &[JsValue])`                                                                        | 命令缓冲提交                                                |
-| `copy_texture_to_buffer(&self, src, dst, &Extent3D)`                                               | 纹理→buffer 拷                                              |
-| `write_texture(&self, &JsValue queue, &TextureWriteDescriptor, &[u8])`                             | (本轮新增)                                                  |
-| `read_buffer(&self, buffer, offset, size) -> Option<Vec<u8>>` (async)                              | **async fn**(本轮新增,不是 sync — 同步会卡死 wasm executor) |
-| `generate_mipmaps(&self, texture)`                                                                 | (本轮新增)                                                  |
-| `push_error_scope(&self, filter: &str) -> JsValue`                                                 | (本轮新增,错误诊断)                                         |
-| `pop_error_scope(&self) -> JsValue`                                                                | (本轮新增,返回 Promise<JsValue>)                            |
-| `apply_camera(&self, ...)`                                                                         | 2D 相机                                                     |
-| `create_texture_view` / `create_depth_texture` / `create_offline_render_target`                    | 2D 离屏 RT                                                  |
-| `create_uniform_buffer` / `create_uniform_bind_group`                                              | 2D 路径快速方法                                             |
-
-### 16.3 描述符结构(struct.rs)
-
-```rust
-pub struct TextureViewDescriptor {
-    pub format: Option<&'static str>,        // "rgba8unorm" / "depth24plus" / ...
-    pub dimension: Option<&'static str>,     // "1d"/"2d"/"2d-array"/"cube"/"cube-array"
-    pub aspect: Option<&'static str>,        // "all"/"depth-only"/"stencil-only"
-    pub base_mip_level: u32,                 // 0 = default
-    pub mip_level_count: u32,                // 0 = default (全 mip)
-    pub base_array_layer: u32,
-    pub array_layer_count: u32,
-}
-pub struct TextureWriteDescriptor {
-    pub texture: JsValue,                    // **不是 Option** — 必传
-    pub mip_level: u32,
-    pub origin: Option<JsValue>,             // {x,y,z} 字典
-    pub data_layout: JsValue,                // {offset,bytesPerRow,rowsPerImage} 字典
-    pub size: JsValue,                       // {width,height,depthOrArrayLayers} 字典
-}
-```
-
-> ⚠️ Lombok `Getter` 对 `u32` 字段生成 `fn get_x(&self) -> u32`(value,**非** `&u32`),对 `Option<T>` 生成 `fn get_x(&self) -> Option<T>`(value)。**`u32` 字段不要 `*` 解引用**。
-
-### 16.4 坑表(WebGPU 路径)
-
-| 坑                                                         | 解决                                                                                                                    |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| 加 const 触发 `E0428 duplicate`                            | **先 grep `engine/src/renderer/const.rs`,99% 已存在**                                                                   |
-| 加方法触发 `E0592 duplicate`                               | **Rust 不支持 method overloading**。改用不同名字(如 `create_shader_module_with_label` 而非 `create_shader_module` 重复) |
-| `await` 在 `fn` 里报 `E0728`                               | 改 `async fn`,由调用方 `await`                                                                                          |
-| `Reflect::set(&dict, &key, value)` 第三个参数要 `&JsValue` | `Reflect::set` 是 `(&JsValue, &JsValue, &JsValue) -> Result`                                                            |
-| `if let Some(x) = d.get_origin()` 让 `x: &JsValue`         | 直接 `&x` 用,不要 `&&JsValue`                                                                                           |
-| sync `read_buffer` 卡死 wasm executor                      | 必须 `pub async fn read_buffer`,由 `wasm_bindgen_futures::JsFuture` 驱动                                                |
-| `baseMipLevel=0` 触发浏览器报错                            | 0 = default,跳过 set 让浏览器兜底                                                                                       |
-
-### 16.5 验证脚本
-
-```bash
-# 真实 const 清单
-grep -oE "WEBGPU_(PROPERTY|METHOD|MAP_MODE)_[A-Z_]+" \
-  /root/projects/euv/engine/src/renderer/const.rs | sort -u | wc -l
-
-# 真实方法清单
-grep -oE "pub fn [a-z_]+" /root/projects/euv/engine/src/renderer/impl.rs | sort -u
-
-# cargo check 0 错
-cd /root/projects/euv/engine && cargo check --target wasm32-unknown-unknown
-# cargo test 0 fail
-cd /root/projects/euv/engine && cargo test
-# euv fmt 0 file changed
-cd /root/projects/euv && euv fmt
-```
-
-## 17. 版本升级规则(用户说「升级版本」时)
+## Index
+
+| 想做什么 | Jump to |
+| --- | --- |
+| Bump 版本 / 同步 workspace deps | §2 Version Bump 铁律 |
+| 跨仓 workflow trigger 限制 | §3 跨仓 workflow trigger |
+| euv-docs PR 流程 / Cargo.toml pin 规则 | §4 euv-docs PR 流程 |
+| 数字/事实验证脚本 | §5 数字/事实验证脚本 |
+| 与其他 skill 关系 | §6 互锁 skill |
+
+## 2. Version Bump 铁律
 
 **euv 提交铁律(user 指令 2026-09-11)**: 任何 euv 框架改动(修复/功能/重构)提交时严格按以下顺序执行,不可跳步:
 
 1. **修复/改动完成**(代码 + 本地验证: cargo check wasm / clippy / audit_rust_standards.py / cargo test --no-run)
-2. **升级小版本** — 「小版本」= patch bump(如 0.21.4 → 0.21.5),只改根 `Cargo.toml` `[package] version` 一行;子 crate 与 workspace path-dep 一律不动,CI `sync_workspace_version` 自动 propagate
+2. **升级小版本** — 「小版本」= patch bump(如 `W.V.U → X.Y.(U+1)`),只改根 `Cargo.toml` `[package] version` 一行;子 crate 与 workspace path-dep 一律不动,CI `sync_workspace_version` 自动 propagate
 3. **`euv fmt`** — 必须跑到 0 files changed(或带上其结果)
 4. **commit / push / PR**
 
@@ -516,7 +58,7 @@ euv 仓的 release bump **只改 1 个文件**(verified PR #101 + 2026-09-05 PR 
 **根 `Cargo.toml` 第 3 行 `[package] version = "X.Y.Z"`**。**只改一行**。
 
 CI `.github/workflows/rust.yml` 里 `sync_workspace_version` job(`if: github.event_name == 'push' && github.ref_name == 'master'`)在 master merge commit 上**自动 propagate**:
-- 6 个子 crate 各自的 `[package] version`(cli/core/engine/example/macros/ui)
+- 7 个子 crate 各自的 `[package] version`(cli/core/engine/example/macros/ui/docs)
 - 根 `[workspace.dependencies]` 里 6 个 path-dep 的 `version = "X.Y.Z"`
 
 PR 内 squash 后是 **1 file / +1/-1 diff**,典型。
@@ -527,8 +69,9 @@ PR 内 squash 后是 **1 file / +1/-1 diff**,典型。
 
 ```bash
 cd /root/github/euv-dev/euv
-NEW_VER="0.18.61"
-OLD_VER="0.18.60"
+# OLD_VER / NEW_VER 从根 Cargo.toml [workspace.package] version 提取;每个 bump 自填
+NEW_VER="X.Y.Z"      # ← bump 目标(每次手填)
+OLD_VER="W.V.U"      # ← 当前 master 版本(从根 Cargo.toml 抄)
 # 只改根 Cargo.toml 的 [package] version
 sed -i "s/^version = \"$OLD_VER\"$/version = \"$NEW_VER\"/" Cargo.toml
 # 验证 git diff --stat 应该只有 1 file +1/-1
@@ -536,7 +79,7 @@ git diff --stat
 # 期望:Cargo.toml | 2 +-
 ```
 
-**不要**对 6 个子 crate `Cargo.toml` 或 `[workspace.dependencies]` path-dep 做任何 `sed`。CI 会处理。
+**不要**对 7 个子 crate `Cargo.toml` 或 `[workspace.dependencies]` path-dep 做任何 `sed`。CI 会处理。
 
 **验证清单**(PR commit 之前):
 - `git diff --stat` 输出**只有** `Cargo.toml` (根) + 1 line
@@ -552,16 +95,18 @@ git diff --stat
 **sync_workspace_version 触发但可能写错 (2026-09-11 实测, PR #196 / #197)**: 在某些情况下 sync job 跑完后写回 master 的不是新版本而是**旧版本**——具体观察: PR #196 把 root `Cargo.toml` bump 到 0.21.2、merge 后, sync job 跑了并写了 `chore: sync all package versions to 0.21.1` (即把 root 从 0.21.2 又 sync 回 0.21.1)。看起来是 sync 读了 stale 的 root Cargo.toml 内容(可能是从 merge commit 触发时读到的还是 pre-bump 状态)或 sync job 自己逻辑有 bug。**修复**: 如果 merge PR #196 后 master 没有出现 `chore: sync all package versions to 0.21.2`, 就手工 commit:
 ```bash
 cd /root/github/euv-dev/euv
-sed -i 's/^version = "0.21.1"$/version = "0.21.2"/' Cargo.toml cli/Cargo.toml core/Cargo.toml engine/Cargo.toml example/Cargo.toml macros/Cargo.toml ui/Cargo.toml
+# sync regression 修复:手动 sed 所有 7 个文件
+# (替换以下占位符为实际数字)
+sed -i 's/^version = "W.V.U"$/version = "X.Y.Z"/' Cargo.toml cli/Cargo.toml core/Cargo.toml docs/Cargo.toml engine/Cargo.toml example/Cargo.toml macros/Cargo.toml ui/Cargo.toml
 # workspace.dependencies 部分 (Cargo.toml 内的 6 个 path-dep) 用 sed 替换时要避开 'compare_version = "2.0.14"' 这种非 path-dep 行 — 用 grep 锁定 path-dep 段
 git diff --stat   # 期望: 7 files changed, 14 insertions(+), 14 deletions(-) — 每个文件 +1/-1
-git commit -m "chore: bump version to 0.21.2 (fix sync regression)"
+git commit -m "chore: bump version to X.Y.Z (fix sync regression)"
 git push origin master
 ```
 CI 这次会再次 sync 一次, 写一个空的 `chore: sync all package versions to 0.21.2` 上去确认 7 个文件一致。
 
 **Bump + PR + Merge 完整序列(PR #171 + PR #220 验证)**:
-1. bump commit: `sed -i 's/^version = "0.20.0"$/version = "0.20.1"/' Cargo.toml` → `git diff --stat` 期望 `1 file +1/-1` → `git add Cargo.toml && git commit -m "chore: bump version to 0.20.1"`
+1. bump commit: `sed -i 's/^version = "W.V.U"$/version = "X.Y.Z"/' Cargo.toml` → `git diff --stat` 期望 `1 file +1/-1` → `git add Cargo.toml && git commit -m "chore: bump version to X.Y.Z"`
 2. push: `git push -u origin chore/bump-X.Y.Z`
 3. PR create:用 `curl` REST,见下方"`gh` GraphQL 失败"段
 4. 等 CI: `gh pr view <N> --repo euv-dev/euv --json statusCheckRollup`(build/check/clippy/tests 4 项全 pass 才 merge)
@@ -598,7 +143,7 @@ curl -sS -X PUT https://api.github.com/repos/euv-dev/euv/pulls/<N>/merge \
 
 `curl` 第一次偶尔返回空 body(GH 边缘节点 cache miss),重试一次即过;无副作用,不算阻塞。
 
-**用户语义核对(反复踩过的坑)**:用户说「升级小版本了吗?提交 pr」时,**可能**只指 PR 而不要 bump,也可能要 bump+PR+merge。euv 项目里这两条路径互斥:**bump 后 CI 才能动 6 个子 crate;不 bump 就 PR = 子 crate 不动,违反 §17 铁律第 1 句**。在没有澄清时,默认执行「最严格」(bump+PR+merge),理由:用户已掌握 euv §17 知识,通常是有意要求全流程。
+**用户语义核对(反复踩过的坑)**:用户说「升级小版本了吗?提交 pr」时,**可能**只指 PR 而不要 bump,也可能要 bump+PR+merge。euv 项目里这两条路径互斥:**bump 后 CI 才能动 7 个子 crate;不 bump 就 PR = 子 crate 不动,违反 §17 铁律第 1 句**。在没有澄清时,默认执行「最严格」(bump+PR+merge),理由:用户已掌握 euv §17 知识,通常是有意要求全流程。
 
 **若 release PR 误改了 7 个文件**(历史教训,2026-09-05 PR #148):
 1. revert PR: `git revert -m 1 <merge_sha>` 在新分支 → PR → merge
@@ -661,13 +206,13 @@ print('OK')
 - **CI publish job 在 `set -e` + post-publish verify curl 失败下假报错**(curl exit 35 中断成功 publish,阻断 release job → tag + GitHub Release 缺失),修法 + 已发布版本补救在 `references/minor-bump-ci-red-by-design.md`
 - **`gh pr create` / `gh pr merge` / `gh pr edit` 在 GH_TOKEN 缺 `read:org` scope 时走 GraphQL 被拒**(`gh pr view` / `gh api` 走 REST 正常),REST 绕道 + 偶发 502 Bad Gateway 重试在同 reference 文件
 
-## 18. 跨仓 workflow trigger(euv → euv-app)
+## 3. 跨仓 workflow trigger(euv → euv-app)
 
 euv (`euv-dev/euv`) 和 euv-app (`eastspire/euv-app`) **不同 org**,跨 org workflow trigger **0-secret 不可行**:`workflow_run` 不跨 org、默认 `GITHUB_TOKEN` 无 `actions: write` 跨仓 scope、只有 PAT(`public_repo` classic / fine-grained `Actions: Write` on 下游 repo)或共享 GitHub App 能解。完整方案 / 模板 / revert 模式见 `references/cross-repo-workflow-trigger-limits.md`(实测 PR #228 + revert #230)。
 
-## 19. euv-docs PR 流程(2026-09-19 PR #238 实测)
+## 4. euv-docs PR 流程(2026-09-19 PR #238 实测)
 
-### 19.1 PR base 必须与你分支时的上游 tip 匹配
+### 4.1 PR base 必须与你分支时的上游 tip 匹配
 
 **坑**:打开 PR 时把 base 设为 `master` 而 head 是 fork 的最新 commit,**即使 git diff 看起来 clean,mergeable 也可能 = false**(mergeable_state = dirty)。
 
@@ -694,7 +239,7 @@ print(f'mergeable_state={resp.get(\"mergeable_state\")}')
 
 **mergeable_state = dirty 时 CI 不会触发**(GitHub 跳过)。修法:本地 rebase `git rebase euv-dev/master`,再 force-push。
 
-### 19.2 PR 上的 `sync_workspace_version` 是 skipped
+### 4.2 PR 上的 `sync_workspace_version` 是 skipped
 
 `.github/workflows/rust.yml` 的 `sync_workspace_version` job 条件是 `if: github.event_name == 'push' && github.ref_name == 'master'`,**只在 push master 时跑**。PR 上的 build/check/clippy/tests 跑时 workspace deps 还是上一次 sync 后的状态。
 
@@ -716,7 +261,7 @@ sed -i "s/^version = \"$OLD\"$/version = \"$NEW\"/" Cargo.toml
 git diff --stat   # 期望: Cargo.toml | 2 +-
 
 # 2. sync workspace deps + member versions (与 sync_workspace_version job 同样的 sed)
-for f in cli/Cargo.toml core/Cargo.toml engine/Cargo.toml \
+for f in cli/Cargo.toml core/Cargo.toml docs/Cargo.toml engine/Cargo.toml \
          example/Cargo.toml macros/Cargo.toml ui/Cargo.toml \
          euv-docs/Cargo.toml; do
     sed -i "s|^version = \"$OLD\"\$|version = \"$NEW\"|" "$f"
@@ -736,7 +281,7 @@ merge 后 master 上 CI 跑 `sync_workspace_version` 会变 **no-op**(workspace 
 
 **根 Cargo.toml vs workspace deps 是 2 个独立 commit**(前 1 个,后 2 个):这是 §17 + sync workflow 的标准 2-commit 模式,别把它们 amend 进同一个 commit。
 
-### 19.3 重写已 push 的 PR commit — rebase + amend + force-push
+### 4.3 重写已 push 的 PR commit — rebase + amend + force-push
 
 场景:PR 已经 push 到 remote,user 又让你修改(修注释 / 删无用代码)。**不要**新增"cleanup commit" 污染 PR history。**做**:
 
@@ -760,7 +305,7 @@ git push origin <branch> --force
 
 如果 amend 时写错了 commit message,`git commit --amend` 改 message 后再 push。
 
-### 19.4 `DocsFeature` 替代 `EuvFeature` 的模式
+### 4.4 `DocsFeature` 替代 `EuvFeature` 的模式
 
 **坑**:`euv-docs` pin `euv = "0.18"`(PR #13),`euv-ui` 0.18.x 的 `EuvFeature` frozen,**不能 augment** 加 `link` 字段。
 
@@ -784,7 +329,7 @@ pub struct DocsFeature {
 
 + `Default` derive **必须保留**——`try_get_props().unwrap_or_default()` 需要 fallback,删除会破坏组件挂载。
 
-### 19.5 `euv_feature_grid` 不支持 link → 自己写 atomic render
+### 4.5 `euv_feature_grid` 不支持 link → 自己写 atomic render
 
 **坑**:`euv-ui` 0.18 的 `euv_feature_grid` 不接 `link`(只 render `<div>`,不能 render `<a>`)。即使上游加 link 字段,euv-docs pin 0.18 也不会拿到。
 
@@ -807,7 +352,7 @@ pub(crate) fn docs_feature_grid(node: VirtualNode<DocsFeatureGridProps>) -> Virt
 
 `docs_feature_card` 内部根据 `feature.link.is_empty()` 决定 wrap `<div>` vs `<a>`(external http vs internal route)。
 
-### 19.6 String class + `Css::inject_css` —— 当 `class!` macro 不可达时
+### 4.6 String class + `Css::inject_css` —— 当 `class!` macro 不可达时
 
 **坑**:`class!` macro 定义在 `euv-ui/src/style/class/fn.rs` 且宏本身是 `pub(crate)`,**外部 crate 不能调用**。`euv-docs` 想加自定义 class(如 `c_docs_feature_card_*` / `c_docs_container_tip`)不能走 `class!` 宏。
 
@@ -837,7 +382,7 @@ pub(crate) fn docs_feature_grid(node: VirtualNode<DocsFeatureGridProps>) -> Virt
 
 **注意**:skill §3.G 第 4 条警告"CSS 嵌套 `> div >` 被优化器合并失效"。逗号分组的扁平选择器是安全的,**但嵌套 descendant 选择器在 euv CSS 注入路径里会被合并掉**——测试长链 `> ` 嵌套时用 headless Chromium DOM probe 验证 computed style 真的生效了。
 
-### 19.7 `if { cond }` 在 reactive `if` 里 cond 是非 Signal 裸 bool 时
+### 4.7 `if { cond }` 在 reactive `if` 里 cond 是非 Signal 裸 bool 时
 
 skill §12 坑表已记录此陷阱:**`if { bool_var }`** 报 `bool` no method `get`,因为 macro 把单段标识符自动 rewrite 为 `.get()`。**修法**:
 
@@ -846,7 +391,7 @@ skill §12 坑表已记录此陷阱:**`if { bool_var }`** 报 `bool` no method `
 
 **首选 `== true` 写法**——Signal 创建有运行时代价,组件 props 的中间 bool 用纯 bool + `== true` 即可。
 
-### 19.8 在 euv-docs 这种 monorepo 子包改代码 — Rust edition 2024 lint 噪声
+### 4.8 在 euv-docs 这种 monorepo 子包改代码 — Rust edition 2024 lint 噪声
 
 **坑**:`euv-docs/src/component/password_gate/view/fn.rs` 用 `async fn` + `spawn_local(async move {...})`,但 patch tool 自带的 rustfmt < 1.85 不认 edition 2024 语法,会输出假错:
 
@@ -856,7 +401,7 @@ error[E0670]: `async fn` is not permitted in Rust 2015
 
 **修法**:这是 pre-existing(不是你的修改引入的),看 patch tool 的 lint 输出是否标 "Pre-existing lint errors — this edit didn't introduce new ones"。`cargo fmt -- --check` 在 euv-docs workspace clean → CI 用 rustc 1.98 编过,本地 patch tool 报的错不阻塞 push。
 
-### 19.9 PR push 后 CI 不 trigger —— 检查 mergeable_state 不是 commit
+### 4.9 PR push 后 CI 不 trigger —— 检查 mergeable_state 不是 commit
 
 **坑**:push 后 `gh pr checks` 显示 "no checks reported"。
 
@@ -874,7 +419,7 @@ python3 -c "...(§19.1 同样的脚本)..."
 
 常见:本地 push 用了相对路径 env var → 构建用了错误的 source → CI 实际没编译源代码(只 cargo install)。修法:用绝对路径 `EUV_DOCS_SRC_DIR="$PWD/docs"`。
 
-### 19.10 cargo fmt on 单行长字符串的 indent 陷阱
+### 4.10 cargo fmt on 单行长字符串的 indent 陷阱
 
 **坑**:在 `Css::inject_css("...long string...")` 这种字符串里,如果缩进改了(比如 patch 把 `"..."` 从 4 spaces 改成 12 spaces),`cargo fmt` 会要求**closing `"`** 与 opening `"` 缩进一致。报错信息:
 
@@ -889,10 +434,58 @@ Diff in /path/to/lib.rs:65:
 
 **修法**:跑 `cargo fmt --manifest-path <pkg>/Cargo.toml` 重写整个字符串到正确缩进,然后再 patch 字符串内的内容。或者把整个字符串重写到一个 raw literal `r#"..."#`,cargo fmt 不动 raw literals。
 
-### 19.11 cargo install --git 的 `EUV_DOCS_SRC_DIR` 必须绝对路径
+### 4.11 cargo install --git 的 `EUV_DOCS_SRC_DIR` 必须绝对路径
 
 **坑**:`cargo install --git URL --branch master euv-docs` 会跑 build script。build script 读 `EUV_DOCS_SRC_DIR` 决定 source 目录。如果 `EUV_DOCS_SRC_DIR=./docs`(相对路径),**build script 用当前 cwd 解析**,而 `cargo install` 的 cwd 是 monorepo root → `./docs` = monorepo_root/docs = euv-docs 自带 demo docs(无用户内容)。
 
 **修法**:**绝对路径**。`EUV_DOCS_SRC_DIR="$PWD/docs"` 或 `EUV_DOCS_SRC_DIR="$(realpath ./docs)"`。
 
 完整 deploy pipeline 模板详见 `references/euv-docs-cli-deploy-pipeline.md`。
+
+
+## 5. 数字/事实验证脚本(用这个对账)
+
+> **本 skill 不维护具体数字**(版本号 / class 数 / 模块数 / page 数都是动态的)。以下脚本每次大版本升级时跑一遍,数字自己看,本 skill 不缓存。
+
+```bash
+# 组件数(带 view/ 的) — `ls -d /tmp/euv/ui/src/component/*/view | wc -l` 即得
+ls -d /tmp/euv/ui/src/component/*/view | wc -l
+
+# class 数 — `grep -cE "^\s+pub c_" /tmp/euv/ui/src/style/class/fn.rs` 即得
+grep -cE "^[[:space:]]+pub c_" /tmp/euv/ui/src/style/class/fn.rs
+
+# vars 数 — 2 (`c_theme_light` + `c_theme_dark`);`grep -cE "^\s+pub c_" var/fn.rs` 验证
+grep -cE "^[[:space:]]+pub c_" /tmp/euv/ui/src/style/var/fn.rs
+
+# 8 个 proc_macro(7 个 #[proc_macro] + 1 个 #[proc_macro_attribute])
+grep -E "proc_macro" /tmp/euv/macros/src/lib.rs
+
+# 组件带 hook 的列表
+find /tmp/euv/ui/src/component -name "hook" -type d
+
+# engine 模块数 — `grep -cE "^mod [a-z_]+;" /tmp/euv/engine/src/lib.rs` 即得
+grep -cE "^mod [a-z_]+;" /tmp/euv/engine/src/lib.rs
+
+# example page 数 — `ls /tmp/euv/example/src/page/ | grep -v mod.rs | wc -l` 即得
+ls /tmp/euv/example/src/page/ | grep -v mod.rs | wc -l
+
+# docs/ 在 workspace 内(独立下游 crate `euv-docs`)
+grep -E "^members" /tmp/euv/Cargo.toml
+```
+
+**永远以源码为准 — skill 里任何具体数字都是写时的快照,实际任务前先 grep 验证。**
+
+## 6. 互锁 skill
+
+- **`euv`**(入口)— 跳转 + 5-行最小调用 + 按需加载 `references/api-*.md`
+- **`euv/references/api-core.md`** — euv-core pub API(Signal / VirtualNode / App / hooks)
+- **`euv/references/api-macros.md`** — euv-macros 8 个 proc_macro 签名
+- **`euv/references/api-ui.md`** — euv-ui 组件 + hooks 完整 pub API
+- **`euv/references/api-engine.md`** — euv-engine ~704 项 pub API
+- **`euv/references/api-cli.md`** — euv-cli 39 项 pub API
+- **`euv/references/api-docs.md`** — euv-docs 34 项 pub API
+- **`euv/references/pitfalls.md`** — 反复踩坑索引(旧 §12 表格)
+- **`euv-ui-standards`** — design class catalogue + var token 索引
+- **`rust-standards`** — Rust 通用规范(同时必加载)
+- **`crates-cli-usage`** — `crate-cli` 跨 monorepo 通用工具使用
+- **`rust-pr-validation-checklist`** — Rust PR 提交前必跑的硬性验证清单
