@@ -291,6 +291,7 @@ public clones work fine.
    git fetch origin <default> && git checkout <default> && \
    git reset --hard origin/<default> && git branch -d <merged-branch>
    ```
+   - **Pitfall(squash merge 后 `git branch -d` 会 refuse,必须 `-D`)**:squash merge 把所有分支 commits 压缩成一个新 SHA(不是任何源 commit 的祖先),所以源分支的 tip 不在 master 的 ancestry 里。`git branch -d` 会报 "the branch 'X' is not fully merged" 并 refuse 删除;`git branch -D` 强制删除(因为 squash 之后这些 commits 实际已经被 squash 进 master,只是 SHA 不连续)。**预防**:对自己 PR 走 squash merge 的场景,直接用 `-D`;merge commit / rebase merge 的场景下 `-d` 才能工作(commits 是祖先)。验证:`git branch -D <branch>` 后 `git branch -a` 不再列出该分支 = 清理成功。
    The `reset --hard origin/<default>` ensures your local default
    branch tracks the new merge commit. euv PR #233/#234/#235/#236 chain
    (2026-09-14) had the legacy Track 2 equivalent of this race —
