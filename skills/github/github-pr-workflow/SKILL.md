@@ -699,6 +699,7 @@ If the user prefers a tighter loop ("just merge them all in sequence and report 
 - `references/gfw-throttled-github-fetch.md` — when `codeload.github.com` and `raw.githubusercontent.com` are heavily throttled or blocked but `api.github.com` and `git@github.com` work. Covers `wget` retry recipe, `api.github.com/contents` + base64 fallback for reading raw files, and why tarballs are NOT git repos (implications for PR workflows).
 - `references/build-product-vs-source-repo.md` — when the repo you're about to edit is a Vercel/Netlify/Cloudflare Pages auto-deploy target. Why editing the rendered HTML is wasted work, how to identify the source repo, and what to do instead.
 - `references/github-api-file-upload.md` — Contents API (`PUT /repos/<o>/<r>/contents/<path>`) recipe for uploading file changes without `git clone`. Used when the repo is too large to clone in the time budget, or forking is disabled and you must push straight to the upstream.
+- `references/stacked-pr-rebase-conflicts.md` — covers two distinct stale-PR patterns: (1) stacked PRs whose base is outdated (rebase + per-file resolve); (2) a PR that was **superseded** by another PR landing first (extract unique files onto master, drop the conflict — never rebase-resolve, master is authoritative for every overlapping file). Also documents the auto-fixer / verifier coupling pitfall: a fixer from a stale branch can `AttributeError` because its companion verifier's public surface has changed.
 
 ---
 

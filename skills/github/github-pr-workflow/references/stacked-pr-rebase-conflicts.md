@@ -169,6 +169,73 @@ The §2.2-double-doc pattern is one shape. Other stacked-PR patterns you'll see:
 
 Always check with `git diff --theirs -- <file>` and `git diff --ours -- <file>` to see exactly which lines came from which side before resolving.
 
+## When the stale PR is superseded — extract unique files, drop the conflict
+
+A different pattern from stacked PRs: an open PR sat unmerged while *another PR* that covered the same files landed first. The stale branch now has `mergeable=False` with `mergeable_state=dirty` because every overlapping file conflicts against master. The naive fix is "rebase + resolve N conflicts" — but that's wrong. The right move is to recognize that master already has the newer / correct / authoritative version of every overlapping file, and the only useful content in the stale branch is what master does NOT have.
+
+**Tell**: `GET /repos/<o>/<r>/pulls/<N>` returns `mergeable=False`, `mergeable_state=dirty`, AND the PR has many overlapping files with recent merged PRs into master.
+
+**Procedure:**
+
+1. **Inventory the stale branch's file set vs master.** Run on each side:
+   ```bash
+   git ls-tree -r --name-only <stale-branch> <scope> | sort > /tmp/stale.txt
+   git ls-tree -r --name-only <default>      <scope> | sort > /tmp/master.txt
+   diff /tmp/stale.txt /tmp/master.txt
+   ```
+   The files that appear ONLY in `stale.txt` are the unique-content candidates. Line-count diffs (`wc -l`) on shared files flag which side is more authoritative (usually the larger = the version that absorbed the others' work).
+
+2. **Compare overlapping files line-by-line** to confirm master is the authoritative version. Read 1-2 overlapping files and check: does master's version have newer commit messages referenced in the file header / later timestamps / more pitfall entries? If yes, master wins for every overlapping file — no need to merge the content.
+
+3. **Extract only the unique files onto master:**
+   ```bash
+   git checkout <default>
+   git checkout <stale-branch> -- \
+     <unique-file-1> <unique-file-2> <unique-file-3>
+   git status   # confirm only those files staged
+   ```
+   **Do NOT checkout overlapping files** — they conflict and master already has the right version.
+
+4. **Verify each unique file actually loads/runs.** If a unique file is a script (`*.py` / `*.sh`), run it once with `--help` or against a sample target to confirm it doesn't depend on an older companion script that master has since refactored. Verified 2026-09-26: `fix_dep_order.py` from a stale branch depended on `verify_dep_order._entry_chars` attribute that master's simplified `verify_dep_order.py` no longer exported → `AttributeError` at import → file unusable. **Auto-fixers can silently break when their companion verifier gets simplified**; check the verifier's public attribute list before committing the fixer.
+
+5. **Commit + push + close the stale PR + delete its branch.**
+   ```bash
+   git add <unique-files>
+   git commit -m "chore(<scope>): bring in <PR> unique files (<list>)..."
+   git push origin <default>
+   # Close the PR via REST (state=closed, merged=false — direct-commit superseded merge)
+   curl -X PATCH -H "Authorization: token $TOKEN" \
+        -H "Accept: application/vnd.github+json" \
+        https://api.github.com/repos/<o>/<r>/pulls/<N> \
+        -d '{"state":"closed"}'
+   # Delete the branch
+   curl -X DELETE -H "Authorization: token $TOKEN" \
+        https://api.github.com/repos/<o>/<r>/git/refs/heads/<branch>
+   git fetch origin --prune
+   git branch -D <stale-branch>
+   ```
+
+**Why this beats "resolve all the conflicts":** A stale PR with `mergeable_state=dirty` and 18 conflicting files is rarely worth 18 file-by-file conflict resolutions — every overlapping file's right side is on master already. The cost of resolution is `O(conflicts × lines)`, the cost of extract-and-discard is `O(unique files)`, which is usually < 5. The procedure preserves every piece of unique work from the stale branch while avoiding any risk of overwriting master's authoritative version.
+
+**Anti-pattern:** "I can resolve all 18 conflicts file-by-file" — when master is the authoritative state for every overlapping file, manual conflict resolution is pure busywork. Resolve only when master is wrong or when both sides add legitimately new content to the same anchor.
+
+## Auto-fixers break when their companion verifier changes
+
+Verified 2026-09-26: a stale branch's `fix_dep_order.py` imported a private attribute `_entry_chars` from `verify_dep_order.py`. Master had simplified `verify_dep_order.py` and removed that attribute. Importing the fixer raised `AttributeError` at module load — every call to the fixer failed before reaching the dep-order logic.
+
+**Rule:** Before checking out a fixer from a stale branch, sanity-test it against the verifier that's now in master:
+
+```bash
+python3 -c "import importlib.util, sys
+spec = importlib.util.spec_from_file_location('vd', 'master-path/verify_X.py')
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print([n for n in dir(m) if not n.startswith('__')])
+" | grep -q '<attribute-the-fixer-needs>' \
+  || { echo "FATAL: verifier public API changed; fixer will AttributeError"; exit 1; }
+```
+
+If the verifier's public surface has changed since the fixer was authored, **drop the fixer** (the verifier is still in master and still works; users can manually apply edits). Don't try to port the fixer forward — its logic is usually coupled to the old verifier's parse output in ways that aren't visible from outside.
+
 ## After the rebase lands — validation checklist
 
 1. `cargo check --workspace` (or whatever your build is) — the rebase can introduce subtle issues if upstream renamed identifiers your branch referenced.
