@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Verify §1.3 / §1.3a / §1.3c keyword-file purity + first-line `use super::*;`
-for any Rust project.
+Verify §1.3 / §1.3a / §1.3c keyword-file purity + relaxed sub-file
+use rule for any Rust project.
 
-Per rust-standards (2026-09-26 user tightening):
+Per rust-standards (2026-09-26 user tightening + sixth-iteration relaxation):
 
   • Each file under src/ must be exactly one of the 9 keyword basenames:
         const.rs / static.rs / fn.rs / enum.rs / struct.rs /
@@ -11,20 +11,43 @@ Per rust-standards (2026-09-26 user tightening):
     Exempt: lib.rs / raw_html.rs / main.rs / bin/<name>.rs / build.rs
     and the whole tests/ tree.
 
-  • Keyword files (any of the 9 above, except mod.rs) MUST open with
-    `use super::*;` as the first non-comment line.  The previous
-    exemption allowing direct `///` doc comments on enum.rs / struct.rs
-    / type.rs is RETIRED.
-
   • Within a keyword file, ONLY declarations matching the file's
     basename may appear at column 0.  Existing rule §1.3a raw-string
     parser is reused.
 
-  • Keyword files MUST NOT contain `use crate::xxx;`,
-    `use super::specific_path;`, `use std::xxx;`,
-    `use external_crate::xxx;` outside the leading
-    `use super::*;`.  All imports are centralized in lib.rs /
-    mod.rs.
+  • Keyword file's first `use` line, if any, MUST be exactly
+    `use super::*;`.  A keyword file MAY also have NO `use` at all
+    (2026-09-26 sixth iteration user relaxation: "不是所有文件都必须要
+    需要使用 use super::*, 可以不要 use").  This means:
+        ✅ File with NO `use`                              — OK
+        ✅ File with `use super::*;` (first or anywhere)   — OK
+        ❌ File with `use crate::*;` or `use crate::xxx;`  — violation
+        ❌ File with `use std::xxx;`                       — violation
+        ❌ File with `use external_crate::xxx;`            — violation
+        ❌ File with `use super::specific_path;`           — violation
+
+  • Scope: sub-files only (any .rs file other than lib.rs / mod.rs).
+    lib.rs goes through §2.4 mandatory //! block rules;
+    mod.rs goes through §6.2 three-stage + trailing use super::*;.
+
+Bidirectional fixture (rust-std-fixtures/use-rule/{compliant,violating}):
+  compliant/src/sub1/fn.rs — `use super::*;` first           → 0 violations
+  compliant/src/sub2/fn.rs — NO use                          → 0 violations
+  violating/src/sub2/fn.rs — `use crate::Bar;` etc.         → 4 violations
+  violating/src/sub3/fn.rs — `use crate::*;`                → 2 violations
+  violating/src/sub4/fn.rs — `use external_crate::Foo;`     → 2 violations
+  violating/src/sub5/fn.rs — `use std::collections::HashMap;` → 2 violations
+  violating/src/sub6/fn.rs — `use super::r#helper;`         → 2 violations
+
+Real-workspace findings (audit_rust_standards check 23):
+  euv:    9 violations  (down from 358 — old rule mandatory,
+                          new rule allows skipping use)
+  ctares: 16 violations (down from 175 — same reason)
+
+User original (2026-09-26, sixth iteration):
+  "不是所有文件都必须要需要使用 use super::*, 可以不要 use, 对于
+   lib.rs, mod.rs 之外的 rs 文件, 是不允许出现 use::super::* 和没
+   有 use 之外的其他写法的"
 
 Exit 0 if clean, exit 1 if any violation found (each violation on its
 own line: <file>:<line>: <reason>).

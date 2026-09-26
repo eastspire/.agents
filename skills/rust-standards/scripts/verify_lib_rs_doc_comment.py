@@ -18,6 +18,21 @@ User original (2026-09-26, fifth iteration): "对于 lib.rs 必须
 要检查是否存在 //! 注释,注释第一行 //! 后是包名后面是一行 //!
 再后面才是内容".
 
+Bidirectional fixture (rust-std-fixtures/lib-rs-doc/{compliant,violating}):
+  compliant/crates/foo/src/lib.rs    — minimal `//! foo\n//!\n//! ...`         → 0 violations
+  compliant/crates/baz/src/lib.rs    — minimal `//! baz\n//!\n//! X` (1-char desc) → 0 violations
+  compliant/crates/qux/src/lib.rs    — multi-line description                                → 0 violations
+  compliant/crates/quux/src/lib.rs   — extra blank lines between //! block and code            → 0 violations
+  violating/crates/foo/src/lib.rs    — missing //! block entirely                             → 1 violation
+  violating/crates/bar/src/lib.rs    — //! + content but missing //! separator                 → 1 violation
+  violating/crates/baz/src/lib.rs    — //! text "WRONG_NAME" doesn't match [package].name      → 1 violation
+  violating/crates/qux/src/lib.rs    — blank line between //! and content (no //! separator)   → 1 violation
+  violating/crates/quux/src/lib.rs   — //! + separator but no third //! description line       → 1 violation
+
+Real-workspace findings (audit_rust_standards check 36):
+  euv:    5 violations — name mismatch in core/example/cli/macros/lib.rs,
+                        docs/src/lib.rs has NO //! block at all.
+
 Validation:
   1. File must START with `//!` (no leading whitespace, no
      leading `use` / `mod` / `pub` / `extern` etc.).
