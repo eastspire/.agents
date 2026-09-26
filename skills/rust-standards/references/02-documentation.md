@@ -63,15 +63,36 @@ where
 - 结构体/枚举每个字段必须单独注释其用途。
 - 元组结构体的每个字段同样要注释。
 
-## 2.4 lib.rs 唯一注释
+## 2.4 lib.rs 必须的 `//!` 头部注释 (2026-09-26 第五轮 user 钦定)
 
-`lib.rs` 唯一注释在文件开头,格式如下:
+`lib.rs` 必须以 `//!` doc block 开头,**强制结构**:
 
 ```rust
-//! Crates name
+//! <package_name>     // 文本必须等于 [package].name
 //!
-//! Description
+//! <description>      // 项目自身描述
 ```
+
+第一行文本(`//!` 后)必须等于最近 `Cargo.toml` 的 `[package].name`
+字段值 — 这是强制性对应关系,改名 crate 时 lib.rs 第一行必须同步改。
+
+**user 原话**(2026-09-26 第五轮):"对于 lib.rs 必须要检查是否存在 `//!`
+注释,注释第一行 `//!` 后是包名后面是一行 `//!` 再后面才是内容"。
+
+**验证脚本**:`scripts/verify_lib_rs_doc_comment.py` 读最近 Cargo.toml
+的 `[package].name`,校验 3 行结构 + 第 1 行文本匹配;被
+`audit_rust_standards.py` check 37 调用,exit 1 即违规。
+
+**euv 真仓命中**:
+- `core/src/lib.rs:1` 写 `//! euv` 但包名是 `euv-core`(mismatch)
+- `example/src/lib.rs:1` 写 `//! euv Example` 但包名是 `euv-example`
+- `docs/src/lib.rs:1` 完全没 `//!` 块(直接 `mod component;` 开头)
+- `cli/src/lib.rs:1` 写 `//! euv CLI` 但包名是 `euv-cli`
+- `macros/src/lib.rs:1` 写 `//! euv_macros` 但包名是 `euv-macros`
+
+**历史 audit-pitfalls §17** 的"lib.rs `//!` doc comment IS allowed"
+条目标记为 **DEPRECATED** —— 这条规则从"可加可不加"升级为"必须
+按固定 3 行结构加"。
 
 ## 2.5 mod.rs 硬性规则:不加任何注释
 

@@ -208,13 +208,34 @@ Blank lines between sections:
 - Between `[build-dependencies]` and `[lib]` (if any)
 - No blank line AFTER the last block (no trailing newline-of-blank-line)
 
-## 17. lib.rs `//!` doc comment IS allowed
+## 17. lib.rs `//!` doc comment IS allowed [DEPRECATED 2026-09-26 fifth iteration]
 
 The audit script category 5 (// comments in mod.rs) does NOT
 flag lib.rs. Master explicitly allows a top-of-file `//!` crate
 description on lib.rs. Same for raw_html.rs (the only non-lib.rs file
 allowed to have `//!` as first lines — it's the proc-macro implementation
 file in `macros/src/`).
+
+**[DEPRECATED 2026-09-26 fifth iteration]**:  This exemption is upgraded
+to a MANDATORY rule by `verify_lib_rs_doc_comment.py` (audit check 37).
+Per user original (2026-09-26 第五轮): "对于 lib.rs 必须要检查是否存在
+//! 注释,注释第一行 //! 后是包名后面是一行 //! 再后面才是内容".
+The required structure is now:
+
+  //! <package_name>     // text must equal [package].name from Cargo.toml
+  //!
+  //! <description>      // project description
+
+Real-workspace findings (euv): 5 lib.rs files violate this rule:
+- `core/src/lib.rs:1` 写 `//! euv` 但 `[package].name = "euv-core"`
+- `example/src/lib.rs:1` 写 `//! euv Example` 但 `name = "euv-example"`
+- `docs/src/lib.rs:1` 完全没 `//!` 块
+- `cli/src/lib.rs:1` 写 `//! euv CLI` 但 `name = "euv-cli"`
+- `macros/src/lib.rs:1` 写 `//! euv_macros` 但 `name = "euv-macros"`
+
+The historical "allowed" framing here is now reversed: missing the
+`//!` block is a violation; the only "allowed" form is the canonical
+3-line structure documented above.
 ## 18. `struct`/`fn` at column 0 inside WGSL shader raw strings — NOT a violation
 
 Keyword-file purity scans (R1.3) that match top-level items by "line starts
@@ -2245,3 +2266,143 @@ the largest single-class violation; will require sustained
 const-extraction work, especially for `eprintln!`/`println!`
 arguments (which are exempt but adjacent code may have other
 hardcoded strings).
+
+### §62 — verify_keyword_file_purity.py first-line check applies to mod.rs (false positive class)
+
+`verify_keyword_file_purity.py`'s `_check_first_line_super()` runs on
+EVERY file with a KEYWORD_BASENAMES basename — including `mod.rs`. But
+§6.2 says `mod.rs` first line MUST be `mod r#xxx;` (the three-stage
+template). The first-line rule (§6.3 sub-file rule) does NOT apply to
+mod.rs. Verifier produces ~80+ false-positive hits on every `mod.rs`
+whose first line is `mod r#const;` or similar.
+
+Symptom: `audit_rust_standards.py` check 23 reports "X hits in Y files"
+with hit count vastly exceeding real first-line violations (e.g. 135
+hits when only 5 are real).
+
+Fix path (skill-script side, out of workspace scope): exempt mod.rs
+from `_check_first_line_super()` in `verify_keyword_file_purity.py`.
+
+Workaround when running audit on workspace: filter check 23 output for
+non-mod.rs lines only — those are the real first-line violations.
+
+### §63 — verify_dep_order.py crashes on `cli/tmp/test_*/Cargo.toml` fixtures, Traceback counted as 135 hits
+
+`verify_dep_order.py` `check_file_v2` has a `return violations`
+statement indented INSIDE the `for sec in [...]` loop. When a Cargo.toml
+file (e.g. `cli/tmp/test_sync_no_version/Cargo.toml` fixtures used by
+the audit self-test) contains no matching dep sections, the loop
+falls through and the function returns `None`. The main() then iterates
+`for v in check_file_v2(...):` → `TypeError: 'NoneType' object is not
+iterable`.
+
+The Traceback lines (130+) are emitted to stdout. `audit_rust_standards.py`
+`run_check` counts `len(out)` where `out = [l for l in r.stdout.strip().split('\n') if l]`
+— so Traceback lines become "hits" and check 21 reports 6 violations
+with 130+ Traceback lines inflating the count, even though exit code is
+non-zero for a non-violation reason.
+
+Fix path (skill-script side): move the `return violations` out one
+indent level (line ~249) so it runs after the for-loop completes, not
+inside it.
+
+### §64 — `and_then` closure receives Ok value, not Err
+
+`Result<T, E>::and_then(F)` requires `F: FnOnce(T) -> Result<U, E>` —
+the closure receives the `T` (Ok value), NOT the `E` (Err). So when
+adding closure type annotations:
+
+- `write_all(&data)` returns `Result<(), io::Error>` → `and_then(|_: ()| flush())`
+  not `and_then(|_: io::Error| flush())`.
+- `.ok().and_then(|u: HttpUrlComponents| u.host.clone())` — closure
+  receives the Ok-wrapped T, type-annotated as T itself (not &T).
+
+Verifier `verify_closure_type_annotations.py` does NOT type-check
+closures — only checks for `: T` annotation presence. So getting the
+type wrong compiles under audit but fails `cargo check` with
+`type mismatch in closure arguments` (E0631).
+
+Always sanity-check closure type annotations with `cargo check` after
+applying bulk regex fixes.
+
+### §65 — `Option::map_or` passes T by value, not &T
+
+`Option<T>::map_or(default, F)` requires `F: FnOnce(T) -> U` — closure
+receives the unwrapped `T` by value (move), NOT `&T`.
+
+Common false annotation in macros:
+- `try_get_header_back(...)` returns `Option<String>` → `.map_or(true, |referer_header: &String| ...)` WRONG, compiler error.
+- Correct: `.map_or(true, |referer_header: String| ...)` or `|referer_header: ::hyperlane_core::RequestHeadersValueItem|`.
+
+Compare with `HashMap::get(K)` returns `Option<&V>` → `.map(|value: &V| ...)`
+takes `&V` (because the Ok value of `Option<&V>` is itself `&V`).
+
+When in doubt: `Option<&T>::map_or(default, |x| ...)` takes `&T`.
+`Option<T>::map_or(default, |x| ...)` takes `T` (moved).
+
+### §66 — audit-verifier output count vs. real violation count
+
+`audit_rust_standards.py` `run_check()` returns `out = [l for l in r.stdout.strip().split('\n') if l]`
+and reports `FAIL: NN. <name>: {len(out)} hits`. The count is **all
+non-empty stdout lines**, not the number of violations.
+
+When a verifier script crashes with a Traceback (e.g. verify_dep_order.py
+on fixture Cargo.toml), the Traceback is on stderr but mixed with stdout
+output. Even if exit code is non-zero for the RIGHT reason, the count
+can be inflated by Traceback lines.
+
+When the reported hit count seems suspiciously high relative to the
+visible violation lines (e.g. 135 hits in 5 visible lines), suspect
+verifier crash + Traceback inflation. Run the verifier standalone and
+look at its actual output.
+
+Cross-check: `audit_rust_standards.py` template `if [ "$exit_code" -ne 0 ]; then echo "FAIL: ..." >&2; fi`
+puts diagnostic on stderr, so the FAIL trailer itself doesn't pollute
+stdout count — only the verifier script's stdout counts.
+
+
+---
+
+## §62 — 2026-09-26 fifth iteration (user-driven, check 37)
+
+User 原话 (2026-09-26 第五轮):
+
+> "对于 lib.rs 必须要检查是否存在 //! 注释,注释第一行 //! 后是
+>  包名后面是一行 //! 再后面才是内容"
+
+This iteration strengthens the existing lib.rs comment policy from
+"allowed but optional" (§17 historical) to MANDATORY 3-line structure.
+The new script `verify_lib_rs_doc_comment.py` reads the nearest
+`Cargo.toml`'s `[package].name` field and validates that lib.rs
+starts with:
+
+  //! <package_name>     // text must equal [package].name
+  //!
+  //! <description>      // content
+
+Implementation:
+
+1. Walk up from `lib.rs` to find the closest `Cargo.toml`.
+2. Parse `[package].name` (regex `^\s*name\s*=\s*"(?P<name>[^"]+)"`).
+3. For each `lib.rs`:
+   - First non-blank line must be `//!` (else: violation).
+   - First `//!` line text must equal `[package].name`
+     (else: violation, mismatch).
+   - Second `//!` line must be EMPTY (just `//!`) — the
+     canonical separator (else: violation).
+   - Third `//!` line is required (description content) —
+     any text allowed (else: violation, EOF).
+
+Bidirectional fixture test: 0/2 violations (one missing-block, one
+incomplete structure).
+
+Real-workspace findings (euv): 5 lib.rs files violate:
+- `core/src/lib.rs` — text "euv" but name "euv-core"
+- `example/src/lib.rs` — text "euv Example" but name "euv-example"
+- `docs/src/lib.rs` — no `//!` block at all
+- `cli/src/lib.rs` — text "euv CLI" but name "euv-cli"
+- `macros/src/lib.rs` — text "euv_macros" but name "euv-macros"
+
+The historical "audit-pitfalls §17 lib.rs `//!` doc comment IS
+allowed" entry is marked DEPRECATED — see that section for the
+full evolution narrative.

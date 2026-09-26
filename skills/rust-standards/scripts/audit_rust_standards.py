@@ -47,6 +47,7 @@ for the master-pattern exceptions the script cannot statically detect):
 34. closure parameters have explicit type annotation (§5.2)
 35. non-test fn has compliant doc comment (§2.1 / §2.2, authoritative)
 36. hardcoded strings live in `const.rs` (§1.3c strengthened)
+37. lib.rs `//!` doc block structure (§2.4)
 
 Each check prints either "PASS: N. <category>" or "FAIL: N. <category>: <count>
 hits" followed by up to 5 sample lines.
@@ -1015,6 +1016,37 @@ python3 "{{audit_script_dir}}/verify_hardcoded_strings.py" "{{target}}" \
 exit_code=${PIPESTATUS[0]}
 if [ "$exit_code" -ne 0 ]; then
     echo "FAIL: verify_hardcoded_strings.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 37 — §2.4 lib.rs MUST have leading `//!` doc block
+    # (2026-09-26 fifth iteration).  User original: "对于 lib.rs
+    # 必须要检查是否存在 //! 注释,注释第一行 //! 后是包名后面
+    # 是一行 //! 再后面才是内容".  Mandatory structure:
+    #
+    #   //! <package_name>
+    #   //!
+    #   //! <description>
+    #
+    # Companion script: verify_lib_rs_doc_comment.py reads the
+    # nearest Cargo.toml's [package].name to compare against the
+    # first `//!` line text.
+    ('lib.rs `//!` doc block structure (§2.4)', '''
+# Per rust-standards §2.4 (2026-09-26 fifth iteration, user 原话):
+#   "对于 lib.rs 必须要检查是否存在 //! 注释,注释第一行 //! 后是
+#    包名后面是一行 //! 再后面才是内容"
+# Every lib.rs MUST start with the canonical 3-line `//!` block:
+#   1st line: `//! <package_name>` (text must equal [package].name)
+#   2nd line: `//!` (empty separator)
+#   3rd line: `//! <description>` (content)
+# Companion script: verify_lib_rs_doc_comment.py.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_lib_rs_doc_comment.py" "{{target}}" \
+    | grep -v -E '^=== lib.rs-doct-comment:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_lib_rs_doc_comment.py exited $exit_code" >&2
 fi
 exit "$exit_code"
 '''),
