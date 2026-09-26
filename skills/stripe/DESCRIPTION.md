@@ -1,0 +1,1 @@
+Stripe skills — official knowledge packs published by Stripe at https://docs.stripe.com/.well-known/skills/index.json. Cover Stripe Connect, Stripe Apps, billing/tax/Treasury, the CLI `stripe docs` tool, vendor directory, money transfer, Metronome usage-based billing, Stripe Projects provisioning, and API/SDK upgrade guidance.
