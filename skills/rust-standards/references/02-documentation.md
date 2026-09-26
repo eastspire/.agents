@@ -18,45 +18,77 @@
 ///
 /// # Arguments
 ///
-/// - `The type of the first parameter` - Description of argument 1.
-/// - `The type of the second parameter` - Description of argument 2.
-/// - `GenericName: GenericConstraint` - Description of argument 3.
+/// - `Type` - Description of argument 1.
+/// - `Name: Constraint` - Description of argument 2.
 ///
 /// # Returns
 ///
-/// - `Type of return value`: Explanation of return value.
+/// - `Type` - Explanation of return value.
 ///
 /// # Panics
 ///
 /// Explanation of when this function might panic.
 ```
+
+**关键约束(2026-09-26 user 加强,2026-09-27 user 第三次强化)**:
+
+1. **`# Arguments` 与 `# Returns` 行必须紧跟空 `///` 行**(section header 之前留一行空 `///`,section 内容之前留一行空 `///`)。
+2. **`# Arguments` 的 `- \`Type\` - description` 与 `# Returns` 的 `- \`Type\` - description` 各自使用 `-`(dash)分隔符(`Returns` 也允许 `:` 分隔符,但两种形式不可混用)**。
+3. **类型签名精确匹配(2026-09-27 user 钦定,新加的硬约束)**:每个 `- \`Type\` -` 中的 `Type` 必须等于 fn 签名中的实际参数类型(保留 `&` 与 `` ` ``),**不允许**把泛型 `T` 写成 `T: Sized`、把 `&self` 写成 `Self`、把 `&'static mut T` 写成 `'static mut T`。完整规则:
+   - `- \`&Self\` -` 用于 `&self` / `&mut self` 方法
+   - `- \`T\` -` 用于泛型参数 `T`(不带 where 子句约束)
+   - `- \`&str\` -` 用于 `&str` 参数(保留 `&`)
+   - `- \`Result<u32, E>\` -` 用于 `Result<u32, E>` 返回类型(完整保留嵌套)
+   - `- \`&'static mut T\` -` 用于 `&'static mut T` 返回类型(保留前置 `&` 与生命周期)
+   - 同样适用于 `# Returns`:类型必须精确等于签名返回类型
+4. **Brief description 必须在第一个 `#` section 之前**:doc 块的第一行非空 `///` 不能直接是 `/// # Arguments` —— 必须先有至少一行英文 prose 描述 fn 的功能。
 
 **完整示例**:
 
 ```rust
-/// Brief description of the item.
-///
-/// Extended explanation if needed.
+/// Compares two `Context` instances for equality.
 ///
 /// # Arguments
 ///
-/// - `A: AsRef<str>` - Description of argument 1.
-/// - `B: String` - Description of argument 2.
+/// - `&Self` - The first `Context` instance.
+/// - `&Self` - The second `Context` instance.
 ///
 /// # Returns
 ///
-/// - `String`: Explanation of return value.
+/// - `bool` - True if the instances are equal, otherwise false.
+#[inline(always)]
+fn eq(&self, other: &Self) -> bool {
+    self == other
+}
+
+/// Retrieves an internal framework attribute.
 ///
-/// # Panics
+/// # Arguments
 ///
-/// Explanation of when this function might panic.
-fn test<A>(_: A, _: String) -> String
+/// - `InternalAttribute` - The internal attribute key to retrieve.
+///
+/// # Returns
+///
+/// - `Option<V>`: The attribute value if it exists and can be cast to the specified type.
+#[inline(always)]
+fn try_get_internal_attribute<V>(&self, key: InternalAttribute) -> Option<V>
 where
-    A: AsRef<str>,
+    V: AnySendSyncClone,
 {
-    String::new()
+    None
 }
 ```
+
+**验证脚本**:`scripts/verify_doc_comment_format.py` 四层校验:
+
+| Layer | 内容 |
+|-------|------|
+| 1 | 存在性 — 每个非测试 fn / impl 必须有 `///` 注释 |
+| 2 | 完整性 — 有非 self 参数的 fn 必须有 `# Arguments`,非 () / Self 返回必须有 `# Returns` |
+| 3 | 格式 — `Arguments` 与 `Returns` 的 `-` 行格式(`- \`Type\` - description` / `- \`Type\`: description`) |
+| 4 | **签名类型匹配(2026-09-27 新加)** — `Arguments` 里每个 `- \`Type\` -` 的 `Type` 必须等于 fn 签名的实际参数类型;`Returns` 同理。doc 块第一个非空 `///` 不能直接是 `# Arguments`(必须有 prose 描述) |
+
+被 `audit_rust_standards.py` check 35 调用,exit 1 即违规。**已知 caveat(2026-09-27 实测 801 真违规 in euv)**:本规则对旧代码是破坏性变更,authoritative enable 后会触发大量现存 doc comment 的连锁修改 —— 计划单独立 PR sweep(参考 2026-09-26 check 23-37 的接入节奏)。
 
 ## 2.3 字段级注释
 

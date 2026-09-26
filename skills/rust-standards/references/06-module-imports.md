@@ -163,3 +163,54 @@ done
 **例外**:
 - `#[cfg(test)] mod tests { use std::time::Instant; }` 如果 `Instant` 没在 lib.rs pub use,且仅测试使用 → OK。
 - 子文件**首次**使用某个 std 符号,而该符号尚未被 lib.rs re-export → **应先加到 lib.rs** (`pub use std::time::Instant;`),然后再在 sub-file 用。**不要**在 sub-file 内 `use std::time::Instant;` 直接绕开。
+
+## 6.5 禁止 `use ... as ...` as 重命名(2026-09-26 user 钦定)
+
+**user 原话**: "类型导入禁止使用 as 重命名,如果类型冲突才在使用的地方使用最短可区分的命名空间"
+
+### 规则
+
+任何 `use` 语句(任意可见性:`use` / `pub use` / `pub(crate) use` / `pub(super) use`;含分组多行 import 块内的 `as`)**禁止** `as <ident>` 重命名:
+
+```rust
+// ❌ 全部违规
+use std::task::Context as TaskContext;
+use std::{fmt::{self, Write as FmtWrite}};
+pub use std::io::Result as IoResult;
+```
+
+### 类型冲突的正确解法:使用处最短可区分命名空间
+
+冲突时**不改 import**,在**使用处**写最短可区分的命名空间路径:
+
+```rust
+// lib.rs:
+use std::{fmt::{self, Debug, Display, Formatter}, io};
+
+// 子文件(冲突:本地 Result vs std::fmt::Result):
+fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result { ... }   // ✅
+fn connect(addr: &str) -> io::Result<Stream> { ... }          // ✅
+let item: toml_edit::Value = parse(raw);                      // ✅ extern crate 名天然在作用域内
+```
+
+- `fmt::Result` / `io::Error` / `toml_edit::Value` 都是"最短可区分"形式。
+- extern crate 名(edition 2018+)在所有位置天然在作用域内,`toml_edit::Value` 不需要任何 import。
+- 本地模块与 std 同名时(如 crate 内有 `mod fmt;`),`fmt::Result` 会解析到本地模块 → 最短可区分形式升级为全路径 `std::fmt::Result`。
+- 无冲突时直接 import 原名(`use std::fmt::Write;`),不要防御性改名。
+
+### 别名替换的正确流程(防炸)
+
+替换存量别名前**必须**确认别名指向的不是本地定义:
+
+```bash
+grep -rn "struct <Alias>\|type <Alias>\|enum <Alias>" <crate>/src
+```
+
+euv cli 实测:`FmtResult` 是本地 `pub(crate) struct FmtResult`(`cli/src/fmt/struct.rs`),不是 std 别名。盲目全局替换 `FmtResult → fmt::Result` 把 struct 定义与构造函数全部改炸(E0425/E0433 5 处)。本地定义的别名不动,只替换 import 别名 + 其使用处。
+
+### 验证
+
+- 脚本:`scripts/verify_no_import_rename.py <repo>`(use 块状态机,覆盖单行 / 分组多行 / 各可见性)。
+- audit:`audit_rust_standards.py` check 37。
+- fixture:`~/.hermes/cache/scratch/verifier-fixtures/rename-{compliant,violating}`,双向通过(0 / 3 hits,exit 0/1)。
+- 三仓收敛(2026-09-26):hyperlane 2 / euv 6 / ctares 1 → 全部 0。

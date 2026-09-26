@@ -2464,3 +2464,125 @@ Documentation:
 - SKILL.md hard rule 5 rewritten with the new allow-list / deny-list.
 - references/06-module-imports.md §6.3 updated from "第一行 必须是"
   to "第一行 **可以省略** `use super::*;`".
+
+## §63 verify_doc_comment_format.py — attr-skip + 缩进修复(2026-09-26 第六轮)
+
+修复两个导致全仓 check 34 基线 835 hits 的 verifier bug:
+
+1. **`_extract_doc_block` 不跳过 fn 上方的 `#[...]` 属性行**:idiomatic Rust 把 doc comment 放在属性之上(`/// doc` → `#[inline(always)]` → `fn`),旧实现从 fn 向上找 doc 时空行之外遇到 `#[` 就停 → 整个 impl 块内所有带属性的 fn 全被报 "missing /// doc comment"。修复:向上扫描时同时跳过空行与 `#[`-起始行(单行属性;多行属性未覆盖,已知限制)。
+2. **`# Arguments` / `# Returns` section header 正则锚定 `^///` 不允许缩进**:impl 块内 fn 的 doc 行有 4 空格缩进(`    /// # Arguments`)→ `^///` 永不匹配 → Layer 2 全部误报 "missing section"(同一块内 Layer 3 用 stripped 行所以能找到 section,行为自相矛盾)。修复:`^\s*///\s*#\s*(Arguments|Returns)\s*$`。
+
+修复效果:hyperlane check 34 从 835 → 626 hits(剩余为真违规:doc 缺失 / 格式不符)。fixture 双向自测:compliant(属性行 + 缩进 section)0 / violating(无 doc / 缺 section)3。
+
+## §64 verify_hardcoded_strings.py — write!/writeln! 与多行格式宏豁免(2026-09-26 第六轮)
+
+修复两个 §1.3c 格式串豁免失效:
+
+1. **`write!` / `writeln!` 的格式串是第二参**:旧豁免启发式要求字面量出现在第一个逗号之前(把格式宏都当 print! 家族),`write!(f, "...")` 的 writer 占第一参 → 全部 write!/writeln! 格式串被误判(Display impl 成片命中)。修复:`write`/`writeln` 要求字面量在第一个逗号之后、第二个逗号之前。
+2. **rustfmt 多行展开后豁免失效**:per-LINE 启发式要求宏名与格式串同行,但 rustfmt 会把超限的宏调用每个参数一行展开,格式串落在自己一行上 → 被误判。修复:新增 `_exempt_format_string_lines` 预扫描,跟踪宏调用的括号深度与参数序号(rustfmt 保证一行一参),print 家族格式串 = 第 0 参行,write!/writeln! = 第 1 参行。
+
+修复效果:hyperlane check 35 从 495 → 466 hits(与 baseline 完全持平)。fixture 覆盖:单行 write! / 多行 write!+println! / 第三参数据字面量仍命中(`write!(f, "{}", "data literal")` → 1 hit)。**注意**:`write!` 格式参数必须是字面量(Rust 语言限制,const 格式串不编译)—— 所以格式串只能就地写,豁免是唯一出路,不能"挪到 const.rs"。
+
+## §65 check 37(no-import-rename)接入 pitfalls(2026-09-26 第六轮)
+
+- **别名替换前必须 `grep -rn "struct <A>\|type <A>\|enum <A>"`**:euv cli 的 `FmtResult` 是本地 struct 不是 std 别名,全局文本替换把定义改炸。详见 06-module-imports.md §6.5。
+- **本地模块遮蔽 std 路径**:euv cli 有 `mod fmt;`,替换后 `fmt::Result` 解析到本地模块(E0425)。本地模块与 std 同名时最短可区分形式是全路径 `std::fmt::Result`(本次通过回退 cli 的 FmtResult 替换规避 —— 它本来就是本地类型)。
+- **三仓收敛数字**:hyperlane 2(type/src/lib.rs 的 `Write as FmtWrite` / `Context as TaskContext`,perf 任务引入) / euv 6(`Result as FmtResult`×4 / `Write as _`×2 / `io::Error as IoError`×1) / ctares 1(`Value as TomlEditValue`)→ 全部 0。`Write as _` 无冲突时直接改 `Write` 具名导入;`Write` 作为 trait 在作用域内即可满足 `write!` 宏。
+
+## §66 verify_doc_comment_format.py Layer 4 签名类型精确匹配接入(2026-09-27 第三轮)
+
+user 强化 §2.2 doc-comment 校验,要求 `# Arguments` / `# Returns` 行内的反引号类型必须**精确等于** fn 签名的实际类型(保留 `&` 与 `` ` ``)。audit wrapper(check 35)沿用同一脚本,**无需新增 check 槽位**。
+
+**实测命中**(euv 仓 2026-09-27 跑一次 `python3 verify_doc_comment_format.py .`):
+
+- **801 violations in 125 files**(euv monorepo)。
+- 典型违规形态:
+  - `- \`Self\` - description` for `&self` method → 应为 `- \`&Self\` - description`
+  - `- \`T: Sized\` - description` for `T` param → 应为 `- \`T\` - description`
+  - `- \`N: AsRef<str>\` - description` for `N` param → 应为 `- \`N\` - description`
+  - `- \`UnsafeCell<Option<T>>\` - description` for `&UnsafeCell<Option<T>>` return → 应为 `- \`&UnsafeCell<Option<T>>\` - description`
+  - `- \`&'static mut T\` - description` for `&'static mut T` return → 文档里漏 `&` 前缀
+- **doc-comment 第一行直接是 `# Arguments` 无 prose** 的子项也会单独报错(no-prose-before-section)。
+
+**已知 limitation**:Layer 4 不处理以下三种合法情况(若后续 user 要求再补):
+- `where T: Bound` 子句出现在签名里(`fn f<T>(x: T) where T: Bound`),doc 里写 `- \`T\` - description` 是 OK 的(因为 Layer 4 只看 `T`,不要求 doc 包含约束)。但**反向**(`- \`T: Bound\` - description` 用于 `fn f<T: Bound>(x: T)`)算违规 — 已实测。
+- 关联类型(`fn foo(&self) -> <Self as Trait>::Item`)的返回类型解析只到 `<Self as Trait>::Item` 字面。
+- `impl Trait` 返回类型(`-> impl Display`)目前解析为字面 `impl Display`,doc 写 `- \`impl Display\` - description` 可过。
+
+**接入策略**(参考 2026-09-26 check 23-37 节奏):
+1. ✅ Phase 1(本次完成):verifier + fixture + 双向自测 + SKILL.md / references 更新。
+2. ⏸ Phase 2(user 决策):是否在 audit_rust_standards.py check 35 wrapper 加上 Layer 4 强制 — 由于会触发 801 现有代码违规,**强烈建议**先单独 PR sweep(euv / hyperlane / ctares 各自跑一遍并修复),完成后再开启 audit enforcement,与 verifier 接入 audit 不同 PR(否则 reviewer 看到 801 hit 直接打回)。
+3. **当前状态**:Layer 4 verifier 已就绪,fixture 双向 0/6 通过;audit check 35 wrapper 调用同一脚本,会自动启用 Layer 4 校验。euv 仓现有 801 violations,**user 决定是否立刻修还是先 baseline-标记 follow-up**。
+
+**修复建议**(对未来 sweep PR):写一个 fixer 脚本 `fix_doc_comment_types.py`,正则 `- \`(.*?)\` -` 替换为 `- \`<signature_type>\` -`,signature_type 从最近 fn 签名按顺序提取(Layer 4 的反向运算)。参考 §1.3c `fix_dep_order.py` 的接入节奏(先 verifier,再 fixer,再 audit wrapper,每步独立 PR)。
+
+
+## §66 check 38(no-self-field-access)接入 pitfalls(2026-09-26 第七轮)
+
+- **fixture 双向**:self-compliant(accessor 体直写 / Display impl 直读 / `#[cfg(test)]` 直读 / 业务方法走 accessor)0 hits;self-violating(业务直读 / 直写 / `self.x.clear()` 字段方法 / Drop impl 直写)4 hits exit 1,audit 端到端双向通过。
+- **括号深度启发式的边界**:`_exempt_ranges` 按行计 `{`/`}` 差值,字符串内含未配对括号(如 `println!("}")`)会错位 —— 项目内 format 串几乎全配对,实测 3 仓无误报;若未来出现错位,把字符串里的孤立括号换成转义常量再扫。
+- **`fn new` 在豁免区**:struct literal 构造不涉及 `self.field`,但 `let mut s = Self{..}; s.field = x;` 这种 builder 写法在 `fn new` 里**合法豁免**(new 是构造器,与宏生成 new 内部同性质) —— 这是规则 §17.12 第 1 类("宏生成的 new 内部")对手写 new 的自然延伸。
+- **request crate 的 50 处"二次违规"**:§17.12 当轮只清扫了业务方法,AsyncRead/AsyncWrite wrapper(`Pin::new(&mut self.inner)`)、`Buf` 实现、builder 字段组装当时未被规则文本覆盖;本轮(check 38)把"非 Debug/Display 的 trait impl"显式列为违规区,清扫时必须覆盖 trait impl 文件(如 `proxy/impl.rs`)。
+
+## §67 verify_no_self_field_access.py check 38 接入 + 边界精度验证(2026-09-27)
+
+user 加强 §17.3 / §17.12 校验:`self.field` 直接读写**禁止**,必须使用 Lombok `Data` 宏生成的 `get_<field>` / `set_<field>` / `try_get_<field>` / `get_<field>_ref` / `get_<field>_mut` API(参见 `~/code/ctares/lombok-macros/src/lib.rs:502` `Data` derive 实现 + `generate/const.rs:17-30` 方法前缀常量)。允许结构体直接初始化(`Self { field: value, ... }` 与 `Self { ..self }` 更新语法)。
+
+**检测精度**(实测 euv 仓 2026-09-27 跑一次):
+
+- 203 violations in euv monorepo(全 `self.X` 直接访问)。
+- 真实违规形态(节选):`self.delay_ms` / `self.step` / `self.max` / `self.min` / `self.interval_ms` / `self.ptr` / `self.dyn_ref` 等(全为业务方法体内字段直读/直写,**无 false positive 可见**)。
+
+**精确豁免语义**(全部 6 种,brance 计数跟踪):
+
+| 豁免位置 | 验证 |
+|---------|------|
+| 手写 `get_<field>` / `set_<field>` / `try_get_<field>` accessor 体 | ✅ fixture: `pub fn get_name(&self) -> String { self.name.clone() }` 不报 |
+| 手写 setter body 内部 `self.field = value;` | ✅ fixture: `pub fn set_name(&mut self, value: String) -> &mut Self { self.name = value; ... }` 不报 |
+| `impl Debug for X` / `impl Display for X` 块 | ✅ fixture: `Display::fmt` 内 `write!(f, "{}", self.name)` 不报 |
+| `#[cfg(test)] mod tests` 块 | ✅ fixture: `tests` 内 `let _: &String = &foo.name;` 不报 |
+| `tests/` 目录(R14.7 self-contained) | ✅ 整目录跳过 |
+| `self.method()` 方法调用(`(` 紧跟) | ✅ regex lookahead `(?!\s*\()` 排除 |
+
+**结构体直接初始化豁免**(user 钦定):
+
+| 写法 | 检测 |
+|------|------|
+| `Self { field: value, ... }`(字面 init) | ✅ 不报(无 `self.X` 模式) |
+| `Self { ..self }`(更新语法) | ✅ 不报 |
+| `Self { ..self.clone() }`(更新 + clone) | ✅ 不报(`self.clone()` 跟 `(` 排除) |
+| `Self { field: self.field }`(init rhs 读 field) | ⚠️ **会报** — 严格按 §17.12 直读禁止;应改为 `Self { field: self.get_field() }` |
+
+**audit pipeline 接入**:
+
+- `scripts/verify_no_self_field_access.py` 已存在(2026-09-26 第六轮)。
+- `audit_rust_standards.py` check 38 已 wired(2026-09-26 第六轮),wrapper 模板与其它 check 同构(`grep -v` 过滤 success-path summary + `PIPESTATUS[0]` 传 exit + FAIL trailer `>&2`)。
+- fixtures `~/.hermes/cache/scratch/verifier-fixtures/self-{compliant,violating}` 双向通过。
+- **新增** `self-edge-cases` fixture(2026-09-27):覆盖 6 种豁免 + 4 种违规,期望 2 violations,实测 2 ✓。
+
+**已知 limitation**(脚本设计取舍):
+
+1. **regex-based 检测,无 AST 解析**:脚本用 `\bself\.([a-z_][a-z0-9_]*)\b(?!\s*\()` 匹配字段访问,不解析 Rust AST。优点:零依赖、快;缺点:**任何 `self.<lowercase>` 都会被报**(即使它不是字段而是 `enum` variant 或模块内部 fn)。euv 实测 0 false positive,但 `mod xxx;` + `self::xxx` 路径语法不会被误报(`self::` 不是 `self.`)。
+2. **tuple field `self.0` 不覆盖**:regex 要求 `[a-z_]` 起始,数字 `0` 不匹配。tuple struct 字段直读不会被报 —— **已知限制**,euv 仓 tuple struct 很少,影响可忽略。
+3. **跨行模式 `self\n.field` 不匹配**:regex 单行应用,跨行字段访问(罕见但 Rust 允许)漏报。
+4. **Lombok `Data` derive 内部生成的 impl 块**:Lombok `inner_lombok_data` 生成 `impl #name { #(#methods)* }`(固有 impl,无 trait),每个方法是 `get_*` / `set_*` / `get_mut_*`,body 内有 `&self.field_name`。脚本通过识别 accessor fn 名(`^(get|set|try_get)_`)豁免 body,所以 Lombok 生成代码不被误报。**但** Lombok 静默失效(§17.11)后手写 accessor 仍走同名 `get_X` / `set_X` 豁免路径 —— 验证:hyperlane request crate 已经在 2026-09-26 收敛到 0 violation。
+
+**修复策略**(对未来 sweep PR):
+
+```bash
+# 1. 一次性 dry-run 看影响面
+python3 ~/.agents/skills/rust-standards/scripts/verify_no_self_field_access.py <repo>
+
+# 2. 按文件分组,每个文件:
+#    a. 读 struct.rs 字段列表
+#    b. 写 accessor 三件套(get / get_ref / get_mut / set)
+#    c. 在 impl.rs 把 `self.field` → `self.get_field_ref()` / `self.set_field(value)` / `self.get_field_mut().X`
+#    d. cargo check + clippy 验证
+#
+# 3. 跑 fixer(若写)再次验证
+
+# 4. 收尾:audit 38 应为 0 PASS
+python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo>
+```
+
+**euv sweep 节奏建议**(参考 §66 经验):sweep PR 不在 audit 接入同一 commit。先独立 PR 收敛 euv 203 violations(分 crate 或分模块批量),然后 audit 38 自然为 0 PASS。

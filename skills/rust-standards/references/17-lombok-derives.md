@@ -354,3 +354,30 @@ pub fn set_field(&mut self, value: FieldType) -> &mut Self {
 - builder / 工厂方法内部的字段组装(`fn build(&mut self) { self.field = read_field(); }` 必须改成 `self.set_field(read_field())`)
 
 **反向引证**(2026-09-26 hyperlane request/):session 中 35 处 `self.headers` / `self.body` / `self.config` / `self.tmp` / `self.url` 直读全部重写为 accessor,build 与 clippy 干净,12/12 test pass。这是项目级强制规则,新加字段**默认**先写 accessor 三件套,不要先写完 `self.field` 直读再"以后"重构。
+
+## 17.13 `self.field` 禁令的可执行校验(2026-09-26 第七轮,user 原话:"禁止通过self直接操作字段,使用Data宏的get和set")
+
+§17.3 / §17.12 的规则现在有可执行脚本:`scripts/verify_no_self_field_access.py`,被 `audit_rust_standards.py` **check 38** 调用。
+
+### 豁免区(脚本与规则一致,仅 3 类)
+
+1. 手写 accessor fn(`get_*` / `set_*` / `try_get_*` / `new`)体内
+2. `impl Debug for ...` / `impl Display for ...` 块内(§17.3)
+3. `#[cfg(test)]` 块 + `tests/` 目录
+
+**不在豁免区 = 违规**:`default()` / `drop()` / `AsyncRead` 等其它 trait impl / builder / 业务方法,全部必须走 accessor。`Pin::new(&mut self.inner)` 这种 wrapper 委托也要改成 `Pin::new(self.get_inner_mut())`。
+
+### 方法调用不算字段访问
+
+`self.get_x()` / `self.flush()` 等带括号的调用永不命中;`self.x` / `self.x = v` / `self.x.m()`(字段上再调方法)都命中。`self.0` tuple 字段与 `self::<path>` 不覆盖(已知限制)。
+
+### 无 accessor 的 struct 怎么办
+
+先补访问面再改使用处:
+
+- 普通 struct → `#[derive(Data)]`(lombok 生成全套)
+- Lombok 静默失效 / 字段含生命周期引用(如 `&'a mut TcpStream`)→ 按 §17.11 手写三件套,命名对齐 Lombok(`get_x` / `get_x_ref` / `get_x_mut` / `set_x`)
+
+### 三仓收敛基线(2026-09-26 第七轮启动时)
+
+hyperlane 94 / euv 203 / ctares 91 处违规(request crate 虽经 §17.12 清扫,但 AsyncRead/AsyncWrite wrapper 委托与 builder 残留 50 处当时未覆盖 —— 本轮规则文本已含 trait impl)。
