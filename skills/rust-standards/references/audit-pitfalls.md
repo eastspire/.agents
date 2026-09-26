@@ -1736,3 +1736,512 @@ Reasons:
   `git diff origin/master..HEAD -- '*/tests/*/fn.rs'` first.
 
 **Reference**: `references/14-testing.md §14.7` for the full prose.
+
+## 44. §13.7 排序规则第四轮变更(2026-09-26,length+lex)
+
+`verify_dep_order.py` 在 2026-09-26 升级为第四轮规则:**本地 vs 三方分组,组内按 entry 完整长度升序 + 长度相同按 dep key 字典序**。前 3 轮规则版本:
+
+- 第一轮 (2026-09-14):块内 (key 长度, 字典序)
+- 第二轮 (2026-09-14):(len, lex) + workspace.dependencies alphabetic,无分组空行
+- 第三轮 (2026-09-14):本地 vs 三方分组 + 组内 alphabetic + 唯一空行在组边界
+- **第四轮 (current, 2026-09-26):本地 vs 三方分组 + 组内 (entry 完整长度, key 字典序) + 唯一空行在组边界**
+
+**用户原话**:「toml依赖导入需要严格遵守顺序,首先本地依赖是同一组,外部依赖是一组,不同组之间需要空行分割,同组之间按照完整的长度(含特性等字段)升序排序,一样的长度按照字典序升序」。
+
+**脚本实现要点**:
+
+- `expected_order_with_blank` 内:排序 key 从 `lambda kv: kv[0]`(纯字典序)改为 `lambda kv: (_entry_chars(kv[1]), kv[0])`。
+- `_entry_chars(raw_lines)`:把每个非空行 `.strip()`,用 `" ".join(...)` 拼起来,再 `re.sub(r"\s+", "", ...)` 去所有空白,返回 `len`。这样 `serde = { version = "1.0.229", features = ["derive"] }` 长度是 46,`toml = "0.9.12"` 长度是 14,与 tablo formatter(默认 `=` 两侧空格、4 空格缩进)无关。
+- 双向验证 fixture:compliant `demo-cli < demo-core < demo-engine < demo-macros, clap < serde < serde_json < tokio` 排列 = exit 0;violated 打散 = exit 1 且 actual/expected 反向可见。
+
+**euv 单仓实测结果**(2026-09-26,在第四轮规则下):
+
+| 文件 | 当前轮(第三轮 alphabetic)顺序 | 期望(第四轮 length+lex)顺序 |
+|---|---|---|
+| `euv/Cargo.toml [dependencies]` | `euv-core, euv-macros` 本地 → `alloc, console, js-sys, lombok, wasm, wasm-futures, web-sys` | `euv-core, euv-macros` 本地 → `js-sys, web-sys, wasm, lombok, alloc, wasm-futures, console` |
+| `euv/Cargo.toml [workspace.dependencies]` | 7 个本地 alphabetic → 27 个三方 alphabetic | 7 个本地按 path 长度排(`euv < euv-ui < euv-cli < euv-core < euv-engine < euv-macros < euv-example`)→ 三方按 entry 长度排(`log < toml < quote < chrono < ignore < js-sys < if-addrs < hyperlane < serde_json < lombok < proc-macro2 < color-output < hyperlane-cli < wasm-bindgen < alloc-no-stdlib < compare_version < serde-wasm-bindgen < wasm-bindgen-test < wasm-bindgen-futures < console < clap < serde < syn < qrcode < notify < tokio < web-sys`) |
+| `euv/cli/Cargo.toml [dependencies]` | 全三方 alphabetic | 全三方按 entry 长度排 |
+
+**为什么这个变更值得记录到 audit-pitfalls**:第三轮 → 第四轮的迁移是破坏性的,任何 euv / hyperlane / crates-dev / docs-pages 仓跑 `verify_dep_order.py` 都会大量 FAIL,**仓主需要在第四轮迁移前接受一次性大批量重排**(每个 dep 块的条目都按 entry 长度重排,涉及的 PR 数量级是一次重排)。不放在 audit-pitfalls.md 记录,未来 session 在 review 旧 PR 时会以为 `verify_dep_order.py` 是 bug。
+
+**注意**:workspace root 与单 crate root 行为差异。`is_local` 依赖 `[workspace] members` 列表解析;fixture 不写 `[workspace]` 时,本地组会被认为是空、整块当三方处理。真实仓上不会撞到这里(workspace.toml 总是带 `[workspace]` 段)。
+
+
+## 45. audit shell template wraps a `.py` script with `bash <script.py>` instead of `python3 <script.py>` — 2026-09-26 `verify_dep_order.py` 接入实测
+
+**Symptom**: Audit check 21 calls `verify_dep_order.py` and the wrapper hangs with `exit code = 127` and stderr `syntax error near unexpected token '('`.看上去像是 shell 报错,但实际上——
+
+**Root cause**: 在 audit check 21 的 `CHECKS.append` shell template 里写了 `bash "{{audit_script_dir}}/verify_dep_order.py" "{{target}}"`,把 Python 脚本喂给 bash 当 shell 脚本执行。bash 看到脚本里的中文双引号 docstring `"完整的长度..."` 立刻 syntax error,exit 127。
+
+**Wrong**:
+```bash
+bash "{{audit_script_dir}}/verify_dep_order.py" "{{target}}"
+```
+
+**Right**:
+```bash
+python3 "{{audit_script_dir}}/verify_dep_order.py" "{{target}}"
+```
+
+脚本头部已有 `#!/usr/bin/env python3` shebang,但 `bash <script.py>` 不读 shebang —— bash 永远把后缀是 `.py` 的文件也当 bash parse。**audit wrap 一个 Python 脚本必须显式 `python3 <script.py>`,不可省**。
+
+**Detection**:
+- audit 跑出 `exit 127` + stderr `syntax error near unexpected token` —— 100% 是 wrap 成 `bash *.py` 了
+- audit 跑出 `exit 2` 且找不到 toml —— 可能是 `cwd=` 不对 或 `find` 路径过滤问题(见 §46)
+
+**Verification**: 双向 fixture 自测 compliant→0 + violated→1,数据可见,exit 0/1,不是 127。
+
+## 46. `find -not -path '*/tmp/*'` 误过滤 `/tmp/...` 测试根 — 2026-09-26 `verify_dep_order.py` 接入实测
+
+**Symptom**: 接 audit check 21 双向 fixture 自测时,临时的 `/tmp/dep_order_test_*` 仓根被 `find` 跳过,`verify_dep_order.py` 报 `exit 2`(内部 `if not files: return 2`)。
+
+**Wrong**:
+```bash
+find str(root) -name Cargo.toml -not -path '*/target/*' -not -path '*/tmp/*'
+```
+
+`-not -path '*/tmp/*'` 匹配任何路径里出现 `/tmp/` —— 包括合法 `/tmp/dep_order_test_compliant/Cargo.toml`,整个测试根都被过滤掉。
+
+**Right**(命名空间粒度):
+```bash
+find str(root) -name Cargo.toml -not -path '*/target/*' -not -path '*/tmp/test_*'
+```
+
+`-path '*/tmp/test_*'` 只匹配 `tmp/test_xxx/...`(cc / crate-cli 的 test-helper fixture),不会误伤 `/tmp/<fixture-root>/...`。
+
+**两条规则**:
+1. 任何 verifier script 的 `find`/`walk`/glob 过滤,不要写 `*/tmp/*` 这种全名空间 broad 匹配
+2. 用 verifier 仓根做 fixture 测试时,fixture 路径不能用 verifier 不希望过滤的子串(`/tmp/`、`/target/`、`*/.cargo/registry/*`);否则过滤器把 fixture 自己也过滤掉,verifier 报"0 files",看起来像 verifier bug。
+
+## 47. verifier → audit wrapper 的 stdout 过滤与 exit-code 传递契约 — 2026-09-26 check 21 接入实测
+
+**Symptom**: 接入 verifier 到 audit 时,如果 verifier exit 0 也打印 status line(例如 `N files checked, 0 violations`),audit 把它当成 violation hit 显示,变成 false-fail。
+
+**契约**(audit 默认把任何非空 stdout 当 FAIL 看待,见 §43 + §35-B):
+
+```bash
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_<rule>.py" "{{target}}" \
+    | grep -v -E '^[0-9]+ files checked, 0 violations$'
+exit_code=${PIPESTATUS[0]}
+test "$exit_code" -ne 0 && echo "FAIL: verify_<rule>.py exited $exit_code"
+exit "$exit_code"
+```
+
+三个关键点:
+
+1. `grep -v -E` 过滤**只是**成功路径尾随行(`0 violations`),让违规文件路径 + actual/expected diff 原样抛给 audit 显示
+2. `${PIPESTATUS[0]}` 捕获 verifier 的 exit code(不是 `grep` 的,也不是 `head` 的)
+3. `exit "$exit_code"` 把 verifier 的真实 exit 透传给 audit runner(`run_check` 数 `r.stdout` 但 `audit_rust_standards.main` 看最终 subprocess 的 returncode)
+
+**常见错误**:
+- 用 `bash -c "...; echo PASS"` 而 verifier 失败时`; echo "FAIL: ..."` 替换 stdout 但 exit 0 —— audit 看 stdout 知道是 fail,但 exit 0 让 main 当 PASS
+- 直接 `python3 verify.py 2>/dev/null` 吃掉 verifier 的真实错误日志
+- 把 `tail -1` 加在 pipeline 末尾覆盖了真实 exit code
+
+**Detection**: 接入任何 verifier 到 audit 后,**必须双向 fixture 自测**:
+- compliant 仓:audit check N 输出 PASS,suite 计数 +1(通过)
+- violated 仓:audit check N 输出 FAIL,suite 计数不增;FAIL message 包含实际违规文件的行号
+
+然后跑完整 audit `python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo>` 看 `SUMMARY: N/M PASS`,N = 通过的项数,M = 总项数。
+
+## 48. verifier 与 auto-fixer 必须共用一套 parse 逻辑(2026-09-26 fix_dep_order.py 接入实测)
+
+**Symptom**: verify 报 "实际顺序 = [...], 期望顺序 = [...],但我手动排好的 fix 写盘后,fix 再跑一次 verifier 报 FAIL(actual vs expected 不一致)——明明 verify 与 fix 用的是同一份 round 4 规则。
+
+**Root cause**: verifier 自己一份 parse 逻辑(Cargo.toml → 4 类块 → entry list),fix 又写一份 parse 逻辑(从 ASCII 文本重建 block);当 entry 跨多行(tokio features `[ ... ]` 跨 6-10 行)或 entry 内部有 bracket(`notify = { ... features = [ ... ] }`),两套 parsers 对"一个 entry 的边界"看法不同 → fix 用它自己的 parser 决定"完成 entry 边界"的位置,写出 fix 内容但 verifier 用它的 parser 重新 tokenize 后认为多/少了 entry → mismatch。
+
+**Prevention — verifier 模块必须 expose parse API + auto-fixer re-import**:
+
+```python
+# scripts/fix_dep_order.py 头部
+import importlib.util
+VERIFY_SCRIPT = Path(__file__).resolve().parent / "verify_dep_order.py"
+_SPEC = importlib.util.spec_from_file_location("verify_dep_order", VERIFY_SCRIPT)
+assert _SPEC is not None and _SPEC.loader is not None
+_verify = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_verify)
+
+KEY_PATTERN = _verify.KEY_PATTERN
+parse_block = _verify.parse_block
+_entry_chars = _verify._entry_chars
+find_cargo_tomls = _verify.find_cargo_tomls
+read_local_crate_names = _verify.read_local_crate_names
+```
+
+**之后 fix 脚本仅在下列点偏离 verifier**:
+- 排序逻辑:verifier 排序后用作 expected,fix 排序后用作 fix 后 actual
+- entry 文本提取与重组:verifier 把 block 切成 (key, lines) tuples 后丢掉 lines;fix 拿到 tuples 后重排 lines,按 round 4 规则组装 block 文本
+
+**这套规则适用于任何 structural-config 校验**:
+- `verify_*.py` 提供 `parse_*` / `expected_*` 函数
+- `fix_*.py` import `verify_*.py` 的函数,只做"重排 + 重组"
+- 任何"verifier 与 rewriter 各自实现一遍 parse"的代码 = review reject,合并到一个 parser
+
+**Detection**: fix 跑完后再跑 verify,应 exit 0;循环 `fix && verify && fix && verify` 第二次必须 no-op(幂等)。若不幂等 → 两套 parsers 分歧,立即合并到一个 verifier 模块。
+
+## 50. Long rust-refactor sessions: commit incrementally or worktree gets auto-pruned and 6 turns of work vanish (2026-09-26)
+
+**Symptom**: A session that does 6+ turns of cross-cutting Rust refactor (Request/Response API redesign, parser module split, field flatten, etc.) on a `git worktree` branch can lose **all uncommitted work** if:
+
+- The user follows the "user owns merge decisions" rule and the agent never `git commit`s during the refactor (defers to user at end)
+- Another agent run on the same machine does `git worktree prune` on a parent shell, or the `.worktrees/<name>` directory is wiped by cleanup/session tooling
+- The branch's HEAD still points at the base commit because nothing was committed
+
+`git fsck --unreachable --no-reflogs` returns 0 unreachable commits and `git reflog --all` shows the worktree path's HEAD reset to base. **The refactor is gone**, not recoverable from git.
+
+**Concrete loss** (this session, refactor of `hyperlane-type::Request`):
+- 9 files modified across 6 turns (~1500 LOC)
+- 0 commits made during refactor (deferred per "user owns merge decisions")
+- Worktree directory disappeared between sessions
+- Branch `refactor/request-api-align-core` still at `499ebb5` (base); no new commits
+- 0 unreachable blobs / unreachable commits — reflog cleared
+
+**Rule** (durable lesson for any future rust-refactor session):
+
+1. **After every completed refactor slice** (each coherent change set: "parser module split", "host field removal", "headers VecDeque flatten", etc.) run:
+   ```bash
+   git add <files>
+   git commit -m "refactor(<scope>): <slice-name>
+
+   <what changed + why>
+
+   Co-authored-by: agent"
+   ```
+   Push or not — doesn't matter; the commit is the recovery point.
+
+2. **If the user really wants one squashed PR at end**, at minimum `git stash` after each slice:
+   ```bash
+   git stash push -u -m "<slice-name>" -- <files>
+   git worktree add .worktrees/<refactor> <branch>
+   cd .worktrees/<refactor>
+   git stash pop
+   ```
+   The stash survives worktree prune because stash reflog is global, not per-worktree.
+
+3. **Verify recovery before continuing**:
+   ```bash
+   git -C <worktree-path> rev-parse HEAD  # should match base + N
+   git -C <worktree-path> status --short  # should be empty between commits
+   ```
+   If HEAD is at base and `git status --short` is empty after slice N, the slice didn't commit — re-commit or stash before next turn.
+
+**Why this is hard rule, not optional**:
+
+- User's "user owns merge decisions" rule is about the **PR**, not the local commit granularity. `git commit` on a feature branch (not master) doesn't violate that rule — user still reviews + merges the squashed / rebased PR. Local commits are safety checkpoints.
+- A refactor touching 5+ files is structurally a 5+ slice task. Bundling all into one commit at end means one bash slip / worktree prune / git reset wipes the entire session.
+- Re-doing 6 turns of refactor from memory is impossible — specific patch blocks, exact code, exact Lombok attribute syntax can't be re-derived.
+
+**Recovery if the disaster already happened**:
+
+- Check `git fsck --unreachable --no-reflogs` first — if any unreachable blobs/commits exist, recover via `git stash list` + `git show <unreachable-sha>:<path>`.
+- Check the agent's session_search (compacted history may have file contents).
+- Otherwise: stop, tell the user honestly what was lost, ask if they have a backup or want to restart from scratch with the incremental-commit rule applied.
+
+**When this rule does NOT apply**:
+
+- Single-file edits / 1-2 turn tasks — `git commit` after each is still cheap insurance, but the disaster window is narrow enough that worktree prune is unlikely to land.
+- Worktree-free workflows (editing directly on master or single non-worktree branch) — `git commit` is still preferable but no worktree-prune failure mode exists.
+- Truly atomic single-commit tasks (rename one symbol across 30 files in one commit) — one commit at the end is fine, because the change is atomic and a stale worktree's HEAD still has the right files.
+
+## 49. Check 22 (§17) — `verify_ci_no_bump.py` 接入 audit 实战 (2026-09-26)
+
+新增 §17:CI 流水线不允许 bump / 写 `version =` 行。配套 verifier `scripts/verify_ci_no_bump.py` 在三仓( ctares / hyperlane / euv )首次接入时的实测 pitfall 列表。
+
+### 49.1 — `python3 -c` 内嵌 regex 跨多层 shell + python 转义(2026-09-26 实测)
+
+CI 工作流的 inline python 脚本(如 `docs/Cargo.toml` version 镜像脚本)会把 regex `version\s*=\s*\"` 通过 bash 单/双引号 → python `r'...'` 再传到 `re.sub`。每一层都可能再加一层 backslash escape:
+
+```bash
+# 第 1 层:原始 regex 文本
+version\s*=\s*"
+
+# 第 2 层:bash 双引号包裹,无转义
+"import re; re.sub(r'version\s*=\s*\"[^\"]*\"', ...)"
+
+# 第 3 层:bash 单引号包裹,无转义
+'import re; re.sub(r"version\s*=\s*\"[^\"]*\"", ...)'
+
+# 第 4 层(罕见):heredoc + bash escape,会被加倍
+<<EOF
+VERSION="\$VERSION" python3 -c "...re.sub(r'^(version\\s*=\\s*\\"[^\\"]*\\")',...)"
+EOF
+# 在 yml 文件中实际写入的字节是:
+# version\\s*=\\s*\\"  ← 两个反斜杠
+# 甚至 version\\\\s*=\\\\s*=\\\\"  ← 四个反斜杠(多层嵌套)
+```
+
+**正确做法**:verifier 的 `PYTHON_VERSION_LITERAL_RE` 不要尝试精确匹配 `\s` `*` `\"` 等子串;改用宽松模式 `version\s*[^\"']*?\s*=\s*[^\"']*?[\"']`,接受 0-多个反斜杠 + 任意非引号字符 + 最终引号。配合上游 python-write-keyword(`write_text` / `re.sub(` / `.replace(` 等)的存在,误报率几乎为 0。
+
+### 49.2 — allowlist marker 必须 tightly-coupled(2026-09-26 实测)
+
+verifier 支持 `# ci-allow-version-write: <reason>` 注释豁免某行违规。最初设计允许 marker 在 violation 上方 6 行内匹配,实测中:
+
+- 6 个 `echo` 之后接 marker 接 python invocation 的 fixture 里,marker 距 violation **正好 1 行**(第 13 行的 marker,第 14 行的 python)→ 仍被豁免。
+- 但若 marker 上方还有几行 echo(脚本扩展等),marker 距离 violation 变成 2+ 行 → 仍被豁免(误报 PASS)。
+
+**正确做法**:把 marker 距离缩到「紧挨 violation 的上一行」(`lines[lineno - 2]` 即 0-indexed `lineno - 2`)。任何 2 行及以上的间隔都不豁免,迫使 author 把 marker 紧贴 violation 写,不易漏看。
+
+### 49.3 — `cc` / `crate` 是同一个工具的两种 binary name(2026-09-26 实测)
+
+crate-cli 在不同发布版本里 binary name 是 `cc`(老版本)或 `crate`(新版本,per `crate-cli v0.2.5` cargo install list 显示 `cc`,但 `0.2.8` 已改)。**正确做法**:verifier 用 `\b(?:cc|crate)\s+bump\b` 同时匹配两种 binary,不要硬编码。
+
+### 49.4 — `sed -i` 与 read-only `sed -E` 必须区分(2026-09-26 实测)
+
+CI workflow 里有两类 `sed` 调用:
+
+```bash
+# 读:VERSION=$(grep ... | sed -E 's/^version = "([^"]+)".*/\1/')  # 提取,允许
+# 写:sed -i 's/version = ".*"/version = "9.9.9"/' Cargo.toml        # 改写,禁止
+# 写:sed ... > Cargo.toml                                           # 改写,禁止
+# 写:sed ... | tee Cargo.toml                                       # 改写,禁止
+```
+
+**正确做法**:`SED_VERSION_WRITE_RE` 只匹配 `sed -i` / `perl -pi` / `> file` / `| tee file` 这四种写盘模式,不匹配 `$()` 替换里的只读 sed。配上 `SED_VERSION_LITERAL_RE = \bversion\b`,只在「写盘 + 涉及 version」两个条件都满足时违规。
+
+### 49.5 — euv docs/Cargo.toml mirror script: removed, version now human-maintained (2026-09-26)
+
+`euv-dev/euv/.github/workflows/rust.yml` originally had an inline
+python step mirroring root's `version =` into the non-workspace-member
+`docs/Cargo.toml`:
+
+```bash
+VERSION="$VERSION" python3 -c "import re,pathlib,os; p=pathlib.Path('docs/Cargo.toml'); t=p.read_text(); p.write_text(re.sub(r'^(version\\s*=\\s*\\\"[^\\\"]*\\\")', lambda m: m.group(1) + os.environ.get('VERSION','0.0.0') + m.group(2), t, count=1, flags=re.M))"
+```
+
+The user deleted this script in preference of having authors update
+`docs/Cargo.toml` by hand in the same PR that bumps root. After
+deletion the euv workflow has zero `version =` writes and verifier
+returns exit 0 cleanly. Trade-off documented in
+`rust-workspace-release` "Non-workspace-member manifests" sub-section.
+
+The allowlist-marker path (`# ci-allow-version-write: docs mirror`)
+was the alternative; the user rejected it because it required adding a
+comment to the workflow, which conflicted with the same user's "no
+explanatory comments in CI" rule (`rust-workspace-release` "Keep CI
+workflows free of explanatory comments" sub-section).
+
+If a new repo shows the same shape, the decision is repo-local — ask
+the user which side of the trade-off they prefer; do not default.
+
+---
+
+## §54-§57 — 2026-09-26 second iteration (user-driven, checks 29-32)
+
+User 原话 (2026-09-26 第二轮):
+
+> "mod.rs 的 mod 前面不能有可见性"
+> "rust skill 里的其他内容也需要通过脚本完成校验"
+
+This iteration adds 4 new verification scripts (checks 29-32) covering
+4 previously-non-scripted or partially-scripted rules.  Bidirectional
+fixture self-tests are mandatory before audit wiring (same protocol as
+§49-§53).
+
+### §54 — verify_mod_visibility.py (check 29, §6.2)
+
+User explicitly added §6.2 in this round:
+`mod r#xxx;` in mod.rs MUST be bare — no `pub mod`, no `pub(crate) mod`,
+no `pub(super) mod`.  Older codebases have stray `pub(crate) mod r#xxx;`
+lines (euv `cli/src/build/mod.rs:4` had one).  Implementation:
+
+- Regex: `^(?:pub(?:\([^)]*\))?\s+)?mod\s+`.  Matches `pub mod`,
+  `pub(crate) mod`, `pub(super) mod`.  Bare `mod` skips through.
+- Filter by file basename: only `mod.rs` is audited.  All other
+  files are exempt because `pub mod foo;` in `lib.rs` is the
+  correct way to declare a public module.
+- Raw-string-aware: lines inside `r#"..."#` raw string literals
+  are skipped (mirrors `verify_doc_comment_format.py`).
+
+Bidirectional fixture test:
+- Compliant: 0 violations / exit 0
+- Violating: 3 violations (pub, pub(crate), pub(super)) / exit 1
+
+Real-workspace finding (euv PR #40): 1 hit at
+`cli/src/build/mod.rs:4: pub(crate) mod r#inline;`.
+
+### §55 — verify_no_allow_lints.py (check 30, §14)
+
+User original (2026-09-14): "从根源修复 warn, 禁止使用 allow 宏".
+Existing check 2 in `audit_rust_standards.py` was git-diff scoped:
+only flagged `#[allow(...)]` introduced in the current PR.  This
+left historical `#[allow]`s in the codebase invisible to the audit.
+The new script does tree-wide scan:
+
+- Regex: `^\s*#\[\s*(?:allow|expect)\s*\(` — catches all variants
+  (allow, allow(unused), allow(clippy::xxx), expect(...), etc.).
+- Exemptions:
+  - Inside `#[cfg(test)] mod tests { ... }` block (the test
+    helper function may legitimately silence unused warnings).
+  - Inside any `tests/` directory tree (R14.7 self-contained).
+- Coexists with check 2 (git-diff scope).  Both can be active;
+  check 2 is the PR gate, check 30 is the baseline gate.
+
+Bidirectional fixture test: 0/3 violations.
+
+Real-workspace findings:
+- ctares: 4 hits.
+- euv: 1 hit.
+
+### §56 — verify_explicit_type_annotations.py (check 31, §5.1)
+
+User original (rule 6, 2026-09-26): "所有变量 / 参数 / 返回值必须显式
+类型".  The existing check 12 in `audit_rust_standards.py` only catches
+`Vec::new()` (single regex).  The new script catches all 12 standard
+collection constructors + the `Vec<_>` placeholder pattern:
+
+- Regex family 1: `let <name> = (Vec|VecDeque|HashMap|HashSet|BTreeMap|
+  BTreeSet|LinkedList|BinaryHeap|String|Box|Rc|Arc)::new();` — catches
+  bare collection constructor without type annotation.
+- Regex family 2: `let <name>: Vec<_> = ...collect();` — catches the
+  `Vec<_>` placeholder which defeats the rule's purpose (reader still
+  has to infer the element type).
+- Skips `tests/` (R14.7 self-contained).
+
+Bidirectional fixture test: 0/4 violations.
+
+Real-workspace findings: ctares 1 hit, euv 0 hits.
+
+### §57 — verify_no_wasm_inline.py (check 32, §12)
+
+User original (rule 12, 2026-09-26): "WASM 项目禁止所有 inline 注解".
+This is a WASM-specific rule — only applies to crates declared as
+`crate-type = ["cdylib", ...]` in their Cargo.toml.  Pure rlib /
+bin crates are unaffected.
+
+Implementation:
+
+1. Find all `Cargo.toml` files in the tree, skip `target/` and
+   `.cargo/registry/`.
+2. For each, regex `crate-type\s*=\s*\[?\s*["\']cdylib["\']` — if
+   matches, this crate is a cdylib crate.
+3. For each cdylib crate, audit its `src/` tree for `^\s*#\[\s*inline
+   (?:\s*\([^\)]*\))?\s*\]` — matches `#[inline]`, `#[inline(always)]`,
+   `#[inline(never)]`.
+4. If no cdylib crates exist, exit 0 with "rule §12 not applicable".
+
+Bidirectional fixture test: 0/3 violations (all 3 inline variants
+caught).
+
+
+
+---
+
+## §58-§61 — 2026-09-26 third iteration (user-driven, checks 33-36)
+
+User 原话 (2026-09-26 第三轮):
+
+> "let 的类型必须要显示标注 (包含 let _ = )"
+> "闭包参数需要显示标注"
+> "非单侧的 fn 必须要符合格式的文档注释"
+> "硬编码字符串必须要维护到 const.rs"
+
+This iteration adds 4 new verification scripts (checks 33-36) covering
+4 hard rules the user explicitly added in this round.  All scripts
+pass bidirectional fixture self-tests before audit wiring (same
+protocol as §49-§57).
+
+### §58 — verify_let_type_annotations.py (check 33, §5.1 comprehensive)
+
+User explicitly added §5.1 in this round:
+"let 的类型必须要显示标注 (包含 let _ = )" — every `let` binding,
+including `let _ = ...`, MUST declare its type.
+
+This is the **comprehensive** successor to `verify_explicit_type_annotations.py`
+(check 31), which only catches collection constructors specifically.
+The new script catches ALL `let` bindings without `: T` annotation:
+
+- `let x = 5;` — violation
+- `let s = "hello";` — violation
+- `let v = vec![1, 2, 3];` — violation
+- `let _ = fs::remove();` — violation (per user explicit)
+- `let _: T = expr;` — ok
+- `if let Some(x) = ...` — exempt (pattern guard, not let stmt)
+- Rust 2024 let-chains `if let X = ... && let Y = ...` — exempt
+  (regex won't match second `let` in chain)
+
+Bidirectional fixture test: 0/5 violations.
+
+Real-workspace findings:
+- ctares: 34 hits.
+- euv: 333 hits.
+
+### §59 — verify_closure_type_annotations.py (check 34, §5.2)
+
+User explicitly added §5.2: "闭包参数需要显示标注".  Closure
+parameters must have explicit `: T` annotation.  Implementation
+heuristic:
+
+- Regex `\|(?P<params>[^|=][^|]*?)\|` finds closures.  Empty
+  `||` (operator) is excluded by the `[^|=]` first-char requirement.
+- Param splitter `_split_top_commas()` walks the captured string
+  character-by-character, tracking `<>`/`()`/`{}` depth, splitting
+  only on top-level commas.
+- Each param is checked via `_has_explicit_type()`:
+  - `..` (rest pattern) — exempt
+  - `&pat: T` or `&mut pat: T` — ok
+  - `(pat): T` (tuple destructure with type) — ok
+  - bare `name` or `_name` without `: T` — violation
+  - `name: T` — ok
+- The script handles `|x: &u32|`, `|(a, b): &(u32, u32)|`, and
+  `|&x: &T|` correctly.
+
+Bidirectional fixture test: 0/5 violations (including tuple
+destructuring without type).
+
+Real-workspace findings:
+- ctares: 102 hits.
+- euv: 179 hits.
+
+### §60 — verify_doc_comment_format.py (check 35, §2.1 / §2.2 authoritative)
+
+User explicitly added §2.1: "非单侧的 fn 必须要符合格式的文档注释".
+The existing check 25 (also `verify_doc_comment_format.py`) was
+de-duplicated; this check 35 is the AUTHORITATIVE entry per user
+iteration.
+
+Test files are exempt because R14.5 forbids ALL comments in test
+files; thus no `///` doc comments there either.  Non-test fn /
+impl method must have `///` doc comment with:
+
+- Layer 1 (existence): at least one `///` line above fn/impl.
+- Layer 2 (completeness): `# Arguments` section if non-self params,
+  `# Returns` section if non-() return.
+- Layer 3 (format): argument items use `- \`Type\` - description`
+  form, return items use `- \`Type\`: description` form.
+
+Bidirectional fixture test: 0/3 violations.
+
+Real-workspace findings: ctares 1048 hits, euv 3151 hits.  These
+are large-scale coverage gaps — projects need a sustained
+doc-comment addition campaign.  Per pitfall §39a, use the
+`doc_comment_audit.py` fixer (`--write`) to bulk-add template
+doc-comments before manual review.
+
+### §61 — verify_hardcoded_strings.py (check 36, §1.3c strengthened)
+
+User explicitly added §1.3c strengthened: "硬编码字符串必须要维护到
+const.rs".  This is the **comprehensive** successor to the
+fn.rs-only byte/char/multi-char check 18.  Catches ALL string
+literals (≥ 4 non-trivial chars) in any non-const file.
+
+Implementation:
+
+- Regex `r"([^"\\]|\\.){4,}"` finds string literals.
+- Per-line filter:
+  - `const.rs` itself — exempt (canonical home).
+  - `tests/` — exempt (R14.7 self-contained).
+  - Lines starting with `#[` — exempt (attribute lines like
+    `#[doc = "..."]` / `#[serde(rename = "...")]`).
+  - Format macro format strings — exempt via
+    `_is_format_macro()` heuristic: finds `<macro>!(<str>...)`
+    where the string is the FIRST positional argument.
+  - Otherwise — violation.
+
+Bidirectional fixture test: 0/4 violations.
+
+Real-workspace findings: ctares 447 hits, euv 3384 hits.  This is
+the largest single-class violation; will require sustained
+const-extraction work, especially for `eprintln!`/`println!`
+arguments (which are exempt but adjacent code may have other
+hardcoded strings).
