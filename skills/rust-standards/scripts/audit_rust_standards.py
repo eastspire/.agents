@@ -19,6 +19,10 @@ for the master-pattern exceptions the script cannot statically detect):
  6. mod.rs missing trailing use super::* (R6.2)
  7. sub-file first line not use super::* (R6.3)
  8. #[cfg(test)] in production (R14.5)
+ 9. mod visibility prefix on mod decl (R6.2)
+10. #[allow(...)] in production tree (R14)
+11. let binding without explicit type (R5.1)
+12. #[inline] in WASM cdylib crate (R12)
  9. long-path use crate::xxx in sub-files (R6.3)
 10. inline generic bounds (R9.2)
 11. r# on non-keyword file (R1.4)
@@ -541,7 +545,9 @@ cd {{target}}
 bash "{{audit_script_dir}}/verify_test_imports_centralized.sh" "{{target}}" \
     | grep -v -E '^OK: [0-9]+ tests/'
 exit_code=${PIPESTATUS[0]}
-test "$exit_code" -ne 0 && echo "FAIL: verify_test_imports_centralized.sh exited $exit_code"
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_test_imports_centralized.sh exited $exit_code" >&2
+fi
 exit "$exit_code"
 '''),
     ('fn-body blank lines (R9.1 §9.1 item 10)', '''
@@ -649,6 +655,269 @@ for f in files:
 sys.exit(0 if hits == 0 else 1)
 PY
 '''),
+<<<<<<< Updated upstream
+=======
+    ('Cargo.toml dep block order (§13.7 round 4)', '''
+# Per references/13-dependency.md §13.7 (round 4, 2026-09-26):
+#   [dependencies] / [dev-dependencies] / [build-dependencies] /
+#   [workspace.dependencies] must be ordered:
+#     * LOCAL first (workspace members via [workspace] members or
+#       value containing workspace = true / path = "...").
+#     * EXACTLY ONE blank line separating local group from third-party
+#       group. No blank lines within either group.
+#     * Within each group: entry full length ascending (whitespace-
+#       agnostic; computed by verify_dep_order.py as
+#       len(re.sub(r"\\s+", "", "<entry-joined>"))), ties broken by
+#       dep key ASCII lex.
+#
+# The companion script `verify_dep_order.py` implements this. Its
+# exit code is the only source of truth for pass/fail. We pipe its
+# stdout through `grep -v` to drop the success-path trailer line
+# (`N files checked, 0 violations`) — that line would otherwise be
+# counted as a hit by the audit wrapper. The actual violation lines
+# (file paths + actual vs expected) MUST flow through unfiltered.
+# Repos with no Cargo.toml print "No Cargo.toml files found ..." to
+# stderr and exit 2 — also filtered out (not a violation).
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_dep_order.py" "{{target}}" 2>/dev/null \
+    | grep -v -E '^[0-9]+ files checked, 0 violations$|^OK: 0 Cargo.toml'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_dep_order.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 22 — §17 CI never bumps versions / never writes `version =`
+    # (2026-09-26 added). Companion script: verify_ci_no_bump.py.
+    ('CI workflow forbids version bumps and version writes (§17)', '''
+# Forbid any `.github/workflows/*.yml` step that bumps a Cargo.toml
+# version (cc bump / crate bump with --patch/--minor/.../--release /
+# --target-version) or rewrites a `version =` line via sed -i / perl -pi
+# / python3 -c / awk >. Read-only `grep ... | sed -E 's/.../.../'`
+# extraction of `$VERSION` for tag/commit-message is allowed.
+# Allowlist: `# ci-allow-version-write: <reason>` on the line just
+# above the violation exempts it (tight coupling).
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_ci_no_bump.py" "{{target}}" \
+    | grep -v -E '^(OK: [0-9]+ workflow|INFO: no .github/workflows)'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_ci_no_bump.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 23 — §1.3 keyword file purity (R1.3a) + first-line use super::*
+    # (2026-09-26 user tightening).  Companion script:
+    # verify_keyword_file_purity.py.  Replaces / extends the older
+    # column-0 decl check (#16) and adds the first-line + use-centralized
+    # checks for keyword files.
+    ('keyword file purity + first-line use super::* (§1.3 / §6.3)', '''
+# Per rust-standards §1.3 + §6.3 (2026-09-26 user tightening):
+#   - Each keyword file (const.rs / static.rs / fn.rs / enum.rs /
+#     struct.rs / trait.rs / impl.rs / type.rs / mod.rs) under src/
+#     MUST be the only declaration kind it contains.
+#   - First non-comment line MUST be `use super::*;` (the previous
+#     exemption allowing direct `///` doc comments on enum.rs /
+#     struct.rs / type.rs is RETIRED).
+#   - No `use crate::xxx;` / `use std::xxx;` / `use external::xxx;`
+#     / `use super::specific_path;` outside the leading super::*.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_keyword_file_purity.py" "{{target}}" \\
+    | grep -v -E '^=== keyword-file purity:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_keyword_file_purity.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 24 — §9.2 fn parameter style: no `impl Trait` in parameters.
+    # (2026-09-26 user tightening).  Companion script:
+    # verify_no_impl_trait_params.py.
+    ('no impl Trait in fn parameters (§9.2)', '''
+# Per rust-standards §9.2: fn parameters must use generic + where
+# clause, not `impl Trait`.  Example:
+#   fn parse<T: FromStr>(...)  ❌  inline bound
+#   fn parse<T>(...) where T: FromStr  ✅
+#   fn f(x: impl AsRef<str>)  ❌  impl param
+#   fn f<T>(x: T) where T: AsRef<str>  ✅
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_impl_trait_params.py" "{{target}}" \\
+    | grep -v -E '^=== no-impl-trait-fn-params:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_impl_trait_params.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 25 — §2.1 / §2.2 doc-comment format conformance.
+    # (2026-09-26 user tightening).  Companion script:
+    # verify_doc_comment_format.py.
+    ('doc-comment format conformance (§2.1 / §2.2)', '''
+# Per rust-standards §2.1 + §2.2:
+#   - Every non-#[test] fn / impl block in src-adjacent code must
+#     carry at least one `///` line above it.
+#   - Every fn with non-self parameters OR a non-()/Self return type
+#     must also carry `# Arguments` / `# Returns` sections per the
+#     §2.2 template.
+#   - Argument list items use `- `Type` - description` form.
+#   - Returns list items use `- `Type`: description` form.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_doc_comment_format.py" "{{target}}" \\
+    | grep -v -E '^=== doc-comment format:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_doc_comment_format.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 26 — §6.1 / §6.3 / §6.4 module-imports centralized.
+    # (2026-09-26 user tightening).  Companion script:
+    # verify_module_imports_centralized.py.  Audits lib.rs (private
+    # `use` for std/external must be `pub use`), mod.rs (no // comments
+    # + last-line use super::*), and keyword sub-files (only `use
+    # super::*;` allowed + no long-path use anywhere).
+    ('module imports centralized in lib.rs / mod.rs (§6.1 / §6.3 / §6.4)', '''
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_module_imports_centralized.py" "{{target}}" \\
+    | grep -v -E '^=== module-imports centralized:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_module_imports_centralized.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 27 — §6.1 lib.rs / mod.rs three-stage import order.
+    # (2026-09-26 user tightening).  Companion script:
+    # verify_lib_rs_order.py.
+    ('lib.rs / mod.rs three-stage import order (§6.1)', '''
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_lib_rs_order.py" "{{target}}" \
+    | grep -v -E '^(=== |OK: 0 lib)'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_lib_rs_order.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 28 — §14.5 no comments in test files.  Replaces the older
+    # regex-based check 14 (which used `^\s*//[^/]` and accidentally
+    # excluded `///`).  Companion script: verify_no_test_comments.py.
+    # Catches //, ///, and //! uniformly per round-3 user clarification.
+    ('no comments in test files (§14.5)', '''
+# Per rust-standards §14.5 (2026-09-12 round 3 user clarification,
+# 2026-09-26 strengthening):
+#   Tests have ZERO comments — no file-level //!, no per-fn ///,
+#   no fn-body //.  Test fn name = documentation; assertion
+#   message = expected behavior.  All three forms banned.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_test_comments.py" "{{target}}" \
+    | grep -v -E '^=== no-comments-in-tests:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_test_comments.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 29 — §6.2 mod.rs `mod xxx;` MUST be bare (no visibility
+    # prefix).  User original (2026-09-26): "mod.rs 的 mod 前面不能
+    # 有可见性".  Companion: verify_mod_visibility.py.
+    ('mod.rs `mod` declaration must be bare (§6.2)', '''
+# Per rust-standards §6.2 (2026-09-26 user iteration): in any
+# mod.rs, `mod r#xxx;` declarations MUST be bare — no `pub mod`,
+# no `pub(crate) mod`, no `pub(super) mod`.  The visibility of
+# items inside the module is controlled at the declaration site
+# of the item itself, not on the mod line.  `mod` in mod.rs is
+# always crate-internal (private to the parent module's
+# namespace); the parent re-exports via the middle-stage
+# `pub use {...};` block if external visibility is needed.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_mod_visibility.py" "{{target}}" \
+    | grep -v -E '^=== mod.rs mod visibility'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_mod_visibility.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 30 — §14 no #[allow(...)] / #[expect(...)] in production
+    # code.  Companion to git-diff-scoped check 2 (PR review).  This
+    # script scans the whole tree to catch historical accumulation.
+    ('no `#[allow(...)]` in production (§14)', '''
+# Per rust-standards rule 14 (user 原话, 2026-09-14): "从根源修复
+# warn, 禁止使用 allow 宏".  clippy / rustc warnings must be
+# fixed at source, not silenced with attribute macros.  This
+# check is the tree-wide version of git-diff-scoped check 2;
+# it catches `#[allow(...)]` accumulated over multiple PRs.
+# Exemptions:  (a) `#[allow(...)]` inside `#[cfg(test)] mod tests
+# { ... }` blocks (test helpers may silence unused warnings);
+# (b) `tests/` directory entirely (R14.7 self-contained).
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_allow_lints.py" "{{target}}" \
+    | grep -v -E '^=== no-allow-lints:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_allow_lints.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 31 — §5.1 explicit type annotations for `let` bindings
+    # of collection constructors.  Companion to check 12
+    # (which only catches `Vec::new()` without `:` via a simpler
+    # regex).  This script is more comprehensive on collection
+    # types AND catches `Vec<_>` placeholder annotations.
+    ('explicit type annotations for let bindings (§5.1)', '''
+# Per rust-standards rule 6 (user 原话, 2026-09-26): "所有变量 /
+# 参数 / 返回值必须显式类型".  Common pitfall: `let items =
+# Vec::new();` leaves the type ambiguous to the reader; must be
+# `let items: Vec<u32> = Vec::new();`.  Same for HashMap /
+# HashSet / BTreeMap / BTreeSet / VecDeque / LinkedList /
+# BinaryHeap / String / Box / Rc / Arc.  Also catches
+# `let v: Vec<_> = ...collect();` which defeats the rule by
+# leaving the element type implicit.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_explicit_type_annotations.py" "{{target}}" \
+    | grep -v -E '^=== explicit-type-annotations:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_explicit_type_annotations.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 32 — §12 WASM crates (cdylib) MUST NOT have
+    # `#[inline]` / `#[inline(always)]` / `#[inline(never)]`
+    # attributes.  User original (2026-09-26): "WASM 项目禁止
+    # 所有 inline 注解".  WASM codegen handles inlining itself;
+    # manual annotations force wasm-opt to skip functions,
+    # enlarging the binary 10-50% without measurable speedup.
+    ('no `#[inline]` in cdylib crates (§12)', '''
+# Per rust-standards rule 12 (2026-09-26 user clarification):
+# "WASM 项目禁止所有 inline 注解".  Detection: find all
+# Cargo.toml files with `crate-type = ["cdylib", ...]` and
+# audit their src/ trees for `#[inline]` / `#[inline(always)]`
+# / `#[inline(never)]`.  Pure rust crates (no cdylib) are
+# ignored.  When no cdylib crate exists in the tree, the
+# script exits 0 with informational output.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_wasm_inline.py" "{{target}}" \
+    | grep -v -E '^=== no-wasm-inline:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_wasm_inline.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+>>>>>>> Stashed changes
 ]
 
 
