@@ -2704,3 +2704,55 @@ while expected_seq and expected_seq[-1][1]:
 2. **未 lint 源码就 commit**:clippy warning 必须修但 auto-fixer 无法 cover,AI 倾向于 "warning 而非 error 不算违例"。**根除**:Phase 4 强制 0 warning 才能 exit 0。
 3. **autocomplete 误判文件类型**:看到 .rs 觉得 "只是 refactor",跳过 skill 加载直接动笔。**根除**:SKILL.md 顶部加了硬性 loop 规则 + description 字段强调任何 .rs 任务必加载 skill。
 4. **`/target/` / `tests/` 豁免区被误读为"全 skip"**:phase 实际仍跑(这些豁免在 verifier 内部 brace 跟踪),AI 把豁免 = "不需要跑脚本"。**根除**:脚本的日志明确打印每个 phase 的 PASS/FAIL,豁免区不显示为 SKIP。
+
+## §79 "fmt idempotence" 不要用 `git status --short` 做哨兵(2026-09-27 rust_pre_commit.py 接入时实测)
+
+写"formatter 是否 idempotent"检查时,**第一直觉**是:`cargo fmt && git status --short` — 期待空输出 = idempotent。**这是错的**,原因:Phase 4 (`cargo clippy --all-targets`) 和 Phase 5 (`cargo test --no-run`) 会创建 `Cargo.lock`(workspace 第一次跑会从无到有生成) + 可能产生 build artifacts。`git status --short` 把这些与 fmt 无关的"仓库变更"和 fmt 漂移混在一起,Phase 3 看到 `M src/lib.rs` + `?? Cargo.lock`,无法判断到底是 fmt 没 idempotent 还是 clippy 留下的锁文件。
+
+**正确哨兵**:`fmt --check` — 退出码就是格式化器自己说的"还有 diff"。`Cargo.lock` 的存在与否跟 `--check` 无关。
+
+模板:
+
+```bash
+# 错的:
+cargo fmt && git status --short   # git status 包含 Cargo.lock 等 noise
+if [ -n "$(git status --short)" ]; then FAIL; fi
+
+# 对的:
+cargo fmt && cargo fmt           # 第二跑,期望无变更
+cargo fmt --check                # 退出 0 = idempotent,非零 = 没收敛
+```
+
+**适用**:任何"工具是否达到稳定状态"的检查(不只是 fmt)。规则:**用工具自己的 `--check` 模式或再跑一次,不要用文件系统的 diff 状态**。理由:文件系统 diff 包含**所有**运行过的副作用,无法区分"本工具的副作用"和"前置 phase 的副作用"。
+
+**反例扩展**(同类陷阱):fixer 默认 dry-run 模式不要靠"git diff 是空"证明没改文件 —— 应该靠 fixer 自己用 `if write:` 控制写盘(§45 / SKILL.md 已说)。两者同根:**外部副作用观察(grep git diff / git status)不能替代内部 controlled-mutation 标志**。
+
+## §80 auto-fixer 必须自给自足,不依赖仓库是 git 仓(2026-09-27 实测)
+
+`doc_comment_audit.py` 用 `git ls-files` 列文件,而不是 `find` 或 `pathlib.rglob`。**后果**:对非 git 仓库(包括 `/tmp` 测试 fixture / `cargo new test-repo`)跑 fixer → git 命令 exit 128(`fatal: not a git repository`) → fixer 把 git stderr 当成"未跟踪文件"列表 → 0 个文件被处理 → 报 "0 violations, 0 files fixed" 但实际从未读源码。
+
+**正确做法**:fixer 优先用 `pathlib.Path.rglob` 或 `os.walk` 直接读文件系统,**只在有 `.git/` 目录时**才退化为 `git ls-files`(用于尊重 `.gitignore`)。CLI 加 `--no-git` 兜底跑。
+
+```python
+def list_rust_files(repo: Path) -> list[Path]:
+    if (repo / ".git").exists() and shutil.which("git"):
+        # respect .gitignore
+        out = subprocess.check_output(["git", "ls-files", "*.rs"], cwd=repo, text=True)
+        return [repo / line for line in out.splitlines()]
+    # fallback: walk filesystem
+    return [p for p in repo.rglob("*.rs") if "target" not in p.parts]
+```
+
+**适用**:任何 auto-fixer 都应能跑在非 git 仓库(temporary fixture / fresh clone / 单文件测试场景),不能假设 `git ls-files` 一定可用。验证:fixer 跑在 `cargo new tmp_repo` 创建的空 cargo 项目上必须工作。
+
+## §81 max-iters 3 不是无限 loop 的设计意图(2026-09-27)
+
+`rust_pre_commit.py` 的 Phase 1 ↔ Phase 2 循环**硬上限 3 次**。这是有意识的设计,不是 bug。原因:
+
+1. **auto-fixer 单次收敛**:fix_dep_order / strictify_tests_layout / doc_comment_audit 都是幂等。1 次跑没解决 = 该次跑出的 violations 是 fixer 不处理的,继续跑 1000 次也不会变(同一输入同输出)。
+2. **真违规需要人改 source**:`self.field = X` 无法自动改(不知道用哪个 setter);`use ... as ...` rename 需要人工重命名使用处;missing Layer 4 doc-comment 需要人写 description。这些 max-iters 触发后 **自动停止**,把"还剩什么违规"报告给用户。
+3. **3 是 sweet spot**:够 auto-fixer 收敛(必要时跑 3 次确认),够 audit 给出稳定违规清单。如果设无限 loop,user 等不到终止信号;设 1 又不够排除 transient noise。
+
+**反例**(不要这么设计):"max-iters=∞ until clean" 看似更严格,实际是死循环 — `self.field` 永远清不掉,user 不知道何时 Ctrl-C。
+
+**调试**:`--max-iters N` 子标志调到 5-10 用于排查 fixer 是否需要额外迭代(eg. doc_comment_audit 偶尔跨文件牵动需要第二轮);正常完工用默认 3。**常见误用**:把 max-iters 调到 100 指望"总有一次能清干净"——如果 3 次没清完,问题不是迭代次数,是人没改 source。
