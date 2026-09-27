@@ -231,3 +231,64 @@ Layer 4 signature-type match):
 Real-world worked example for Layer 4 doc-comment: see commit history of
 `verify_doc_comment_format.py`, `references/02-documentation.md` §2.2, and
 `audit-pitfalls.md` §66.
+
+## Two-layer enforcement: rust_pre_commit.py + pre-commit hook
+
+After every rollout, the new check needs **two layers** of enforcement so
+neither AI nor human can accidentally bypass it.
+
+### Layer A: `scripts/rust_pre_commit.py` (manual / AI post-coding)
+
+Single command runs the full 5-phase loop:
+1. Phase 1 — auto-fixers (`fix_dep_order --write` → `strictify_tests_layout`
+   → `doc_comment_audit`)
+2. Phase 2 — `audit_rust_standards.py` (38 checks)
+3. Phase 3 — `crate fmt` double-run + `--check` idempotence
+4. Phase 4 — `cargo clippy --all-targets --offline` (0 warning)
+5. Phase 5 — `cargo test --no-run --all-targets --offline`
+
+Phase 1 ↔ Phase 2 loop max 3 times (auto-fix may unblock audit findings).
+Phases 3–5 do NOT loop — they require source changes.
+
+Sub-commands: `--audit-only` (Phase 2 only), `--no-fix` (skip Phase 1),
+`--max-iters N` (raise loop ceiling for fixer-convergence debugging).
+
+**AI post-coding standard**: run this script, observe "PASS — all phases
+clean" + exit 0, then commit. Any other outcome = keep fixing.
+
+### Layer B: `references/hooks/pre-commit` (commit-time safety net)
+
+Installed at `~/.git-hooks/pre-commit` with
+`git config --global core.hooksPath ~/.git-hooks`. Runs automatically on
+every `git commit` and **only checks staged files** (not the whole repo).
+
+Five file-level verifiers invoked per staged `.rs` / `.toml`:
+- `verify_doc_comment_format.py` (§2.1/§2.2)
+- `verify_no_import_rename.py` (§6.5)
+- `verify_no_self_field_access.py` (§17.3/§17.12)
+- `verify_lib_rs_doc_comment.py` (§1.3c/§2.4)
+- `verify_dep_order.py` (§13.7 round 4)
+
+Why staged-file strategy: the rule is "block NEW violations, not legacy
+debt." Whole-repo scan would lock out repos with existing tech debt
+(euv 808 doc-comment, hyperlane 26 keyword-file). See `audit-pitfalls.md`
+§82 for the design rationale, §83 for the 5-verifier selection criteria.
+
+### When to add a verifier to the hook
+
+Add a verifier to the hook's verifier list when:
+- The rule fires on per-file signal (no global context needed)
+- Exit code from per-file run is the source of truth
+- Performance is < 100ms per file (hook must not slow commits)
+- The rule's violation semantics match "introduced by THIS commit"
+
+Do NOT add a verifier to the hook when:
+- The rule needs global context (e.g. check 23 keyword-file purity
+  walks the whole tree for `mod.rs` / `fn.rs` / `struct.rs` topology)
+- The rule needs cross-file state (e.g. check 26 import centralization
+  looks at lib.rs ↔ mod.rs ↔ sub-file relationships)
+- The rule scans by directory (e.g. check 32 let-type annotation walks
+  whole impl blocks)
+
+These stay covered by `rust_pre_commit.py` Phase 2 — the hook's job is
+the commit-time first line of defense, the full audit is the safety net.

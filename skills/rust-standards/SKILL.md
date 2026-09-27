@@ -1,6 +1,6 @@
 ---
 name: rust-standards
-description: 'Rust 开发规范(最高优先级,与任何 skill 冲突时以此为准)。**任何写 / 改 / 审查 Rust 代码、`.rs` 文件、`Cargo.toml`、cargo 命令、euv / hyperlane / wasm / proc-macro / ServerHook / Signal 的任务,在写第一行代码 / 第一次回答之前必须 `skill_view("rust-standards")` —— 不靠 description 软触发。不加载本 skill 写出的 Rust 代码会被开发者 review 直接驳回,不得 commit / push / 提 PR**。互锁:euv 任务必同时加载 `euv-standards` + `euv-ui-standards`;hyperlane 任务必同时加载 `hyperlane-standards`。适用于:新项目脚手架、现有 Rust 代码维护、PR 审查、重构、模块划分、命名、错误处理、性能优化、依赖管理、测试策略。涵盖硬性规则:9 种关键字文件纯净 / raw identifier / mod.rs 三段式 / lib.rs 集中导入 / 显式类型 / 泛型 where / WASM 禁 inline / fmt 双幂等 / 测试放 tests/。'
+description: 'Rust 开发规范(最高优先级,与任何 skill 冲突时以此为准)。**任何写 / 改 / 审查 Rust 代码、`.rs` 文件、`Cargo.toml`、cargo 命令、euv / hyperlane / wasm / proc-macro / ServerHook / Signal 的任务,在写第一行代码 / 第一次回答之前必须 `skill_view("rust-standards")` —— 不靠 description 软触发。不加载本 skill 写出的 Rust 代码会被开发者 review 直接驳回,不得 commit / push / 提 PR**。互锁:euv 任务必同时加载 `euv-standards` + `euv-ui-standards`;hyperlane 任务必同时加载 `hyperlane-standards`。**完工闭环**(2026-09-27 user 钦定):编码后**必须**跑 `python3 scripts/rust_pre_commit.py <repo>` 直到 exit 0,commit 时由 `~/.git-hooks/pre-commit` 强制 gate 新引入违规(只挡 staged 文件,不拦历史债)。适用于:新项目脚手架、现有 Rust 代码维护、PR 审查、重构、模块划分、命名、错误处理、性能优化、依赖管理、测试策略。涵盖硬性规则:9 种关键字文件纯净 / raw identifier / mod.rs 三段式 / lib.rs 集中导入 / 显式类型 / 泛型 where / WASM 禁 inline / fmt 双幂等 / 测试放 tests/。'
 ---
 
 # Rust 开发规范
