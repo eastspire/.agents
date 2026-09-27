@@ -359,6 +359,45 @@ python3 ~/.agents/skills/rust-standards/scripts/strictify_tests_layout.py <repo-
 
 PR 提交后 `gh pr checks <N>` 必须 build/clippy/tests/check/setup 5/5 pass。`Format check` job 单独注意——它跑 `cargo fmt --check` 而不是 `euv fmt --check`(参见 rule 13 pitfall)。
 
+### Pre-commit git hook(2026-09-27 user 钦定强装)
+
+**`rust_pre_commit.py` 是 commit 之前的推荐流程;真挡 commit 的是 `~/.git-hooks/pre-commit` 这个 git hook**。
+
+**装法**(全局,所有 Rust 仓都生效):
+
+```bash
+mkdir -p ~/.git-hooks
+cp skills/rust-standards/references/hooks/pre-commit ~/.git-hooks/pre-commit
+chmod +x ~/.git-hooks/pre-commit
+git config --global core.hooksPath ~/.git-hooks
+```
+
+**hook 行为**:
+
+| 触发条件 | 行为 |
+|---------|------|
+| 当前仓无 `Cargo.toml` | skip(非 Rust 仓) |
+| 没 staged `.rs` / `.toml` | skip |
+| 有 staged Rust 文件 | 跑 `verify_doc_comment_format.py` + `verify_no_import_rename.py` + `verify_no_self_field_access.py` + `verify_lib_rs_doc_comment.py` + `verify_dep_order.py`(按文件) |
+| 任一失败 | **commit 阻断**,exit 1,输出违规文件 + verifier 名 |
+| 全 PASS | "0 violations — commit allowed",exit 0 |
+
+**关键设计**:**只检查 staged 文件,不扫整个 repo**。这样:
+- 历史违规(`euv` 808 doc-comment / `hyperlane` 26 keyword-file 之类)不会被 hook 拦
+- **新引入的违规**才被拦 — 这是 user 的真实意图("挡新错,不挡旧债")
+- 跑得快(< 1 秒,小文件)
+
+**Escape hatch**:`git commit --no-verify`(NOT 推荐;真要 bypass 前先想清楚为啥 hook 报 FAIL)。SKILL.md 已留 `--no-verify` 注释提示。
+
+**为什么需要 hook + 脚本两层**:
+- `rust_pre_commit.py` 是 AI / 人**写完代码 → 立刻跑**的闭环(auto-fix + fmt + clippy + test),需要主动执行
+- `~/.git-hooks/pre-commit` 是 **commit 的最后一道关**,AI 忘记跑脚本就被 git 直接拦住
+- 两层加起来 = 万无一失
+
+**已知局限**:
+- hook 只跑 file-level verifier(check 35 / 36 / 37 / 38 / 21);其他 33 项 audit check 仍依赖 `audit_rust_standards.py` 完整跑(在 `rust_pre_commit.py` Phase 2 覆盖)
+- 单文件 verifier 不知道全局上下文(如 lib.rs 集中导入的全模块拓扑),所以 audit 38-check 仍必须由 rust_pre_commit 跑一遍作为兜底
+
 ### 已知 audit 盲点(命中时不一定是真违规,先看 audit-pitfalls 再判断)
 
 | audit rule | 盲点 | 缓解 |

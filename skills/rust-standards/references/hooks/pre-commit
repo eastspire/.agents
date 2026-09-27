@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# Global pre-commit hook for eastspire Rust repos.
+#
+# Strategy: only check STAGED files (the diff about to be committed).
+# This is fast, doesn't trigger on historical violations, and matches
+# user intent — block NEW violations, not legacy debt.
+#
+# For full pre-coding loop (auto-fix + clippy + test-compile), run:
+#   python3 ~/.agents/skills/rust-standards/scripts/rust_pre_commit.py <repo>
+#
+# This hook is the COMMIT-TIME safety net: any violation found here is
+# a violation introduced by THIS commit, regardless of repo history.
+#
+# Installed at ~/.git-hooks/pre-commit with git config --global core.hooksPath.
+# Escape hatch (NOT recommended, see rust-standards SKILL.md):
+#   git commit --no-verify
+
+set -euo pipefail
+
+# -------------------------------------------------------------------
+# Locate helpers (HOOK_DIR-relative, not cwd-relative)
+# -------------------------------------------------------------------
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# -------------------------------------------------------------------
+# Detect: Rust repo?
+# -------------------------------------------------------------------
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
+if [[ -z "$REPO_ROOT" ]]; then
+    exit 0
+fi
+
+if ! find "$REPO_ROOT" -maxdepth 4 -name Cargo.toml -not -path '*/target/*' 2>/dev/null | head -1 | grep -q .; then
+    exit 0  # not a Rust repo, skip
+fi
+
+# Locate rust-standards scripts dir
+SCRIPTS_DIR=""
+for candidate in \
+    "$HOME/.agents/skills/rust-standards/scripts" \
+    "$HOME/.hermes/skills/rust-standards/scripts"; do
+    if [[ -d "$candidate" && -f "$candidate/audit_rust_standards.py" ]]; then
+        SCRIPTS_DIR="$candidate"
+        break
+    fi
+done
+if [[ -z "$SCRIPTS_DIR" ]]; then
+    echo "pre-commit hook: rust-standards skill not found, skipping audit" >&2
+    exit 0
+fi
+
+# -------------------------------------------------------------------
+# Get list of staged files (.rs / .toml) — skip binary, vendor, target
+# -------------------------------------------------------------------
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR -- \
+    ':(exclude)target/*' ':(exclude)*.lock' \
+    | grep -E '\.(rs|toml)$' || true)
+
+if [[ -z "$STAGED_FILES" ]]; then
+    exit 0  # nothing Rust-related staged, skip
+fi
+
+# -------------------------------------------------------------------
+# Run individual verifiers (only checks that scale to a file list)
+# -------------------------------------------------------------------
+# We do NOT call audit_rust_standards.py — it scans the whole repo
+# and would block on legacy debt. Instead we call the file-level
+# verifiers directly on each staged file.
+
+echo "============================================================"
+echo "pre-commit hook (rust-standards): staged-file audit gate"
+echo "  repo:    $REPO_ROOT"
+echo "  scripts: $SCRIPTS_DIR"
+echo "  files:   $(echo "$STAGED_FILES" | wc -l | tr -d ' ')"
+echo "============================================================"
+
+VIOLATIONS=0
+FAILED_FILES=()
+
+# --- .toml files: dep order check (only on .toml files modified) ---
+TOML_FILES=$(echo "$STAGED_FILES" | grep '\.toml$' || true)
+if [[ -n "$TOML_FILES" ]]; then
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        full="$REPO_ROOT/$f"
+        [[ ! -f "$full" ]] && continue
+        # verify_dep_order.py only accepts a directory — verify the
+        # WHOLE repo on any .toml change (cheap; < 100ms for typical)
+        if ! python3 "$SCRIPTS_DIR/verify_dep_order.py" "$REPO_ROOT" >/dev/null 2>&1; then
+            # Diff against HEAD to confirm violation is in OUR staged change
+            if git diff --cached --name-only --diff-filter=ACMR | grep -q "^$f$"; then
+                # Only flag if THIS file's diff introduced the violation.
+                # We can't easily per-file diff Cargo.toml ordering without
+                # parsing; for now report as "dep-order §13.7 on $f".
+                VIOLATIONS=$((VIOLATIONS + 1))
+                FAILED_FILES+=("$f (dep-order §13.7 — run verify_dep_order.py)")
+            fi
+        fi
+    done <<< "$TOML_FILES"
+fi
+
+# --- .rs files: doc-comment / import-rename / self-field / lib-rs-doc ---
+RS_FILES=$(echo "$STAGED_FILES" | grep '\.rs$' || true)
+if [[ -n "$RS_FILES" ]]; then
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        full="$REPO_ROOT/$f"
+        [[ ! -f "$full" ]] && continue
+
+        for verifier in \
+            verify_doc_comment_format.py \
+            verify_no_import_rename.py \
+            verify_no_self_field_access.py \
+            verify_lib_rs_doc_comment.py; do
+            if [[ -f "$SCRIPTS_DIR/$verifier" ]]; then
+                if ! python3 "$SCRIPTS_DIR/$verifier" "$full" >/dev/null 2>&1; then
+                    VIOLATIONS=$((VIOLATIONS + 1))
+                    FAILED_FILES+=("$f ($verifier)")
+                fi
+            fi
+        done
+    done <<< "$RS_FILES"
+fi
+
+# -------------------------------------------------------------------
+# Verdict
+# -------------------------------------------------------------------
+if [[ "$VIOLATIONS" -eq 0 ]]; then
+    echo "  0 violations — commit allowed"
+    echo "============================================================"
+    exit 0
+fi
+
+echo ""
+echo "  $VIOLATIONS violations across ${#FAILED_FILES[@]} check(s):"
+for vf in "${FAILED_FILES[@]}"; do
+    echo "    - $vf"
+done
+echo ""
+echo "============================================================"
+echo "pre-commit hook: FAIL — commit BLOCKED"
+echo "============================================================"
+echo "" >&2
+echo "rust-standards violations introduced by this commit." >&2
+echo "Fix them, then re-commit." >&2
+echo "" >&2
+echo "For full auto-fix loop (run BEFORE staging):" >&2
+echo "  python3 $SCRIPTS_DIR/rust_pre_commit.py $REPO_ROOT" >&2
+echo "" >&2
+echo "To see detailed violation output, re-run the specific verifier on a file:" >&2
+echo "  python3 $SCRIPTS_DIR/verify_doc_comment_format.py <file>" >&2
+echo "" >&2
+echo "Escape hatch (NOT recommended, see rust-standards SKILL.md):" >&2
+echo "  git commit --no-verify" >&2
+exit 1

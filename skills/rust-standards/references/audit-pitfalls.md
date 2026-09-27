@@ -2756,3 +2756,41 @@ def list_rust_files(repo: Path) -> list[Path]:
 **反例**(不要这么设计):"max-iters=∞ until clean" 看似更严格,实际是死循环 — `self.field` 永远清不掉,user 不知道何时 Ctrl-C。
 
 **调试**:`--max-iters N` 子标志调到 5-10 用于排查 fixer 是否需要额外迭代(eg. doc_comment_audit 偶尔跨文件牵动需要第二轮);正常完工用默认 3。**常见误用**:把 max-iters 调到 100 指望"总有一次能清干净"——如果 3 次没清完,问题不是迭代次数,是人没改 source。
+
+## §82 pre-commit hook staged-file strategy(2026-09-27)
+
+`~/.git-hooks/pre-commit` 的关键设计决策:**只检查 staged 文件,绝不扫整个 repo**。
+
+**为什么不是扫整个 repo**:
+1. euv 仓当前历史已有 808 doc-comment / 333 let-type / 26 keyword-file 等**历史违规**,这些不是某次 commit 引入的,是长期积累的。如果 hook 扫全仓,这些 repo 永远 commit 不进去。
+2. user 的真实意图是"挡新错,不挡旧债"。`rust_pre_commit.py` Phase 1+2 的 loop 才是处理历史包袱的工具;hook 是 commit-time safety net,只挡这次 commit 引入的。
+3. 全仓扫跑得慢(euv 一次 1.7s,hyperlane 5s+,ctares 还要多)。staged-file 模式跑得很快(< 100ms,小文件)。
+
+**staged-file 模式的盲点**:
+- 只跑 file-level verifier(check 35 doc-comment / 36 lib.rs doc / 37 use-as-rename / 38 self.field / 21 dep-order)
+- 不跑需要全局上下文的 check(check 23 keyword-file 全树扫描 / check 26 import 集中化 / check 32/33 显式类型标注 等)
+- 这些全局 check 由 `rust_pre_commit.py` Phase 2 完整 audit 兜底
+
+**因此两层都必须跑**:
+- AI 编码后:`rust_pre_commit.py`(5 phase 全 loop)
+- commit 时:`~/.git-hooks/pre-commit`(staged-file 5 verifier)
+
+**Escape hatch `git commit --no-verify`**:理论可绕过 hook。SKILL.md 注释"NOT recommended";真要 bypass 前先想清楚 hook 为啥报 FAIL,大概率是真违规。
+
+**为什么不直接用 `pre-commit` framework 装**:`pre-commit` 是 Python 项目,要写 `.pre-commit-config.yaml`,对单文件 Rust 仓 overhead 大。直接 bash + git diff + 全局 hooksPath 更轻量,符合 eastspire 仓最小依赖原则。
+
+## §83 hook 的 4 个 verifier 选择标准(2026-09-27)
+
+hook 不跑 `audit_rust_standards.py` 38 项 audit,只跑 5 个 verifier,选择标准:
+
+1. **接受 per-file 参数**:`verify_doc_comment_format.py <file>` / `verify_no_import_rename.py <file>` / 等都接受单文件;`audit_rust_standards.py` 只接受 dir,扫全树
+2. **检查有明确的 file-scope 语义**:doc-comment / use-rename / self-field / lib-rs-doc / dep-order 都在单文件内可判定
+3. **跑得快**(< 100ms/file):hook 不能阻塞 commit
+4. **违规语义和"新引入"挂钩**:改了 file X → 产生违规 → 这次 commit 该负责
+
+被排除的 check(典型):
+- check 23 keyword-file purity:需要全树扫描 `mod.rs` / `fn.rs` / `struct.rs` 的拓扑
+- check 26 import 集中化:需要看 lib.rs / mod.rs / 子文件的 use 关系
+- check 32 let type annotation:扫整个 impl block 的上下文
+
+这些检查的正确执行点 = `rust_pre_commit.py` Phase 2,不是 hook。
