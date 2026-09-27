@@ -188,7 +188,7 @@ cd ~/github/euv-dev/euv/example
 /root/.cargo/bin/euv build
 ```
 
-⚠️ **Pitfall**: `euv build` (euv-cli 0.13.6) leaves a `pkg/` dir at the example crate root containing the bundle. This dir is **not** gitignored by the root `.gitignore` (which only covers `target/`, `www/`, `node_modules/`). If you `git add -A` from the repo root without thinking, it leaks into your PR. Always `rm -rf example/pkg/` before `git add`. See `references/release-pitfalls.md`.
+⚠️ **Pitfall**: `euv build`(euv-cli,现为 0.26.8)leaves a `pkg/` dir at the example crate root containing the bundle. This dir is **not** gitignored by the root `.gitignore` (which only covers `target/`, `www/`, `node_modules/`). If you `git add -A` from the repo root without thinking, it leaks into your PR. Always `rm -rf example/pkg/` before `git add`. See `references/release-pitfalls.md`.
 
 ### Step 8 — Pick the deployment target
 

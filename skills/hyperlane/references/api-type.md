@@ -224,17 +224,18 @@ Crate name: `http-type` (目录仍叫 `type/`);use as `hyperlane::http_type::*` 
 - `fn` **`from_json`** — `pub fn from_json<C>(json: C) -> Result<RequestConfig, serde_json::Error> where C: AsRef<str>, {...}`
 - `fn` **`low_security`** — `pub fn low_security() -> Self {...}`
 - `fn` **`high_security`** — `pub fn high_security() -> Self {...}`
+- `fn` **`reset`** — `pub fn reset(&mut self) -> &mut Self {...}`
 - `fn` **`get_http_first_line`** — `pub(crate) fn get_http_first_line( line: &str, ) -> Result<(RequestMethod, &str, RequestVersion), RequestError> {...}`
 - `fn` **`check_http_path_size`** — `pub(crate) fn check_http_path_size(path: &str, max_size: usize) -> Result<(), RequestError> {...}`
 - `fn` **`get_http_query`** — `pub(crate) fn get_http_query( path: &str, query_index: Option<usize>, hash_index: Option<usize>, ) -> &str {...}`
-- `fn` **`get_http_path`** — `pub(crate) fn get_http_path( path: &str, query_index: Option<usize>, hash_index: Option<usize>, ) -> RequestPath {...}`
-- `fn` **`get_http_querys`** — `pub(crate) fn get_http_querys(query: &str) -> RequestQuerys {...}`
+- `fn` **`get_http_path`** — `pub(crate) fn get_http_path( path: &str, query_index: Option<usize>, hash_index: Option<usize>, ) -> &str {...}`
+- `fn` **`fill_http_querys`** — `pub(crate) fn fill_http_querys(query: &str, querys: &mut RequestQuerys) {...}`
 - `fn` **`check_http_header_count`** — `pub(crate) fn check_http_header_count( count: usize, max_count: usize, ) -> Result<(), RequestError> {...}`
 - `fn` **`check_http_header_key_size`** — `pub(crate) fn check_http_header_key_size( key: &str, max_size: usize, ) -> Result<(), RequestError> {...}`
 - `fn` **`check_http_header_value_size`** — `pub(crate) fn check_http_header_value_size( value: &str, max_size: usize, ) -> Result<(), RequestError> {...}`
 - `fn` **`check_http_body_size`** — `pub(crate) fn check_http_body_size( value: &str, max_size: usize, ) -> Result<usize, RequestError> {...}`
-- `fn` **`get_http_headers`** — `pub(crate) async fn get_http_headers<R>( reader: &mut R, config: &RequestConfig, ) -> Result<(RequestHeaders, RequestHost, usize), RequestError> where R: AsyncBufRe`
-- `fn` **`get_http_body`** — `pub(crate) async fn get_http_body( reader: &mut BufReader<&mut TcpStream>, content_size: usize, ) -> Result<RequestBody, RequestError> {...}`
+- `fn` **`get_http_headers`** — `pub(crate) async fn get_http_headers<R>( &mut self, reader: &mut R, config: &RequestConfig, ) -> Result<usize, RequestError> where R: AsyncBufReadExt + Unpin {...}`
+- `fn` **`fill_http_body`** — `pub(crate) async fn fill_http_body<R>( reader: &mut R, body: &mut RequestBody, content_size: usize, ) -> Result<(), RequestError> where R: AsyncRead + Unpin {...}`
 - `fn` **`try_get_query`** — `pub fn try_get_query<K>(&self, key: K) -> Option<RequestQuerysValue> where K: AsRef<str>, {...}`
 - `fn` **`get_query`** — `pub fn get_query<K>(&self, key: K) -> RequestQuerysValue where K: AsRef<str>, {...}`
 - `fn` **`try_get_header`** — `pub fn try_get_header<K>(&self, key: K) -> Option<RequestHeadersValue> where K: AsRef<str>, {...}`
@@ -293,6 +294,7 @@ Crate name: `http-type` (目录仍叫 `type/`);use as `hyperlane::http_type::*` 
 
 ### `response::impl`
 
+- `fn` **`reset`** — `pub fn reset(&mut self) -> &mut Self {...}`
 - `fn` **`try_get_header`** — `pub fn try_get_header<K>(&self, key: K) -> Option<ResponseHeadersValue> where K: AsRef<str>, {...}`
 - `fn` **`get_header`** — `pub fn get_header<K>(&self, key: K) -> ResponseHeadersValue where K: AsRef<str>, {...}`
 - `fn` **`try_get_header_front`** — `pub fn try_get_header_front<K>(&self, key: K) -> Option<ResponseHeadersValueItem> where K: AsRef<str>, {...}`
@@ -348,12 +350,18 @@ Crate name: `http-type` (目录仍叫 `type/`);use as `hyperlane::http_type::*` 
 - `fn` **`is_continue`** — `pub fn is_continue(&self) -> bool {...}`
 - `fn` **`is_reject`** — `pub fn is_reject(&self) -> bool {...}`
 
+### `stream::fn`
+
+- `fn` **`take_read_buffer`** — `pub(crate) fn take_read_buffer(capacity: usize) -> Vec<u8> {...}`
+- `fn` **`return_read_buffer`** — `pub(crate) fn return_read_buffer(buffer: Vec<u8>) {...}`
+
 ### `stream::impl`
 
 - `fn` **`is_keep_alive`** — `pub fn is_keep_alive(&self, keep_alive: bool) -> bool {...}`
 - `fn` **`try_get_http_request`** — `pub async fn try_get_http_request(&mut self) -> Result<Request, RequestError> {...}`
 - `fn` **`try_get_websocket_request`** — `pub async fn try_get_websocket_request(&mut self) -> Result<RequestBody, RequestError> {...}`
-- `fn` **`get_websocket_from_stream`** — `pub(crate) async fn get_websocket_from_stream( &mut self, buffer: &mut [u8], duration_opt: Option<Duration>, is_client_response: &mut bool, ) -> Result<Option<u`
+- `fn` **`get_websocket_from_stream`** — `pub(crate) async fn get_websocket_from_stream( &mut self, buffer: &mut [u8], duration_opt: Option<Duration>, is_client_response: &mut bool, ) -> Result<Option<usize>, RequestError> {...}`
+- `fn` **`try_fill_http_request`** — `pub async fn try_fill_http_request( &mut self, request: &mut Request, ) -> Result<(), RequestError> {...}`
 - `fn` **`try_send`** — `pub async fn try_send<D>(&mut self, data: D) -> Result<(), ResponseError> where D: AsRef<[u8]>, {...}`
 - `fn` **`send`** — `pub async fn send<D>(&mut self, data: D) where D: AsRef<[u8]>, {...}`
 - `fn` **`try_send_list`** — `pub async fn try_send_list<I, D>(&mut self, data_iter: I) -> Result<(), ResponseError> where I: IntoIterator<Item = D>, D: AsRef<[u8]>, {...}`
@@ -364,6 +372,14 @@ Crate name: `http-type` (目录仍叫 `type/`);use as `hyperlane::http_type::*` 
 ### `stream::struct`
 
 - `struct` **`Stream`** — `pub struct Stream {`
+
+### `stream::static`
+
+- `static` **`READ_BUFFER_POOL`** — `pub(crate) static READ_BUFFER_POOL: RefCell<Vec<Vec<u8>>> = const { RefCell::new(Vec::new()) }`
+
+### `stream::struct`
+
+- `struct` **`PooledReader`** — `pub(crate) struct PooledReader<'a>`
 
 ### `stream::type`
 

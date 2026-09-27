@@ -107,6 +107,26 @@ r'^\s*pub(\s*\([^)]*\))?\s+((?:async\s+|const\s+|unsafe\s+)?(?:fn|struct|enum|tr
 ```
 在 `os.walk` 遍历的每个 `.rs` 文件全文 multi-line 扫描（`re.finditer(..., re.MULTILINE | re.DOTALL)`）。impl 块内的 pub fn 是 method，不是"模块 pub API surface"——要剔除。
 
+### ❌ 签名截取的深度计数顺序
+写 pub item 签名提取器时，**终止符判断必须在括号深度更新之前**，否则函数体开头的 `{` 会被当成括号吃掉，签名永远不终止（会一路吞到下一个 `;`）：
+```python
+# 错：先执行 if c in "([{": depth += 1，'{' 已被当成括号
+# 对：
+if depth <= 0 and c in ";{":   # 先判终止
+    ...
+if c in "([{": depth += 1
+elif c in ")]}": depth -= 1
+```
+另有 `= const { .. };` 这类值块属于声明的一部分，要跟到配对 `}` 并带上 `;`，否则会截成 `= const {`。
+
+**经验：写完提取器必须拿它反向重建已有文档做自检**（`gen.rerender() == 旧文件`），90%+ 逐条一致才说明风格复刻正确，再拿去做 diff。否则分不清「真漂移」和「自己风格写错」——这比不写提取器更危险。
+
+### ❌ 用「重新生成」做对账 = 制造假 diff
+`os.walk` 的遍历顺序决定 section 顺序，按字母序重排会一次改动上百行但语义零变化（euv 的 api-ui.md 曾出现 53 删/210 增而真实漂移为 0）。**对账要按 (section, kind, name) 三元组比对条目集合，不要按行 diff 整个文件。**
+
+### ❌ markdown 表格单元格里的 shell 管道符
+`grep ... | wc -l` 这类「验证命令」写在表格里时，管道若未转义，读者复制执行会把管道喂给 grep。这类「数字 + 验证命令」表格恰恰是防漂移的关键，值得单独跑一遍确认每条命令输出 == 表里数字。
+
 ### ❌ proc_macro 提取正则不够激进
 77 个 proc_macro 分散在 macros/src/lib.rs 里，被大量 doctest 注释和空白隔开。**工作 regex**：
 ```python

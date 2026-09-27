@@ -796,7 +796,7 @@ Re-exported at crate root as `euv::euv_button`, `euv::use_async` 等 via `ui/src
 - `fn` **`schedule_measure_by_id`** — `pub(crate) fn schedule_measure_by_id(self, container_id: &str) {...}`
 - `fn` **`try_get_container`** — `pub fn try_get_container() -> Option<Element> {...}`
 - `fn` **`try_get_container_by_id`** — `pub fn try_get_container_by_id<C>(container_id: C) -> Option<Element> where C: AsRef<str>, {...}`
-- `fn` **`compute_visible_range`** — `pub(crate) fn compute_visible_range( scroll_offset: i32, viewport_height: i32, total_count: usize, item_height: i32, overscan_count: usize, ) -> (usize,`
+- `fn` **`compute_visible_range`** — `pub(crate) fn compute_visible_range( scroll_offset: i32, viewport_height: i32, total_count: usize, item_height: i32, overscan_count: usize, ) -> (usize, usize, usize, usize) {...}`
 
 ### `component::virtual_list::hook::static`
 
@@ -806,7 +806,7 @@ Re-exported at crate root as `euv::euv_button`, `euv::use_async` 等 via `ui/src
 ### `component::virtual_list::hook::struct`
 
 - `struct` **`UseVirtualList`** — `pub struct UseVirtualList {`
-- `struct` **`PendingMeasureCell`** — `pub(crate) struct PendingMeasureCell( #[get(pub(crate))]`
+- `struct` **`PendingMeasureCell`** — `pub(crate) struct PendingMeasureCell( #[get(pub(crate))] #[get_mut(pub(crate))] #[set(pub(crate))] pub(crate) UnsafeCell<HashSet<String>>, );`
 
 ### `component::virtual_list::view::fn`
 

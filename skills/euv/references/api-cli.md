@@ -6,6 +6,51 @@ Source: `cli/src/` — auto-extracted from `pub` declarations.
 
 - `fn` **`main`** — `pub async fn main() -> Result<(), EuvError> {...}`
 
+### `build::enum`
+
+- `enum` **`Action`** — `pub enum Action {`
+- `enum` **`BuildMode`** — `pub enum BuildMode {`
+- `enum` **`Mode`** — `pub enum Mode {`
+- `enum` **`ReloadEvent`** — `pub enum ReloadEvent {`
+
+### `build::fn`
+
+- `fn` **`has_build_mode_flag`** — `pub fn has_build_mode_flag(wasm_pack_args: &[String]) -> bool {...}`
+- `fn` **`filter_euv_args`** — `pub fn filter_euv_args(wasm_pack_args: &[String]) -> Vec<String> {...}`
+- `fn` **`reconcile_args`** — `pub fn reconcile_args(args: &mut ModeArgs) {...}`
+- `fn` **`resolve_build_mode`** — `pub fn resolve_build_mode(args: &ModeArgs) -> BuildMode {...}`
+- `fn` **`build_mode_to_flag`** — `pub fn build_mode_to_flag(build_mode: BuildMode) -> &'static str {...}`
+- `fn` **`resolve_out_name`** — `pub fn resolve_out_name(args: &ModeArgs) -> String {...}`
+- `fn` **`resolve_serving_root`** — `pub async fn resolve_serving_root(args: &ModeArgs) -> PathBuf {...}`
+- `fn` **`resolve_serving_route_prefix`** — `pub fn resolve_serving_route_prefix(args: &ModeArgs) -> String {...}`
+- `fn` **`resolve_import_path`** — `pub fn resolve_import_path(args: &ModeArgs) -> String {...}`
+- `fn` **`resolve_out_dir`** — `pub fn resolve_out_dir(args: &ModeArgs) -> PathBuf {...}`
+- `fn` **`run_build_only_pipeline`** — `pub async fn run_build_only_pipeline(args: &ModeArgs) -> Result<(), EuvError> {...}`
+- `fn` **`clean_out_dir`** — `pub async fn clean_out_dir(out_dir: &Path) {...}`
+- `fn` **`run_build_pipeline`** — `pub async fn run_build_pipeline( args: &ModeArgs, reload_tx: Option<&broadcast::Sender<ReloadEvent>>, ) -> Result<String, EuvError> {...}`
+- `fn` **`watch_and_build`** — `pub(crate) async fn watch_and_build(state: Arc<AppState>) -> Result<(), EuvError> {...}`
+- `fn` **`build_wasm`** — `pub async fn build_wasm(args: &ModeArgs) -> Result<(), EuvError> {...}`
+- `fn` **`print_banner`** — `pub fn print_banner(action: Action) {...}`
+- `fn` **`print_server_urls`** — `pub(crate) fn print_server_urls(config: &ServerUrlConfig) {...}`
+- `fn` **`run_hyperlane_fmt`** — `pub async fn run_hyperlane_fmt() -> Result<(), EuvError> {...}`
+
+### `build::inline`
+
+- `fn` **`build_inline_bridge`** — `pub(crate) async fn build_inline_bridge( pkg_dir: &Path, js_name: &str, wasm_url: &str, ) -> Result<String, EuvError> {...}`
+- `fn` **`build_module_fallback_bridge`** — `pub(crate) fn build_module_fallback_bridge(import_path: &str) -> String {...}`
+- `fn` **`inline_bridge_disabled`** — `pub(crate) fn inline_bridge_disabled() -> bool {...}`
+- `fn` **`extract_exported_function_names`** — `pub fn extract_exported_function_names(source: &str) -> Vec<String> {...}`
+- `fn` **`is_namespace_import`** — `pub fn is_namespace_import(rest: &str) -> bool {...}`
+- `fn` **`extract_namespace_alias`** — `pub fn extract_namespace_alias(rest: &str) -> Option<&str> {...}`
+- `fn` **`extract_import_spec`** — `pub fn extract_import_spec(rest: &str) -> Option<&str> {...}`
+
+### `build::struct`
+
+- `struct` **`Cli`** — `pub struct Cli {`
+- `struct` **`ModeArgs`** — `pub struct ModeArgs {`
+- `struct` **`FmtArgs`** — `pub struct FmtArgs {`
+- `struct` **`ServerUrlConfig`** — `pub(crate) struct ServerUrlConfig {`
+
 ### `error::enum`
 
 - `enum` **`EuvError`** — `pub enum EuvError {`

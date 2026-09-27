@@ -1,6 +1,6 @@
 ---
 name: euv-engine-webgpu-completion-workflow
-description: '在 euv-engine 的 `WebGpuRenderer` 上补完 WebGPU API 的标准流程。本轮在 euv 0.13.3 实地把 WebGPU const.rs / impl.rs / struct.rs 补到了完整 web 等级(descriptor 完整字段、async readback、dynamic offsets、writeTexture、generateMipmaps、error scope)。'
+description: '在 euv-engine 的 `WebGpuRenderer` 上补完 WebGPU API 的标准流程。2026-08-15 在 euv 0.13.3 首次补完(descriptor 完整字段、async readback、dynamic offsets、writeTexture、generateMipmaps、error scope);此后随源码演进需重新核对。当前回源版本以 `~/code/euv` 根 `Cargo.toml` 的 `[workspace.package].version` 为准。'
 ---
 
 # euv-engine WebGPU API 补完流程

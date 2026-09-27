@@ -9,6 +9,7 @@ Crate name: `http-request` (目录仍叫 `request/`).
 - `struct` **`Body`** — `pub struct Body {`
 - `fn` **`empty`** — `pub const fn empty() -> Self {...}`
 - `fn` **`from_bytes`** — `pub fn from_bytes<B: Into<Vec<u8>>>(bytes: B) -> Self {...}`
+- `fn` **`get_bytes_ref`** — `pub fn get_bytes_ref(&self) -> &[u8] {...}`
 - `fn` **`as_slice`** — `pub fn as_slice(&self) -> &[u8] {...}`
 - `fn` **`as_str`** — `pub fn as_str(&self) -> Option<&str> {...}`
 
@@ -82,6 +83,7 @@ Crate name: `http-request` (目录仍叫 `request/`).
 - `fn` **`get_url_ref`** — `pub fn get_url_ref(&self) -> &str {...}`
 - `fn` **`get_headers`** — `pub fn get_headers(&self) -> HashMap<String, String> {...}`
 - `fn` **`get_headers_ref`** — `pub fn get_headers_ref(&self) -> &HashMap<String, String> {...}`
+- `fn` **`get_headers_mut`** — `pub fn get_headers_mut(&mut self) -> &mut HashMap<String, String> {...}`
 - `fn` **`get_body`** — `pub fn get_body(&self) -> Body {...}`
 - `fn` **`get_body_ref`** — `pub fn get_body_ref(&self) -> &Body {...}`
 - `fn` **`get_config`** — `pub fn get_config(&self) -> RequestConfig {...}`
@@ -117,7 +119,7 @@ Crate name: `http-request` (目录仍叫 `request/`).
 - `fn` **`parse_decimal_bytes`** — `pub(crate) fn parse_decimal_bytes(bytes: &[u8]) -> usize {...}`
 - `fn` **`parse_status_code`** — `pub(crate) fn parse_status_code(status_bytes: &[u8]) -> usize {...}`
 - `fn` **`calculate_buffer_capacity`** — `pub(crate) fn calculate_buffer_capacity( response_bytes: &[u8], n: usize, current_capacity: usize, ) -> usize {...}`
-- `fn` **`parse_response_headers`** — `pub(crate) fn parse_response_headers( headers_bytes: &[u8], http_version_bytes: &[u8], location_sign_key: &[u8], content_length: &mut usize, redirect_url: &mut Option<Vec<u8>>,`
+- `fn` **`parse_response_headers`** — `pub(crate) fn parse_response_headers( headers_bytes: &[u8], http_version_bytes: &[u8], location_sign_key: &[u8], content_length: &mut usize, redirect_url: &mut Option<Vec<u8>>, is_chunked: &mut bool, ) -> Result<(), RequestError> {...}`
 
 ### `request::proxy::impl`
 
@@ -139,6 +141,7 @@ Crate name: `http-request` (目录仍叫 `request/`).
 
 - `struct` **`RequestBuilder`** — `pub struct RequestBuilder {`
 - `fn` **`new`** — `pub fn new() -> Self {...}`
+- `fn` **`get_request_mut`** — `pub fn get_request_mut(&mut self) -> &mut HttpRequest {...}`
 - `fn` **`get`** — `pub fn get(&mut self, url: impl Into<String>) -> &mut Self {...}`
 - `fn` **`post`** — `pub fn post(&mut self, url: impl Into<String>) -> &mut Self {...}`
 - `fn` **`method`** — `pub fn method(&mut self, method: Method) -> &mut Self {...}`
@@ -166,9 +169,6 @@ Crate name: `http-request` (目录仍叫 `request/`).
 ### `request::tmp::struct`
 
 - `struct` **`Tmp`** — `pub struct Tmp {`
-- `fn` **`visit_url_ref`** — `pub(crate) fn visit_url_ref(&self) -> &HashSet<String> {...}`
-- `fn` **`visit_url_mut`** — `pub(crate) fn visit_url_mut(&mut self) -> &mut HashSet<String> {...}`
-- `fn` **`root_cert_clone`** — `pub(crate) fn root_cert_clone(&self) -> RootCertStore {...}`
 
 ### `utils::encode::fn`
 

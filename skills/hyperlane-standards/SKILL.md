@@ -1,11 +1,11 @@
 ---
 name: hyperlane-standards
-description: '**hyperlane 框架工作区规范 — 涉及 hyperlane monorepo 跨 crate 操作时加载**。Layer-2 skill,与 `hyperlane`(入口)+ `hyperlane/references/api-*.md`(API 速查)互补。本 skill 只讲跨 crate 的事:`[workspace.package]` 单一版本号 + sync_workspace_version CI job + monorepo 7 crate 互依赖图 + crate-cli 工具分工 + 12 interlocking ecosystem crates + 22 common pitfalls(详见 references/pitfalls.md)+ version bump 铁律 + monorepo publish 顺序。**版本号查根 `Cargo.toml` `[workspace.package] version`**(skill 不维护版本信息)。**当且仅当任务不涉及 hyperlane monorepo 跨 crate 操作**(纯写 Server / 纯写 hook / 纯写 client)才不需要加载本 skill,直接用 `hyperlane` 入口 + `hyperlane/references/api-*.md`。**当且仅当任务完全不使用 hyperlane**才不需要加载。'
+description: '**hyperlane 框架工作区规范 — 涉及 hyperlane monorepo 跨 crate 操作时加载**。Layer-2 skill,与 `hyperlane`(入口)+ `hyperlane/references/api-*.md`(API 速查)互补。本 skill 只讲跨 crate 的事:`[workspace.package]` 单一版本号 + sync_workspace_version CI job + monorepo 7 member crate 互依赖图 + crate-cli 工具分工 + 生态 crate 对照 + common pitfalls(详见 `hyperlane/references/pitfalls.md`)+ version bump 铁律 + monorepo publish 顺序。**版本号查根 `Cargo.toml` `[workspace.package] version`**(skill 不维护版本信息);**计数(proc_macro 数 / crate 内模块数 / pub item 数)一律不写死,用文中的 grep 命令现取**。**当且仅当任务不涉及 hyperlane monorepo 跨 crate 操作**(纯写 Server / 纯写 hook / 纯写 client)才不需要加载本 skill,直接用 `hyperlane` 入口 + `hyperlane/references/api-*.md`。**当且仅当任务完全不使用 hyperlane**才不需要加载。'
 license: MIT
 ---
 # hyperlane-standards — Monorepo 跨 crate 规范
 
-> **本 skill 只讲 hyperlane monorepo 跨 crate 操作**(workspace / 版本 / 工具 / CI / publish)。具体的 `Server` / `Context` / `Hook` / `Route` / `Config` API 在 `hyperlane/references/api-core.md`,77 个 proc_macro 在 `hyperlane/references/api-macros.md`,HTTP 类型(`Request` / `Response` / `Method` / `Status` / `Stream` / `Cookie` / `WebSocketFrame` 等)在 `hyperlane/references/api-type.md`,客户端在 `hyperlane/references/api-request.md`,22 个常见坑 consolidated 在 `hyperlane/references/pitfalls.md`。
+> **本 skill 只讲 hyperlane monorepo 跨 crate 操作**(workspace / 版本 / 工具 / CI / publish)。具体的 `Server` / `Context` / `Hook` / `Route` / `Config` API 在 `hyperlane/references/api-core.md`,proc_macro 全集在 `hyperlane/references/api-macros.md`,HTTP 类型(`Request` / `Response` / `Method` / `Status` / `Stream` / `Cookie` / `WebSocketFrame` 等)在 `hyperlane/references/api-type.md`,客户端在 `hyperlane/references/api-request.md`,22 个常见坑 consolidated 在 `hyperlane/references/pitfalls.md`。
 
 ---
 
@@ -17,8 +17,8 @@ license: MIT
 | Check crate name / version / edition / license | [Project Metadata](#1-project-metadata) |
 | Add `hyperlane` to `Cargo.toml` | [Installation](#2-installation) |
 | See the 5-line minimum call to start a server | [5-Line Minimum Call](#3-5-line-minimum-call) |
-| Avoid the 22 most common gotchas | [22 Common Pitfalls](#4-22-common-pitfalls) |
-| Pick an ecosystem crate to extend hyperlane | [12 Interlocking Ecosystem Crates](#5-12-interlocking-ecosystem-crates) |
+| Avoid the most common gotchas | [Common Pitfalls](#4-common-pitfalls) |
+| Pick an ecosystem crate to extend hyperlane | [Ecosystem Crates](#5-ecosystem-crates) |
 | Work with the monorepo / path-deps / publish order | [Monorepo Layout & Internal Deps](#6-monorepo-layout--internal-deps) |
 | Bump the version of all crates at once | [Version Bump Rule](#7-version-bump-rule) |
 | See related/companion skills | [互锁 skill](#8-互锁-skill) |
@@ -34,7 +34,7 @@ license: MIT
 ## 1. Project Metadata
 
 - 仓库: `hyperlane-dev/hyperlane` (single repo, monorepo)
-- **Monorepo**(2026-09 起) — **7 个 crate**:
+- **Monorepo**(2026-09 起) — **7 个 member crate + 1 个根 shim = 8 个 package**(`members = ["compress", "constant", "type", "request", "core", "macros", "cli"]`,根 `hyperlane` 包不在 members 里):
   - `hyperlane` (根) — 纯 re-export shim,`use hyperlane::*` 暴露 core + macros(type 通过 core 间接)
   - `hyperlane-core` — 框架本体: `Server` builder + `Context` + `Hook`/`Route`/`Config` + `http_type::*` 重导出
   - `hyperlane-macros` — proc-macro 集合(`#[route]` 等),独立 proc-macro crate
@@ -64,13 +64,13 @@ license: MIT
 
 ### 1.1 版本升级规则(用户说「升级版本」时,hyperlane 全家桶通用)
 
-Monorepo 7 个 crate 共享一个 version 号(查根 `Cargo.toml` `[workspace.package]`;skill 不维护具体值)。bump 时 **只改根 `Cargo.toml` 第 3 行 `[package] version`**,子 crate 的 `[package] version` + `[workspace.dependencies]` path-dep 内的 `version` 一律不动 — 由 CI `.github/workflows/rust.yml` 的 `sync_workspace_version` job 在 master push 上自动 propagate(实际行为:PR 上 sync skipped,master push 上 sync + `chore: sync all package versions to X.Y.Z` 自动 commit)。
+Monorepo 全部 8 个 package(7 个 member + 根 shim)共享一个 version 号(查根 `Cargo.toml` `[workspace.package]`;skill 不维护具体值)。bump 时 **只改根 `Cargo.toml` `[workspace.package]` 段的 `version`**(根 `[package] version.workspace = true`,子 crate 全部 `version.workspace = true`,所以真正的单一版本号只有 `[workspace.package] version` 一处),子 crate 的 `[package] version` + `[workspace.dependencies]` path-dep 内的 `version` 一律不动 — 由 CI `.github/workflows/rust.yml` 的 `sync_workspace_version` job 在 master push 上自动 propagate(实际行为:PR 上 sync skipped,master push 上 sync + `chore: sync all package versions to X.Y.Z` 自动 commit)。
 
 **禁止全仓 sed `version = "X.Y.Z"`**(会误伤第三方依赖如 `http-compress = "..."`)。**禁止**手改 7 个子 crate 的 `Cargo.toml` 中的 `version` 字段。
 
 **PR 前 diff stat 自检**:`git diff --stat` 期望只有 1 file + 1 line(根 `Cargo.toml`)。多于 1 file = 停下来,先 `git checkout HEAD -- <额外文件>`。
 
-CI sync 行为: master merge → `sync_workspace_version` job 跑 → 在 master 上追加 `chore: sync all package versions to X.Y.Z` commit → 7 个 `Cargo.toml` + 根 `[workspace.dependencies]` 内 path-dep `version` 全部同步。等这个自动 commit 出现后再认为 release 完成。
+CI sync 行为: master merge → `sync_workspace_version` job 跑 → 在 master 上追加 `chore: sync all package versions to X.Y.Z` commit → 7 个 member `Cargo.toml` + 根 `[workspace.dependencies]` 内 path-dep `version` 全部同步(根包用 `version.workspace = true`,不需改)。等这个自动 commit 出现后再认为 release 完成。
 
 **发布前必须手动在本地跑 `crate sync`**(`crate-cli` 提供),因为 PR 上 CI 不跑 sync:
 - hyperlane 的 `[workspace.dependencies]` 字段中 path-dep 的 `version` 行,例如 `http-type = { path = "type", version = "X.Y.Z" }`,在 PR merge 时可能 stale,CI publish job 会因 resolver 找不到而失败。
@@ -97,15 +97,12 @@ hyperlane-macros = { workspace = true }
 
 ```toml
 [dependencies]
-hyperlane-type = { path = "../type", version = "X.Y.Z" }   # crate 名 http-type,路径仍叫 type/;version 跟 [workspace.package] 同步
-http-compress = { path = "../compress", version = "X.Y.Z" }
-http-constant = { path = "../constant", version = "X.Y.Z" }
-http-request = { path = "../request", version = "X.Y.Z" }
+http-type = { workspace = true }   # 唯一的内部 path-dep;crate 名 http-type,路径仍叫 type/
 
-regex = "1.13.1"
-inventory = "0.3.24"
-lombok-macros = "2.1.0"
-serde = { version = "1.0.229", features = ["derive"] }
+regex = { workspace = true }
+inventory = { workspace = true }
+lombok-macros = { workspace = true }
+serde = { workspace = true }
 ```
 
 ## 3. 5-Line Minimum Call
@@ -123,9 +120,9 @@ async fn main() {
 }
 ```
 
-## 4. 22 Common Pitfalls
+## 4. Common Pitfalls
 
-> 完整内容已迁移到 `hyperlane/references/pitfalls.md`(consolidated index + 22 核心坑 + 8 monorepo/工具链坑)。本节保留精简版作为快速参考,详细解释 + 修法见 references/pitfalls.md。
+> 完整内容已迁移到 `hyperlane/references/pitfalls.md`(consolidated index)。本节保留精简版作为快速参考,详细解释 + 修法见 references/pitfalls.md。
 
 1. **路由注册是 async**:`server.route::<T>(path).await` — 不能 `.route().route()` 链式。
 2. **response setter 是 sync**:`ctx.get_mut_response().set_xxx()` — 不需要 `.await`。
@@ -150,9 +147,9 @@ async fn main() {
 21. **404 / 405 默认走 `RequestError` hook**:如果你没注册 `RequestError` hook,框架会用内置 default(返回空 404 body)。
 22. **profile `panic = "unwind"`**:`TaskPanic` hook 才能拿到 panic;`panic = "abort"` 直接 abort 不触发。
 
-## 5. 12 Interlocking Ecosystem Crates
+## 5. Ecosystem Crates
 
-hyperlane monorepo 自带的 7 个 crate + 1 个外部核心依赖 `crate-cli`(跨 monorepo 通用)+ lombok-macros 第三方 + 3 个独立 plugin。
+hyperlane monorepo 自带的 7 个 member crate + 根 shim + 1 个外部核心依赖 `crate-cli`(跨 monorepo 通用)+ lombok-macros 第三方 + 3 个外部独立 plugin 仓。
 
 | crate | 用途 | 关系 |
 |---|---|---|
@@ -163,39 +160,37 @@ hyperlane monorepo 自带的 7 个 crate + 1 个外部核心依赖 `crate-cli`(�
 | `hyperlane-core` | Server / Context / Hook trait / Route / Config + root `hyperlane` 的 re-export 源 | monorepo 根 re-export 目标 + 客户端类型消费者 |
 | `lombok-macros` (`2.1.0` 第三方,固定不变) | 派生宏源(`Data/New/Getter/Setter/...` + 替换 `#[async_trait]`) | `hyperlane` + `hyperlane-core` 依赖,derive 在 hyperlane 结构上 |
 | `hyperlane-macros` | 过程宏(`#[route]` / `#[hyperlane]` / `#[task_panic]` 等) | **独立 crate**,需单独 `cargo add`,依赖 `hyperlane-core` 才能展开 |
-| `hyperlane-cli` | `watch / new / template / help / version` 项目脚手架 CLI | hyperlane monorepo 自带,**不**做 `fmt / bump / publish / sync` |
+| `hyperlane-cli` | `watch / new / template / help / version` 项目脚手架 CLI | hyperlane monorepo 自带,**不**做 `fmt / bump / publish / sync`;依赖 `http-type` + `hyperlane-core` + `hyperlane-macros` |
 | `crate-cli`(外部) | `fmt / bump / publish / sync` 跨 monorepo 通用工具 | 独立 crate,在 `ctares` monorepo 下,旧名 `crates-cli`,已发布到 crates.io,`hyperlane` / `euv` / `ctares` CI 都用 |
-| `hyperlane-plugin-websocket` | WebSocket 支持 | 独立 plugin,`inventory::submit!` |
-| `hyperlane-plugin-server-monitor` | 服务监控(指标/健康检查) | 独立 plugin,`inventory::submit!` |
-| `hyperlane-broadcast` | 进程内 broadcast bus | 独立 plugin,`broadcast::Bus<T>` |
+| `hyperlane-plugin-websocket` | WebSocket 支持 | **外部独立仓**,不在本 monorepo(`grep -rl 'hyperlane-plugin-websocket' --include=Cargo.toml` 无命中) |
+| `hyperlane-plugin-server-monitor` | 服务监控(指标/健康检查) | **外部独立仓**,不在本 monorepo |
+| `hyperlane-broadcast` | 进程内 broadcast bus | **外部独立仓**,不在本 monorepo;见 `references/hyperlane-broadcast.md` |
 
-> ⚠️ **monorepo 内部 7 个 crate(`hyperlane` 根 re-export + `hyperlane-core` + `hyperlane-macros` + `http-type` + `http-compress` + `http-constant` + `http-request` + `hyperlane-cli`)版本号统一**,跟根 `Cargo.toml` `[workspace.package] version` 同步 — skill 不维护具体值,master `git show master:Cargo.toml | grep '^version'` 即得。`lombok-macros` 是第三方独立版本,不在同步范围。
+> ⚠️ **monorepo 内部 8 个 package(根 `hyperlane` re-export shim + 7 个 member:`hyperlane-core` / `hyperlane-macros` / `http-type` / `http-compress` / `http-constant` / `http-request` / `hyperlane-cli`)版本号统一**,跟根 `Cargo.toml` `[workspace.package] version` 同步 — skill 不维护具体值,master `git show master:Cargo.toml | grep '^version'` 即得。`lombok-macros` 是第三方独立版本,不在同步范围。
 
 ## 6. Monorepo Layout & Internal Deps
 
 ### 6.1 内部依赖图(path-dep,workspace 模式)
 
 ```
-hyperlane-type (= http-type)        (叶子, 无内部依赖)
-   ↑ path-dep
-http-constant ────────────────────────┐
-http-compress ────────────────────────┤  (都 path-dep 到 http-type)
-http-request ────────────────────────┤
-   ↑ path-dep
-hyperlane-core ──────────────────────┐
-   ↑ path-dep                       │
-hyperlane-macros ───────────────────┤  (依赖 hyperlane-core + http-type)
-   ↑ path-dep                       │
-hyperlane-cli ──────────────────────┤  (依赖 hyperlane-core + http-type)
-   ↑ path-dep                       │
-hyperlane (根) ──────────────────────┘
+http-constant ──┐  (叶子, 无内部依赖)
+                ├── path-dep ──> http-type ──┐
+http-compress ──┘                          │
+   ↑ path-dep                              ├──> hyperlane-core ──┐
+http-request ──────────────────────────────┘                     │
+   ↑ path-dep                                                   ├──> hyperlane (根)
+hyperlane-core ────────────────────> hyperlane-macros ─────────┘
+                                    ↑ path-dep
+                              hyperlane-cli (http-type + hyperlane-core + hyperlane-macros)
 ```
 
-**关键**(2026-09-25 实地):
-- `core` 同时依赖 **4 个**内部 path-dep:`hyperlane-type` + `http-constant` + `http-compress` + `http-request`。
-- `macros` 依赖 `hyperlane-core`(`dev-dependencies`,因为 macro 生成代码引用 `::hyperlane_core::*`)。
-- `cli` 不依赖 `macros`(`hyperlane-cli` 只做 `watch / new / template`,不需要 proc-macro)。
-- 根 `hyperlane` 不直接依赖 `hyperlane-type`(由 `hyperlane-core` 间接 `pub use` 暴露)。
+**关键**(2026-09-27 实地,逐个读 `<crate>/Cargo.toml` 的 `[dependencies]`):
+- `http-type` 依赖 **2 个**内部 path-dep:`http-compress` + `http-constant`。
+- `hyperlane-core` 只依赖 **1 个**内部 path-dep:`http-type`(`regex` / `serde` / `inventory` / `lombok-macros` 是第三方)。
+- `http-request` 只依赖 `http-type`。
+- `hyperlane-macros` 依赖 `hyperlane-core`(**`[dependencies]`**,不是 dev-dependencies,因为 macro 展开需要 `::hyperlane_core::*` 在作用域)。
+- `hyperlane-cli` 依赖 `http-type` + `hyperlane-core` + **`hyperlane-macros`**(**依赖 macros**,与旧文档「cli 不依赖 macros」的说法相反)。
+- 根 `hyperlane` 只依赖 `hyperlane-core` + `hyperlane-macros`,不直接依赖 `http-type`(由 `hyperlane-core` 的 `pub use {http_type::*, inventory}` 间接暴露)。
 
 **验证命令**:`cargo metadata --format-version=1 --no-deps` 看每个 `package.dependencies[]`,内部依赖的 `source` 字段必须是 `null`(path-dep,不打 crates.io)。任何 `source` 不为 null = 循环依赖 / 错配。
 
@@ -205,18 +200,23 @@ hyperlane (根) ─────────────────────�
 
 子包内部依赖用 `path = "..."` + 显式 `version`:
 ```toml
-# core/Cargo.toml
-hyperlane-type = { path = "../type", version = "X.Y.Z" }   # crate 名 http-type,目录仍叫 type/
-http-compress  = { path = "../compress", version = "X.Y.Z" }
-http-constant  = { path = "../constant", version = "X.Y.Z" }
-http-request   = { path = "../request", version = "X.Y.Z" }
+# core/Cargo.toml —— 唯一的内部 path-dep 是 http-type
+http-type = { workspace = true }   # crate 名 http-type,目录仍叫 type/
 
 # macros/Cargo.toml
-hyperlane-core = { path = "../core", version = "X.Y.Z" }
+hyperlane-core = { workspace = true }
+
+# cli/Cargo.toml —— 依赖 macros
+http-type       = { workspace = true }
+hyperlane-core  = { workspace = true }
+hyperlane-macros = { workspace = true }
 
 # 根 Cargo.toml 引用子包用 workspace = true:
 hyperlane-core = { workspace = true }
+hyperlane-macros = { workspace = true }
 ```
+
+> 子 crate 之间**不写 `path =`,统一用 `{ workspace = true }`** — path-dep 只在根 `[workspace.dependencies]` 里声明一次(见下)。
 
 根 `Cargo.toml` 的 `[workspace.dependencies]` 必须包含**全部** path-dep(sync_workspace_version job 依赖它来 sed):
 ```toml
@@ -254,15 +254,18 @@ hyperlane-macros = { workspace = true }
 hyperlane CI `.github/workflows/rust.yml` 的 `publish` job 按**拓扑序**发布(被依赖的先发)。注意:发布顺序**不再**有独立 shell loop,而是 `crate-cli` 的 `crate publish` 子命令按 members 拓扑序自动排(2026-09-13 PR #233 之后的标准模式):
 
 ```
-http-type → http-constant → http-compress → http-request
-         → hyperlane-core → hyperlane-macros → hyperlane-cli → hyperlane
+http-constant → http-compress → http-type
+              → http-request
+              → hyperlane-core → hyperlane-macros → hyperlane-cli → hyperlane
 ```
+
+> 2026-09-27 按实际 `[dependencies]` 修正:`hyperlane-macros` 依赖 `hyperlane-core`(**硬依赖**,非 dev-only),`hyperlane-cli` 依赖 `hyperlane-macros`,所以 `macros` 必须先于 `cli` 发布。`http-compress` / `http-constant` 必须先于 `http-type`。
 
 每个 `cargo publish -p X --allow-dirty --no-verify` 是纯本地 package 操作,workspace 模式下 path-dep 自动解析为本地路径。**不需要**先把 path-dep 改成 crates.io 版本。
 
 **顺序由依赖图决定**(2026-09-14 PR #34 验证):
 - `hyperlane-macros` 在 `Cargo.toml` 里 `dev-dependencies` 引 `hyperlane-core` + 生成代码引用 `::hyperlane_core::*`,所以 **`core` 必须先于 `macros` 发布**。
-- `hyperlane-core` 引用 `hyperlane-type` (`Request/Response/...`)+ `http-constant` + `http-compress` + `http-request` 的类型,所以这些**必须先于 `core` 发布**。
+- `hyperlane-core` 引用 `http-type` 的 `Request/Response/...`,`http-type` 又引用 `http-compress` + `http-constant`,所以 `http-compress` / `http-constant` / `http-type` **必须先于 `core` 发布**。
 
 如果 publish job 写成 `core → macros`,macros 发布时 core 还没上 crates.io,resolver 失败。CI 静默吞错误(retry+continue),最终 `max_stable_version` 不匹配 tag。
 
@@ -318,36 +321,35 @@ error: readme `../../README.md` does not appear to exist
 - [ ] 跑 `cargo check --workspace` + `cargo test --workspace` + `audit_rust_standards.py`
 - [ ] 跑 `cargo metadata` 验证无循环
 
-### 6.8 `Request` 模块拆分模式(`type/src/request/` + `request/src/request/`, 2026-09-26)
+### 6.8 `http-type` 的 `Request` parser 方法**仍留在 impl.rs(尚未拆分)
 
-**`http-type` 仓**(`type/src/request/`):`Request` impl.rs 在 fluent setter + public accessor 之间混入了 11 个 `pub(crate)` static parser 方法(`get_http_first_line` / `check_http_*` / `get_http_querys` / `get_http_headers` / `get_http_body`),导致 impl.rs 1096 行难以维护,且语义上 parser 不属于 Request 数据类型。
-
-**`http-request` 仓**(`request/src/request/`):parser 也是独立子模块,但**位置不同** — 在 `request/request/parser/`,**不**在顶层 `request/parser/`。
+> ⚠️ 2026-09-27 实地核实:`http-type` 侧**没有** `type/src/request/parser/` 子目录,parser 相关的 `pub(crate)` static 方法仍然内联在 `type/src/request/impl.rs` 里(与 fluent setter + accessor 混排)。历史上有人计划把它们拆到 `parser/{mod.rs, fn.rs}` 并以 `pub mod r#parser;` + `pub(crate) use r#fn::*;` 暴露 —— **这个重构在当前 HEAD 尚未发生**,不要按它写代码或改文档。
 
 ```
-type/src/request/                # http-type
-├── mod.rs           # pub mod request;
+type/src/request/                # http-type —— 无 parser/ 子目录
+├── mod.rs           # mod r#enum; mod r#impl; mod r#struct; mod r#type;
 ├── enum.rs
-├── impl.rs
+├── impl.rs          # setter/accessor + 11 个 pub(crate) parser static 方法混排
 ├── struct.rs
 └── type.rs
-
-request/src/request/             # http-request
-├── mod.rs           # pub mod r#request; pub mod r#parser;
-├── request_builder/
-├── proxy/
-├── config/
-├── impl.rs
-├── enum.rs
-├── struct.rs
-└── parser/                     # 独立 parser 子模块
-    ├── mod.rs       # pub mod r#parser;
-    └── fn.rs        # parser 方法
 ```
 
-**关键点**(两个仓通用):
-- consumer 调用路径: `request::parser::fn_name(...)`(注意:不能写 `Request::parser::fn_name(...)`,Rust 会把 `parser` 解析成 associated type 而不是模块路径,触发 E0223 ambiguous associated type)。
-- `http-request` 的 response 依赖 parser 路径用 `crate::request::parser::wire::split_*` 绝对路径(`parser` 子文件叫 `fn.rs` 还是 `wire.rs` 视具体 crate 而定)。
+parser 侧真实方法名(2026-09-27 核实,`grep -cE '^\s*pub\(crate\) (async )?fn (get_http|check_http|fill_http)' type/src/request/impl.rs`):
+`get_http_first_line` / `check_http_path_size` / `get_http_query` / `get_http_path` / `fill_http_querys` / `check_http_header_count` / `check_http_header_key_size` / `check_http_header_value_size` / `check_http_body_size` / `get_http_headers` / `fill_http_body`。
+
+> 注意 c675749 起有两个改成 `fill_*`(`get_http_querys` → `fill_http_querys`,`get_http_body` → `fill_http_body`,都改成写入调用方传入的 buffer 不再返回新分配);`get_http_path` 返回值也从 `RequestPath` 变成 `&str`。以 `hyperlane/references/api-type.md` 的 `request::impl` 小节为准。
+
+**`http-request` 侧**已拆出独立 parser 子模块,位置在 `request/src/request/parser/`(**不是**顶层 `request/parser/`),文件是 `fn.rs`(不是 `wire.rs` —— `wire` 只是旧文档里的错写):
+
+```
+request/src/request/parser/      # http-request
+├── mod.rs           # mod r#fn;  pub(crate) use r#fn::*;
+└── fn.rs            # 全部是 pub(crate) fn
+```
+
+**关键点**:
+- consumer 调用路径: `request::parser::fn_name(...)`(不能写 `Request::parser::fn_name(...)` — Rust 会把 `parser` 解析成 associated type 而不是模块路径,触发 E0223 ambiguous associated type)。
+- 模块路径是 `crate::request::parser::fn::split_multi_byte` / `::split_whitespace`;这些 fn 全部是 `pub(crate)`,`request/src/response/struct.rs` 通过 `request/src/request/mod.rs` 的 `pub(crate) use {config::*, parser::*, tmp::*};` 间接拿到,不是靠 `wire` 绝对路径。
 - `pub(crate) use r#fn::*;` 而**不是** `pub use r#fn::*`(后者配合 `pub(crate)` fn 是 no-op,触发 unused_imports warning)。
 
 ### 6.9 `http-request` 客户端(`request/`)2026-09-26 重构
@@ -360,14 +362,14 @@ request/src/request/             # http-request
 - `Proxy` enum: `Proxy::http()` / `Proxy::https()` / `Proxy::socks5(host, port)`,无 `*_proxy_auth` setter 变体。
 - fluent `RequestBuilder` 返回 `HttpRequest` 直接具体类型,**不**返回 trait 对象。
 - `.send()` 返回 `Result<HttpResponse, RequestError>`。
-- parser 独立子模块 `request/parser/{mod.rs, wire.rs}`(`wire` 而非 `fn` 因为是关键字)。
+- parser 独立子模块 `request/src/request/parser/{mod.rs, fn.rs}`(文件叫 `fn.rs`)。
 - `HttpResponse` 单值 struct 字段全 `pub`。
 - `HttpResponse::from_bytes` 解析 raw response。
 - `ResponseBody = Vec<u8>` 支持 `String::from_utf8_lossy` 双模式。
 
 保留 crate 名 `http-request` 和 `HttpRequest`/`HttpResponse` 命名(已发布到 crates.io,避免破坏下游)。
 
-response 依赖 parser 路径用 `crate::request::parser::wire::split_*` 绝对路径(**不能**用 `use super::parser::*` 跨 crate 模块)。
+response 经 `request/src/request/mod.rs` 的 `pub(crate) use {config::*, parser::*, tmp::*};` 间接拿到 parser 的 `split_multi_byte` / `split_whitespace`;模块路径是 `crate::request::parser::fn::split_*`(**没有** `wire` 这个模块)。
 
 ## 7. Version Bump Rule
 
@@ -379,7 +381,7 @@ cd /root/github/hyperlane-dev/hyperlane
 NEW_VER="X.Y.Z"      # ← bump 目标(每次手填)
 OLD_VER="W.V.U"      # ← 当前 master 版本(从根 Cargo.toml 抄)
 # 只改根 Cargo.toml
-sed -i "s/^version = \"$OLD_VER\"$/version = \"$NEW_VER\"/" Cargo.toml
+sed -i "s/^version = \"$OLD_VER\"$/version = \"$NEW_VER\"/" Cargo.toml   # 命中 [workspace.package] 段的 version 行
 git diff --stat   # 期望只有 Cargo.toml +1/-1
 git add Cargo.toml
 git commit -m "chore: bump version to $NEW_VER"
@@ -387,7 +389,7 @@ git commit -m "chore: bump version to $NEW_VER"
 
 **不**做:
 - ❌ `sed -i 's/version = "W.V.U"/version = "X.Y.Z"/' */Cargo.toml`
-- ❌ 编辑 `core/Cargo.toml` / `macros/Cargo.toml` / `type/Cargo.toml` / `compress/Cargo.toml` / `constant/Cargo.toml` / `request/Cargo.toml` / `cli/Cargo.toml`
+- ❌ 编辑 `core/Cargo.toml` / `macros/Cargo.toml` / `type/Cargo.toml` / `compress/Cargo.toml` / `constant/Cargo.toml` / `request/Cargo.toml` / `cli/Cargo.toml`(7 个 member,子包全是 `version.workspace = true`)
 - ❌ 编辑 `[workspace.dependencies]` 内 path-dep 的 `version`
 
 CI sync 在 master push 上自动补齐上述字段(`chore: sync all package versions to X.Y.Z` 自动 commit)。
@@ -397,13 +399,13 @@ CI sync 在 master push 上自动补齐上述字段(`chore: sync all package ver
 
 - **`hyperlane`**(入口)— 跳转 + 5-行最小调用 + 按需加载 `references/api-*.md`
 - **`hyperlane/references/api-core.md`** — hyperlane-core pub API(Server / Context / Hook / Route / Config)
-- **`hyperlane/references/api-macros.md`** — hyperlane-macros 77 个 proc_macro 签名
+| **`hyperlane/references/api-macros.md`** — hyperlane-macros proc_macro 签名全集 |
 - **`hyperlane/references/api-type.md`** — http-type pub API(Request / Response / Method / Status / Stream / Cookie / WebSocketFrame 等)
 - **`hyperlane/references/api-request.md`** — http-request 客户端 pub API(RequestBuilder / Proxy / redirect / 解码)
 - **`hyperlane/references/api-compress.md`** — http-compress pub API(Brotli / Deflate / Gzip)
-- **`hyperlane/references/api-constant.md`** — http-constant 14 个常量模块
+| **`hyperlane/references/api-constant.md`** — http-constant 常量模块清单 |
 - **`hyperlane/references/api-cli.md`** — hyperlane-cli pub API(5 个子命令)
-- **`hyperlane/references/pitfalls.md`** — 22 核心坑 + 8 monorepo/工具链坑
+| **`hyperlane/references/pitfalls.md`** — 核心坑 + monorepo/工具链坑索引 |
 - **`crates-cli-usage`** — 跨 monorepo 通用 `crate-cli` 工具使用(替代废弃的 `hyperlane fmt`)
 - **`rust-standards`** — Rust 通用规范(同时必加载)
 - **`rust-pr-validation-checklist`** — Rust PR 提交前必跑的硬性验证清单

@@ -1,7 +1,7 @@
 ---
 name: euv-ui-standards
-description: '**euv UI 设计规范 + 365 个全局 class! + 38 个 euv_* 函数（28 个组件目录） + 34 个 example page — 用 euv 写页面/组件/UI 时必加载**。涵盖：(1) 全局 class! 注册表（`ui/src/style/class/fn.rs`，共 365 个，按 c_page_/c_home_/c_euv_button_/c_euv_navbar_/c_euv_sidebar_/c_euv_toc_/c_euv_pagination_/c_euv_dropdown_/c_euv_drawer_/c_card_/c_modal_/c_vconsole_/c_nav_/c_app_/c_mobile_/等前缀分组）；(2) design tokens（`vars!` 主题变量 — monochrome 黑/白 + light/dark，spacing 阶 / 字号阶 / 圆角 / 阴影 / 缓动 / safe-area）；(3) 38 个 euv_* 函数（28 个组件目录） API + HTML 结构：渲染组件（euv_button / euv_card / euv_badge / euv_tag / euv_alert / euv_input / euv_checkbox / euv_field / euv_modal / euv_loading / euv_info / euv_logo / euv_header / euv_virtual_list — select/textarea 是 §3.7/§3.8 的裸 div，不用 euv_select）、站点组件（euv_navbar / euv_sidebar / euv_toc / euv_pagination / euv_dropdown / euv_drawer / euv_hero / euv_feature_grid / euv_markdown / euv_result / euv_doc_layout，§3.F）、导航组件（euv_nav_items / euv_nav_item / euv_mobile_nav_item）、路由组件（euv_routes / euv_page_router）、调试组件（euv_vconsole_panel / euv_vconsole_fab / euv_vconsole_drawer / euv_debug）；(4) 全 34 个 example page 列表（about / animation / hooks_async / attrs / badge / binding / browser / camera / canvas / conditional / counter / dynamic / event / file / form / game_2d / game_3d / hooks_i18n / hooks_protect / hooks_timing / keep_alive / lifecycle / list / modal / not_found / observer / select / sse / timer / virtual_list / webgpu_status / websocket + lighting / raytrace 2 个新增 + 1 个 home_page 入口）；(5) page 标准模板（用 `euv_header` 包装标题/icon/subtitle，30/34 页都用此模式，仅 about 是 hero 自定义）；(6) 响应式（唯一断点 `@media (max-width: 767px)`）+ 深色模式 + a11y（focus-visible 隐藏由 border 反转表达 / touch tap-highlight / prefers-reduced-motion）。触发词:euv ui, euv-ui, euv class!, euv_header, euv_field, euv_virtual_list, euv_routes, euv_vconsole, design tokens, design system, euv design system, design class, euv utility, btn class, card class, modal class, form class, euv page template, euv responsive, euv dark mode, euv theme, vars! 主题, spacing scale, color palette, typography scale, euv atomic CSS、euv_navbar、euv_sidebar、euv_markdown。**当且仅当任务完全不涉及 euv UI 页面/组件/样式**才不加载。'
-  euv example/example 项目 UI 设计系统全量规范。涵盖 365 个全局 class!（注册于 `ui/src/style/class/fn.rs`，单一真源）、design tokens（colors / spacing / font-size / transition / safe-area）、38 个 euv_* 函数（28 个组件目录） HTML 结构（euv_header / euv_field / euv_button / euv_card / euv_badge / euv_tag / euv_alert / euv_input / euv_checkbox / euv_modal / euv_loading / euv_info / euv_logo / euv_virtual_list + 站点组件 euv_navbar / euv_sidebar / euv_toc / euv_pagination / euv_dropdown / euv_drawer / euv_hero / euv_feature_grid / euv_markdown / euv_result / euv_doc_layout（§3.F）+ 路由/导航/调试三组 euv_routes / euv_page_router / euv_nav_items / euv_nav_item / euv_mobile_nav_item / euv_vconsole_panel / euv_vconsole_fab / euv_vconsole_drawer — select/textarea 见 §3.7/§3.8 裸 div）、页面骨架（app 壳、page_router、page_container，**所有非 hero page 都以 `euv_header { icon title subtitle }` 开头**）、断点（@media (max-width: 767px)）、响应式规则、class 编写约定（不在 page 内写 class! 块）。触发词：euv UI、euv 样式、euv design token、c_page_container、c_home_、c_euv_button、c_card、c_badge、c_euv_tag、c_euv_input、c_modal_content、c_nav_item_active、c_app_root、c_app_nav、c_app_main、euv_header、euv_field、euv_routes、euv-ui-standards。'
+description: '**euv UI 设计规范 + 363 个全局 class! + 38 个 euv_* 函数（28 个组件目录） + 34 个 example page — 用 euv 写页面/组件/UI 时必加载**。涵盖：(1) 全局 class! 注册表（`ui/src/style/class/fn.rs`，共 363 个，按 c_page_/c_home_/c_euv_button_/c_euv_navbar_/c_euv_sidebar_/c_euv_toc_/c_euv_pagination_/c_euv_dropdown_/c_euv_drawer_/c_card_/c_modal_/c_vconsole_/c_nav_/c_app_/c_mobile_/等前缀分组）；(2) design tokens（`vars!` 主题变量 — monochrome 黑/白 + light/dark，spacing 阶 / 字号阶 / 圆角 / 阴影 / 缓动 / safe-area）；(3) 38 个 euv_* 函数（28 个组件目录） API + HTML 结构：渲染组件（euv_button / euv_card / euv_badge / euv_tag / euv_alert / euv_input / euv_checkbox / euv_field / euv_modal / euv_loading / euv_info / euv_logo / euv_header / euv_virtual_list — select/textarea 是 §3.7/§3.8 的裸 div，不用 euv_select）、站点组件（euv_navbar / euv_sidebar / euv_toc / euv_pagination / euv_dropdown / euv_drawer / euv_hero / euv_feature_grid / euv_markdown / euv_result / euv_doc_layout，§3.F）、导航组件（euv_nav_items / euv_nav_item / euv_mobile_nav_item）、路由组件（euv_routes / euv_page_router）、调试组件（euv_vconsole_panel / euv_vconsole_fab / euv_vconsole_drawer / euv_debug）；(4) 全 34 个 example page 列表（about / animation / hooks_async / attrs / badge / binding / browser / camera / canvas / conditional / counter / dynamic / event / file / form / game_2d / game_3d / hooks_i18n / hooks_protect / hooks_timing / keep_alive / lifecycle / list / modal / not_found / observer / select / sse / timer / virtual_list / webgpu_status / websocket + lighting / raytrace 2 个新增 + 1 个 home_page 入口）；(5) page 标准模板（用 `euv_header` 包装标题/icon/subtitle，32/34 页都用此模式，仅 about 是 hero 自定义、webgpu_status 例外）；(6) 响应式（唯一断点 `@media (max-width: 767px)`）+ 深色模式 + a11y（focus-visible 隐藏由 border 反转表达 / touch tap-highlight / prefers-reduced-motion）。触发词:euv ui, euv-ui, euv class!, euv_header, euv_field, euv_virtual_list, euv_routes, euv_vconsole, design tokens, design system, euv design system, design class, euv utility, btn class, card class, modal class, form class, euv page template, euv responsive, euv dark mode, euv theme, vars! 主题, spacing scale, color palette, typography scale, euv atomic CSS、euv_navbar、euv_sidebar、euv_markdown。**当且仅当任务完全不涉及 euv UI 页面/组件/样式**才不加载。'
+  euv example/example 项目 UI 设计系统全量规范。涵盖 363 个全局 class!（注册于 `ui/src/style/class/fn.rs`，单一真源）、design tokens（colors / spacing / font-size / transition / safe-area）、38 个 euv_* 函数（28 个组件目录） HTML 结构（euv_header / euv_field / euv_button / euv_card / euv_badge / euv_tag / euv_alert / euv_input / euv_checkbox / euv_modal / euv_loading / euv_info / euv_logo / euv_virtual_list + 站点组件 euv_navbar / euv_sidebar / euv_toc / euv_pagination / euv_dropdown / euv_drawer / euv_hero / euv_feature_grid / euv_markdown / euv_result / euv_doc_layout（§3.F）+ 路由/导航/调试三组 euv_routes / euv_page_router / euv_nav_items / euv_nav_item / euv_mobile_nav_item / euv_vconsole_panel / euv_vconsole_fab / euv_vconsole_drawer — select/textarea 见 §3.7/§3.8 裸 div）、页面骨架（app 壳、page_router、page_container，**所有非 hero page 都以 `euv_header { icon title subtitle }` 开头**）、断点（@media (max-width: 767px)）、响应式规则、class 编写约定（不在 page 内写 class! 块）。触发词：euv UI、euv 样式、euv design token、c_page_container、c_home_、c_euv_button、c_card、c_badge、c_euv_tag、c_euv_input、c_modal_content、c_nav_item_active、c_app_root、c_app_nav、c_app_main、euv_header、euv_field、euv_routes、euv-ui-standards。'
 ---
 
 # euv example 项目 UI 设计规范（全量）
@@ -19,7 +19,7 @@ description: '**euv UI 设计规范 + 365 个全局 class! + 38 个 euv_* 函数
 | Build the app shell, page container, nav, main area                                                                                         | [Global Skeleton](#2-global-skeleton)                             |
 | Use a built-in component (button / card / badge / tag / alert / input / checkbox / nav / header / field / virtual_list / vconsole / routes) | [Core Component HTML Templates](#3-core-component-html-templates) |
 | Build the special Home / Hero page layout (only `/about`)                                                                                   | [Home / Hero Page Spec](#4-home--hero-page-spec)                  |
-| See all 34 example pages & their hooks                                                                                          | [All 34 example Pages — 速查表](#4a-all-32-example-pages--速查表) |
+| See all 34 example pages & their hooks                                                                                          | [All 34 example Pages — 速查表](#4a-all-34-example-pages--速查表) |
 | Name a new class correctly (c_ prefix, page scope)                                                                                          | [Class Naming Conventions](#5-class-naming-conventions)           |
 | Apply responsive rules and breakpoint behavior                                                                                              | [Responsive / Breakpoints](#6-responsive--breakpoints)            |
 | Add a11y / touch optimization / safe-area                                                                                                   | [Accessibility / Touch](#7-accessibility--touch)                  |
@@ -40,15 +40,22 @@ description: '**euv UI 设计规范 + 365 个全局 class! + 38 个 euv_* 函数
   - 路由：router（提供 euv_routes / euv_page_router）（2）
   - 调试：vconsole（提供 euv_vconsole_panel / euv_vconsole_fab / euv_vconsole_drawer）/ debug（提供 euv_debug，dev-only 状态查看器）（4）
   - 工具 hook-only：theme（主题切换）/ touch（手势） / browser / camera / layout（这些不在模板里写 euv_* 调用，只在 hook/ 文件内供其他组件消费；不进 euv_* 渲染树）
-- 项目内二次封装（仅供 example 调用、不得新增全局 class）：`example/src/style/class/fn.rs`（16 个本地 class：`c_game_*` / `c_keep_alive_*` / `c_binding_*` / `c_canvas_pixelated` / `c_anim_scale_*` / `c_slider_value` 等）
-- 34 个 example page：`example/src/page/<name>/{mod,view/fn}.rs`（30 用 `euv_header` 开头，仅 `about` 是 hero 自定义；`not_found` 也用 euv_header）
+- 项目内二次封装（仅供 example 调用、不得新增全局 class）：`example/src/style/class/fn.rs`（20 个本地 class：`c_game_*` / `c_keep_alive_*` / `c_binding_*` / `c_canvas_pixelated` / `c_anim_scale_*` / `c_slider_value` 等）
+- 34 个 example page：`example/src/page/<name>/{mod,view/fn}.rs`（32 用 `euv_header` 开头，仅 `about`(hero 自定义) 与 `webgpu_status` 例外；`not_found` 也用 euv_header）
 
-| 数量类别           | 数值 | 验证命令                                                |
-| ------------------ | ---- | ------------------------------------------------------- |
-| 全局 class         | 365  | `grep -oE '\bc_[a-z_]+\b' ui/src/style/class/fn.rs      | sort -u                  | wc -l` |
-| example 本地 class | 16   | `grep -oE '\bc_[a-z_]+\b' example/src/style/class/fn.rs | sort -u                  | wc -l` |
-| euv_* 组件         | 28   | `ls ui/src/component/*/view/fn.rs                       | wc -l`（参与渲染的函数） |
-| example page       | 34   | `ls example/src/page                                    | grep -v mod.rs           | wc -l` |
+> 下表数值于 **euv 0.26.8** 实地核对。源码 bump 后用「验证命令」列重跑，不要只信表里的数字(版本以 `Cargo.toml` 的 `[workspace.package].version` 为准)。
+
+| 数量类别           | 数值  | 验证命令（源码为准）                                              |
+| ------------------ | ----- | ----------------------------------------------------------------- |
+| 全局 class         | 363   | `grep -cE '^\s*pub c_[a-z_0-9]+ *\{' ui/src/style/class/fn.rs`      |
+| example 本地 class | 20    | `grep -cE '^\s*pub c_[a-z_0-9]+ *\{' example/src/style/class/fn.rs` |
+| euv_* 组件函数     | 38    | `grep -rhoE '^\s*pub (async \|unsafe )?fn euv_[a-z_0-9]+' ui/src/component \| grep -oE 'euv_[a-z_0-9]+' \| sort -u \| wc -l` |
+| 含 euv_* 的组件目录 | 28    | `grep -rlE 'fn euv_[a-z_0-9]+' ui/src/component \| cut -d/ -f4 \| sort -u \| wc -l` |
+| 组件目录（总计）   | 33    | `ls -d ui/src/component/*/ \| wc -l`                                 |
+| example page       | 34    | `ls -d example/src/page/*/ \| wc -l`                                |
+| engine 模块数      | 21    | `grep -cE '^mod [a-z_]+;' engine/src/lib.rs`                        |
+| proc_macro 数      | 8     | `grep -cE '^\#\[proc_macro' macros/src/lib.rs`                     |
+| workspace members  | 7     | `grep -oE 'members = \[[^]]*\]' Cargo.toml`                        |
 
 > **强制约束**：
 >
@@ -266,7 +273,7 @@ div class=c_page_router  flex:1; display:flex; flex-direction:column
     // 各 page 内容（典型顺序）
 ```
 
-**所有 34 个 example page 中的 30 个** 用 `euv_header` 组件开头（见 §3.X），而不是裸 div page header：
+**所有 34 个 example page 中的 32 个** 用 `euv_header` 组件开头（见 §3.X），而不是裸 div page header：
 
 ```
 div class=c_page_router
@@ -568,7 +575,7 @@ div c_tab_bar (flex; border-bottom:1px dashed var!(border); gap:gap-element; mb:
 
 ⚠️ 命名 + 前缀约定：**`c_<page>_<element>`**（如 `c_keep_alive_*`），不污染全局 ui 包。
 
-### 3.A euv_header — **所有 30/34 page 的事实入口**（组件层封装，不是裸 div）
+### 3.A euv_header — **所有 32/34 page 的事实入口**（组件层封装，不是裸 div）
 
 ```rust
 euv_header {
@@ -846,7 +853,7 @@ html body .c_home_feature_grid .c_feature_card {
 
 ## 4. Home / Hero Page Spec
 
-`page_about`（路由 `/about`）是**唯一的 hero 页面** —— 它**不**走 `euv_header`，而是用 `c_home_*` 系列 class 自己拼。所有其它 27 个页面一律 `euv_header { icon title subtitle }` 起手（见 §3.A）。
+`page_about`（路由 `/about`）是**唯一的 hero 页面** —— 它**不**走 `euv_header`，而是用 `c_home_*` 系列 class 自己拼。所有其它 32 个页面一律 `euv_header { icon title subtitle }` 起手（见 §3.A）。
 
 > 页头区分速判：grep `c_home` 出现在 `view/fn.rs` 里 → 一定是 `about`；grep `euv_header` → 普通 page。
 
@@ -876,7 +883,7 @@ html body .c_home_feature_grid .c_feature_card {
 
 ## 4.A All 34 example Pages — 速查表
 
-example 项目现共 **34 个 page**（`example/src/page/` 下 34 个目录；ls -d example/src/page/*/ | wc -l 即得当前数）。30 用 `euv_header`，唯独 `about` 是 hero 模板。下表第一列 = 文件夹名（即路由 path），第二列 = `euv_header` 渲染出的标题，第三列 = 该 page 主演示的能力——新 page 设计用途可对照这张表定位。
+example 项目现共 **34 个 page**（`example/src/page/` 下 34 个目录；`ls -d example/src/page/*/ | wc -l` 即得当前数）。32 用 `euv_header`；例外是 `about`（hero 模板）与 `webgpu_status`。下表第一列 = 文件夹名（即路由 path），第二列 = `euv_header` 渲染出的标题，第三列 = 该 page 主演示的能力——新 page 设计用途可对照这张表定位。
 
 | 路由 path        | `euv_header` 标题                                   | 演示什么                                                   | Hook 模块 |
 | ---------------- | --------------------------------------------------- | ---------------------------------------------------------- | --------- |
@@ -970,7 +977,7 @@ example 项目现共 **34 个 page**（`example/src/page/` 下 34 个目录；ls
 
 ## 8. New Page Standard Template
 
-> ⚠️ **现代 page 模板从 30/34 个 example 抽象而来**，唯一例外是 §4 的 hero page。**不要**再用 §2.2 末尾的裸 div pattern。
+> ⚠️ **现代 page 模板从 32/34 个 example 抽象而来**，唯一例外是 §4 的 hero page。**不要**再用 §2.2 末尾的裸 div pattern。
 
 **步骤**：
 

@@ -14,6 +14,7 @@ Re-exported at root via `hyperlane-core::*` (then `hyperlane::*` re-exports it).
 
 ### `context::impl`
 
+- `fn` **`clear_route_params`** — `pub(crate) fn clear_route_params(&mut self) -> &mut Self {...}`
 - `fn` **`try_get_route_param`** — `pub fn try_get_route_param<T>(&self, name: T) -> Option<String> where T: AsRef<str>, {...}`
 - `fn` **`get_route_param`** — `pub fn get_route_param<T>(&self, name: T) -> String where T: AsRef<str>, {...}`
 - `fn` **`try_get_attribute`** — `pub fn try_get_attribute<V>(&self, key: impl AsRef<str>) -> Option<V> where V: AnySendSyncClone, {...}`
@@ -98,7 +99,7 @@ Re-exported at root via `hyperlane-core::*` (then `hyperlane::*` re-exports it).
 
 ### `route::struct`
 
-- `struct` **`RoutePattern`** — `pub struct RoutePattern( #[get]`
+- `struct` **`RoutePattern`** — `pub struct RoutePattern( #[get] pub(super) RouteSegmentList, )`
 - `struct` **`RouteMatcher`** — `pub struct RouteMatcher {`
 
 ### `route::type`

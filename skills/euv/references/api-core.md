@@ -103,14 +103,14 @@ Re-exported at crate root as `euv::*` via `core/src/lib.rs`.
 - `static` **`SUPPRESS_SCHEDULE`** — `pub static SUPPRESS_SCHEDULE: AtomicBool = AtomicBool::new(false);`
 - `static` **`mut`** — `pub(crate) static mut CURRENT_HOOK_CONTEXT: CurrentHookContextCell = CurrentHookContextCell(UnsafeCell::new(None));`
 - `static` **`CURRENT_TRACKING_DYNAMIC_ID`** — `pub static CURRENT_TRACKING_DYNAMIC_ID: AtomicUsize = AtomicUsize::new(usize::MAX);`
-- `static` **`DISPATCH_CLOSURE`** — `pub static DISPATCH_CLOSURE: Closure<dyn FnMut()> = Closure::wrap(Box::new(|| {`
-- `static` **`MICROTASK_CACHE`** — `pub static MICROTASK_CACHE: MicrotaskCacheCell = MicrotaskCacheCell(UnsafeCell::new(MicrotaskCache {`
+- `static` **`DISPATCH_CLOSURE`** — `pub static DISPATCH_CLOSURE: Closure<dyn FnMut()> = Closure::wrap(Box::new(|| { SCHEDULED.store(false, Ordering::Relaxed); Scheduler::dispatch_updates(); }));`
+- `static` **`MICROTASK_CACHE`** — `pub static MICROTASK_CACHE: MicrotaskCacheCell = MicrotaskCacheCell(UnsafeCell::new(MicrotaskCache { queue_microtask: None, }));`
 
 ### `reactive::schedule::struct`
 
 - `struct` **`MicrotaskCache`** — `pub(crate) struct MicrotaskCache {`
-- `struct` **`MicrotaskCacheCell`** — `pub(crate) struct MicrotaskCacheCell( #[get(pub(crate))]`
-- `struct` **`CurrentHookContextCell`** — `pub(crate) struct CurrentHookContextCell( #[get(pub(crate))]`
+- `struct` **`MicrotaskCacheCell`** — `pub(crate) struct MicrotaskCacheCell( #[get(pub(crate))] #[get_mut(pub(crate))] pub UnsafeCell<MicrotaskCache>, );`
+- `struct` **`CurrentHookContextCell`** — `pub(crate) struct CurrentHookContextCell( #[get(pub(crate))] #[get_mut(pub(crate))] #[set(pub(crate))] pub UnsafeCell<Option<HookContextRc>>, );`
 - `struct` **`Scheduler`** — `pub(crate) struct Scheduler;`
 
 ### `reactive::schedule::type`
@@ -145,7 +145,6 @@ Re-exported at crate root as `euv::*` via `core/src/lib.rs`.
 
 ### `reactive::signal::struct`
 
-- `type` **`ListenerEntry`** — `pub(crate) type ListenerEntry = (usize, Box<dyn FnMut()>);`
 - `struct` **`SignalInner`** — `pub(crate) struct SignalInner<T> where T: Clone, {`
 - `struct` **`Signal`** — `pub struct Signal<T> where T: Clone + PartialEq + 'static, {`
 - `struct` **`SignalCell`** — `pub struct SignalCell<T> where T: Clone + PartialEq + 'static, {`
@@ -155,6 +154,10 @@ Re-exported at crate root as `euv::*` via `core/src/lib.rs`.
 ### `reactive::signal::trait`
 
 - `trait` **`AnySignalInner`** — `pub(crate) trait AnySignalInner: Any {`
+
+### `reactive::signal::type`
+
+- `type` **`ListenerEntry`** — `pub(crate) type ListenerEntry = (usize, Box<dyn FnMut()>);`
 
 ### `renderer::dom::trait`
 
@@ -227,13 +230,13 @@ Re-exported at crate root as `euv::*` via `core/src/lib.rs`.
 
 - `struct` **`HandlerSlot`** — `pub(crate) struct HandlerSlot {`
 - `struct` **`SignalUpdateSlot`** — `pub(crate) struct SignalUpdateSlot {`
-- `struct` **`HandlerRegistryCell`** — `pub(crate) struct HandlerRegistryCell( #[get(pub(crate))]`
-- `struct` **`DelegatedEventsCell`** — `pub(crate) struct DelegatedEventsCell( #[get(pub(crate))]`
-- `struct` **`SignalUpdateRegistryCell`** — `pub(crate) struct SignalUpdateRegistryCell( #[get(pub(crate))]`
-- `struct` **`DirtyUpdateIdsCell`** — `pub(crate) struct DirtyUpdateIdsCell( #[get(pub(crate))]`
-- `struct` **`WindowEventRegistryCell`** — `pub(crate) struct WindowEventRegistryCell( #[get(pub(crate))]`
-- `struct` **`NodeRefRegistryCell`** — `pub(crate) struct NodeRefRegistryCell( #[get(pub(crate))]`
-- `struct` **`BindingCleanupsCell`** — `pub(crate) struct BindingCleanupsCell( #[get(pub(crate))]`
+- `struct` **`HandlerRegistryCell`** — `pub(crate) struct HandlerRegistryCell( #[get(pub(crate))] #[get_mut(pub(crate))] #[set(pub(crate))] pub UnsafeCell<HandlerRegistryMap>, );`
+- `struct` **`DelegatedEventsCell`** — `pub(crate) struct DelegatedEventsCell( #[get(pub(crate))] #[get_mut(pub(crate))] #[set(pub(crate))] pub UnsafeCell<HashSet<&'static str>>, );`
+- `struct` **`SignalUpdateRegistryCell`** — `pub(crate) struct SignalUpdateRegistryCell( #[get(pub(crate))] #[get_mut(pub(crate))] #[set(pub(crate))] pub UnsafeCell<HashMap<usize, SignalUpdateEntry>>, );`
+- `struct` **`DirtyUpdateIdsCell`** — `pub(crate) struct DirtyUpdateIdsCell( #[get(pub(crate))] #[get_mut(pub(crate))] #[set(pub(crate))] pub UnsafeCell<HashSet<usize>>, );`
+- `struct` **`WindowEventRegistryCell`** — `pub(crate) struct WindowEventRegistryCell( #[get(pub(crate))] #[get_mut(pub(crate))] #[set(pub(crate))] pub UnsafeCell<WindowEventRegistryMap>, );`
+- `struct` **`NodeRefRegistryCell`** — `pub(crate) struct NodeRefRegistryCell( #[get(pub(crate))] #[get_mut(pub(crate))] #[set(pub(crate))] pub UnsafeCell<NodeRefRegistryMap>, );`
+- `struct` **`BindingCleanupsCell`** — `pub(crate) struct BindingCleanupsCell( #[get(pub(crate))] #[get_mut(pub(crate))] #[set(pub(crate))] pub UnsafeCell<BindingCleanupsMap>, );`
 - `struct` **`Registry`** — `pub(crate) struct Registry;`
 
 ### `renderer::registry::type`
@@ -268,7 +271,6 @@ Re-exported at crate root as `euv::*` via `core/src/lib.rs`.
 ### `renderer::render::impl`
 
 - `fn` **`new`** — `pub(crate) fn new(pointer: *mut T) -> Self {...}`
-- `fn` **`get`** — `pub(crate) fn get(&self) -> *mut T {...}`
 - `fn` **`render`** — `pub fn render(&mut self, vnode: VirtualNode) {...}`
 - `fn` **`render_full_replace`** — `pub fn render_full_replace(&mut self, vnode: VirtualNode) {...}`
 - `fn` **`setup`** — `pub(crate) fn setup<S, F>(selector: S, render_fn: F) where S: AsRef<str>, F: FnOnce() -> VirtualNode, {...}`
@@ -317,7 +319,7 @@ Re-exported at crate root as `euv::*` via `core/src/lib.rs`.
 - `struct` **`AttrValueAdapter`** — `pub struct AttrValueAdapter<T> {`
 - `struct` **`InnerHtmlAdapter`** — `pub struct InnerHtmlAdapter<T> {`
 - `struct` **`CallbackNamedAdapter`** — `pub struct CallbackNamedAdapter<T> {`
-- `struct` **`InjectedClassesCell`** — `pub(crate) struct InjectedClassesCell( #[get(pub(crate))]`
+- `struct` **`InjectedClassesCell`** — `pub(crate) struct InjectedClassesCell( #[get(pub(crate))] #[get_mut(pub(crate))] #[set(pub(crate))] pub UnsafeCell<HashSet<String>>, );`
 
 ### `vdom::attribute::type`
 

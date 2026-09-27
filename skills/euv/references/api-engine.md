@@ -419,7 +419,7 @@ Re-exported at crate root via `engine/src/lib.rs` `pub use` 链。`Engine` 是�
 ### `math::trait`
 
 - `trait` **`Interpolable`** — `pub trait Interpolable {`
-- `trait` **`Vector`** — `pub trait Vector: Copy + Clone + Default + Debug + PartialEq + Add<Output = Self> + Sub<Output = Self> + Mul<f64, Output = Self> + Neg<Output = Self> + AddAssig`
+- `trait` **`Vector`** — `pub trait Vector: Copy + Clone + Default + Debug + PartialEq + Add<Output = Self> + Sub<Output = Self> + Mul<f64, Output = Self> + Neg<Output = Self> + AddAssign + SubAssign + MulAssign<f64> {`
 
 ### `particle::impl`
 
@@ -438,7 +438,7 @@ Re-exported at crate root via `engine/src/lib.rs` `pub use` 链。`Engine` 是�
 
 ### `particle::static`
 
-- `static` **`PARTICLE_PALETTE`** — `pub(crate) static PARTICLE_PALETTE: LazyLock<[Color; PARTICLE_PALETTE_SIZE]> = LazyLock::new(|| {`
+- `static` **`PARTICLE_PALETTE`** — `pub(crate) static PARTICLE_PALETTE: LazyLock<[Color; PARTICLE_PALETTE_SIZE]> = LazyLock::new(|| { [ Color::new(1.000, 1.000, 1.000, 1.000), Color::new(0.875, 0.875, 0.875, 1.000), Color::new(0.750, 0.750, 0.750, 1.000), Color::new(0.625, 0.625, 0.625, 1.000), Color::new(0.500, 0.500, 0.500, 1.000), Color::new(0.375, 0.375, 0.375, 1.000), Color::new(0.250, 0.250, 0.250, 1.000), Color::new(0.125, 0.125, 0.125, 1.000), Color::new(0.000, 0.000, 0.000, 1.000), Color::new(1.000, 0.000, 0.000, 1.000), Color::new(0.000, 1.000, 0.000, 1.000), Color::new(0.000, 0.000, 1.000, 1.000), Color::new(1.000, 1.000, 0.000, 1.000), Color::new(0.000, 1.000, 1.000, 1.000), Color::new(1.000, 0.000, 1.000, 1.000), Color::new(1.000, 0.500, 0.000, 1.000), Color::new(0.500, 1.000, 0.000, 1.000), Color::new(0.000, 1.000, 0.500, 1.000), Color::new(0.000, 0.500, 1.000, 1.000), Color::new(0.500, 0.000, 1.000, 1.000), Color::new(1.000, 0.000, 0.500, 1.000), Color::new(0.875, 0.250, 0.125, 1.000), Color::new(0.250, 0.875, 0.125, 1.000), Color::new(0.125, 0.250, 0.875, 1.000), Color::new(0.875, 0.125, 0.250, 1.000), Color::new(0.250, 0.125, 0.875, 1.000), Color::new(0.125, 0.875, 0.250, 1.000), Color::new(0.625, 0.625, 0.125, 1.000), Color::new(0.125, 0.625, 0.625, 1.000), Color::new(0.625, 0.125, 0.625, 1.000), Color::new(0.375, 0.375, 0.875, 1.000), Color::new(0.875, 0.375, 0.375, 1.000), ] });`
 
 ### `particle::struct`
 
@@ -613,7 +613,7 @@ Re-exported at crate root via `engine/src/lib.rs` `pub use` 链。`Engine` 是�
 - `fn` **`zoom`** — `pub fn zoom(&mut self, distance: f64) {...}`
 - `fn` **`orbit`** — `pub fn orbit(&mut self, yaw_delta: f64, pitch_delta: f64) {...}`
 - `fn` **`from_selector`** — `pub fn from_selector<S>(canvas_selector: S, width: f64, height: f64) -> Option<SsaaCanvas> where S: AsRef<str>, {...}`
-- `fn` **`from_selector_with_scale`** — `pub fn from_selector_with_scale<S>( canvas_selector: S, width: f64, height: f64, scale_factor: f64, ) -> Option<SsaaCanvas> where S: AsRef<str>, { .`
+- `fn` **`from_selector_with_scale`** — `pub fn from_selector_with_scale<S>( canvas_selector: S, width: f64, height: f64, scale_factor: f64, ) -> Option<SsaaCanvas> where S: AsRef<str>, {...}`
 - `fn` **`present`** — `pub fn present(&self) {...}`
 - `fn` **`clear`** — `pub fn clear(&self) {...}`
 - `fn` **`clear_color`** — `pub fn clear_color<C>(&self, color: C) where C: AsRef<str>, {...}`
@@ -621,7 +621,7 @@ Re-exported at crate root via `engine/src/lib.rs` `pub use` 链。`Engine` 是�
 - `fn` **`to_css`** — `pub fn to_css(&self) -> &str {...}`
 - `fn` **`create`** — `pub fn create(start: Vector2D, end: Vector2D, stops: Vec<(f64, String)>) -> LinearGradient {...}`
 - `fn` **`to_gradient`** — `pub fn to_gradient(&self, context: &CanvasRenderingContext2d) -> Option<CanvasGradient> {...}`
-- `fn` **`create`** — `pub fn create( inner_center: Vector2D, inner_radius: f64, outer_center: Vector2D, outer_radius: f64, stops: Vec<(f64, String)>, ) -> RadialGradient { ..`
+- `fn` **`create`** — `pub fn create( inner_center: Vector2D, inner_radius: f64, outer_center: Vector2D, outer_radius: f64, stops: Vec<(f64, String)>, ) -> RadialGradient {...}`
 - `fn` **`to_gradient`** — `pub fn to_gradient(&self, context: &CanvasRenderingContext2d) -> Option<CanvasGradient> {...}`
 - `fn` **`create`** — `pub fn create() -> ShadowConfig {...}`
 - `fn` **`create`** — `pub fn create(z_index: i32, visible: bool) -> RenderLayer {...}`
@@ -644,10 +644,10 @@ Re-exported at crate root via `engine/src/lib.rs` `pub use` 链。`Engine` 是�
 - `fn` **`create_command_encoder`** — `pub fn create_command_encoder(&self) -> JsValue {...}`
 - `fn` **`get_current_texture_view`** — `pub(crate) fn get_current_texture_view(&self) -> JsValue {...}`
 - `fn` **`begin_render_pass`** — `pub fn begin_render_pass( &mut self, encoder: &JsValue, clear_color: (f64, f64, f64, f64), ) -> JsValue {...}`
-- `fn` **`begin_render_pass_full`** — `pub fn begin_render_pass_full( &mut self, encoder: &JsValue, color: &mut RenderPassColorAttachment, depth: Option<&RenderPassDepthStencilAttachment>, ) -> JsVal`
+- `fn` **`begin_render_pass_full`** — `pub fn begin_render_pass_full( &mut self, encoder: &JsValue, color: &mut RenderPassColorAttachment, depth: Option<&RenderPassDepthStencilAttachment>, ) -> JsValue {...}`
 - `fn` **`submit`** — `pub fn submit(&self, command_buffers: &[JsValue]) {...}`
 - `fn` **`create_render_pipeline`** — `pub fn create_render_pipeline<S>(&self, shader_code: S) -> JsValue where S: AsRef<str>, {...}`
-- `fn` **`create_render_pipeline_full`** — `pub fn create_render_pipeline_full<S>( &self, shader_code: S, vertex_buffer_layouts: &[VertexBufferLayout], vertex_entry: &str, fragment_entry: &str,`
+- `fn` **`create_render_pipeline_full`** — `pub fn create_render_pipeline_full<S>( &self, shader_code: S, vertex_buffer_layouts: &[VertexBufferLayout], vertex_entry: &str, fragment_entry: &str, depth_format: Option<&str>, ) -> JsValue where S: AsRef<str>, {...}`
 - `fn` **`set_pipeline`** — `pub fn set_pipeline(&self, pass: &JsValue, pipeline: &JsValue) {...}`
 - `fn` **`set_vertex_buffer`** — `pub fn set_vertex_buffer(&self, pass: &JsValue, slot: u32, buffer: &JsValue) {...}`
 - `fn` **`set_index_buffer`** — `pub fn set_index_buffer(&self, pass: &JsValue, buffer: &JsValue, format: &str) {...}`
@@ -664,7 +664,7 @@ Re-exported at crate root via `engine/src/lib.rs` `pub use` 链。`Engine` 是�
 - `fn` **`push_error_scope`** — `pub fn push_error_scope(&self, filter: &str) {...}`
 - `fn` **`pop_error_sync`** — `pub fn pop_error_sync(&self) -> Option<JsValue> {...}`
 - `fn` **`take_last_error`** — `pub fn take_last_error(&self) -> Option<JsValue> {...}`
-- `fn` **`begin_render_pass_to_texture`** — `pub fn begin_render_pass_to_texture( &mut self, encoder: &JsValue, color_view: &JsValue, clear_color: Option<(f64, f64, f64, f64)>, depth_view: Option<&JsVa`
+- `fn` **`begin_render_pass_to_texture`** — `pub fn begin_render_pass_to_texture( &mut self, encoder: &JsValue, color_view: &JsValue, clear_color: Option<(f64, f64, f64, f64)>, depth_view: Option<&JsValue>, depth_clear: Option<f32>, ) -> JsValue {...}`
 - `fn` **`copy_texture_to_buffer`** — `pub fn copy_texture_to_buffer( &self, source: &JsValue, destination: &JsValue, bytes_per_row: u32, width: u32, height: u32, ) {...}`
 - `fn` **`create_offline_render_target`** — `pub fn create_offline_render_target( &self, width: u32, height: u32, format: &str, ) -> (JsValue, JsValue) {...}`
 - `fn` **`create_texture_view`** — `pub fn create_texture_view(&self, texture: &JsValue) -> JsValue {...}`
@@ -681,7 +681,7 @@ Re-exported at crate root via `engine/src/lib.rs` `pub use` 链。`Engine` 是�
 - `fn` **`set_bind_group`** — `pub fn set_bind_group(&self, pass: &JsValue, index: u32, bind_group: &JsValue) {...}`
 - `fn` **`set_bind_group_on`** — `pub(crate) fn set_bind_group_on( &self, class: GpuReceiverClass, pass: &JsValue, index: u32, bind_group: &JsValue, ) {...}`
 - `fn` **`render_frame`** — `pub fn render_frame( &mut self, pipeline: &JsValue, clear_color: (f64, f64, f64, f64), vertex_count: u32, ) {...}`
-- `fn` **`render_frame_with_bind_group`** — `pub fn render_frame_with_bind_group( &mut self, pipeline: &JsValue, bind_group: &JsValue, clear_color: (f64, f64, f64, f64), vertex_count: u32, ) { ...`
+- `fn` **`render_frame_with_bind_group`** — `pub fn render_frame_with_bind_group( &mut self, pipeline: &JsValue, bind_group: &JsValue, clear_color: (f64, f64, f64, f64), vertex_count: u32, ) {...}`
 - `fn` **`set_compute_pipeline`** — `pub fn set_compute_pipeline(&self, pass: &JsValue, pipeline: &JsValue) {...}`
 - `fn` **`create_bind_group_for_layout`** — `pub fn create_bind_group_for_layout( &self, layout: &JsValue, entries: &[BindGroupEntry], ) -> JsValue {...}`
 - `fn` **`create_bind_group_layout`** — `pub fn create_bind_group_layout(&self, entries: &[BindGroupLayoutEntry]) -> JsValue {...}`
@@ -689,8 +689,8 @@ Re-exported at crate root via `engine/src/lib.rs` `pub use` 链。`Engine` 是�
 - `fn` **`create_storage_texture`** — `pub fn create_storage_texture(&self, width: u32, height: u32, format: &str) -> JsValue {...}`
 - `fn` **`create_timestamp_query_set`** — `pub fn create_timestamp_query_set(&self, count: u32) -> JsValue {...}`
 - `fn` **`write_timestamp`** — `pub fn write_timestamp(&self, pass: &JsValue, query_set: &JsValue, index: u32) {...}`
-- `fn` **`resolve_timestamp`** — `pub fn resolve_timestamp( &self, encoder: &JsValue, query_set: &JsValue, first_query: u32, query_count: u32, destination: &JsValue, destinat`
-- `fn` **`create_render_pipeline_with_layout`** — `pub fn create_render_pipeline_with_layout<S>( &self, shader_code: S, layout: &JsValue, vertex_buffer_layouts: &[VertexBufferLayout], vertex_entry: &str,`
+- `fn` **`resolve_timestamp`** — `pub fn resolve_timestamp( &self, encoder: &JsValue, query_set: &JsValue, first_query: u32, query_count: u32, destination: &JsValue, destination_offset: u64, ) {...}`
+- `fn` **`create_render_pipeline_with_layout`** — `pub fn create_render_pipeline_with_layout<S>( &self, shader_code: S, layout: &JsValue, vertex_buffer_layouts: &[VertexBufferLayout], vertex_entry: &str, fragment_entry: &str, depth_format: Option<&str>, ) -> JsValue where S: AsRef<str>, {...}`
 - `fn` **`dispose`** — `pub fn dispose(&self) {...}`
 - `fn` **`set_viewport`** — `pub fn set_viewport(&self, pass: &JsValue, viewport: &ViewportDescriptor) {...}`
 - `fn` **`set_scissor_rect`** — `pub fn set_scissor_rect(&self, pass: &JsValue, x: u32, y: u32, width: u32, height: u32) {...}`
@@ -916,6 +916,22 @@ Re-exported at crate root via `engine/src/lib.rs` `pub use` 链。`Engine` 是�
 - `fn` **`is_finished`** — `pub fn is_finished(&self) -> bool {...}`
 - `fn` **`get_state`** — `pub fn get_state(&self) -> TweenState {...}`
 - `fn` **`get_duration`** — `pub fn get_duration(&self) -> f64 {...}`
+- `fn` **`get_from`** — `pub fn get_from(&self) -> T {...}`
+- `fn` **`get_to`** — `pub fn get_to(&self) -> T {...}`
+- `fn` **`get_easing`** — `pub fn get_easing(&self) -> Easing {...}`
+- `fn` **`get_delay`** — `pub fn get_delay(&self) -> f64 {...}`
+- `fn` **`get_elapsed`** — `pub fn get_elapsed(&self) -> f64 {...}`
+- `fn` **`get_elapsed_mut`** — `pub fn get_elapsed_mut(&mut self) -> &mut f64 {...}`
+- `fn` **`get_mode`** — `pub fn get_mode(&self) -> AnimationMode {...}`
+- `fn` **`get_direction`** — `pub fn get_direction(&self) -> f64 {...}`
+- `fn` **`try_get_on_complete`** — `pub fn try_get_on_complete(&self) -> &Option<Rc<dyn Fn()>> {...}`
+- `fn` **`set_easing`** — `pub fn set_easing(&mut self, easing: Easing) {...}`
+- `fn` **`set_delay`** — `pub fn set_delay(&mut self, delay: f64) {...}`
+- `fn` **`set_elapsed`** — `pub fn set_elapsed(&mut self, elapsed: f64) {...}`
+- `fn` **`set_state`** — `pub fn set_state(&mut self, state: TweenState) {...}`
+- `fn` **`set_mode`** — `pub fn set_mode(&mut self, mode: AnimationMode) {...}`
+- `fn` **`set_direction`** — `pub fn set_direction(&mut self, direction: f64) {...}`
+- `fn` **`set_on_complete`** — `pub fn set_on_complete(&mut self, on_complete: Option<Rc<dyn Fn()>>) {...}`
 
 ### `tween::struct`
 

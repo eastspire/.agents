@@ -33,11 +33,11 @@ members = ["server", "client"]
 resolver = "2"
 
 [workspace.dependencies]
-euv = { path = "../../euv-dev/euv", version = "0.13.6" }
-euv-core = { path = "../../euv-dev/euv/core", version = "0.13.6" }
-euv-ui = { path = "../../euv-dev/euv/ui", version = "0.13.6" }
-euv-engine = { path = "../../euv-dev/euv/engine", version = "0.13.6" }
-hyperlane = "21.3.6"
+euv = { path = "../../euv-dev/euv", version = "0.26.8" }
+euv-core = { path = "../../euv-dev/euv/core", version = "0.26.8" }
+euv-ui = { path = "../../euv-dev/euv/ui", version = "0.26.8" }
+euv-engine = { path = "../../euv-dev/euv/engine", version = "0.26.8" }
+hyperlane = "21.7.7"   # 实时核对：curl -s https://crates.io/api/v1/crates/hyperlane | jq -r .crate.max_stable_version
 hyperlane-macros = "0.1"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.2"
@@ -99,7 +99,7 @@ cargo build --release --target wasm32-unknown-unknown
 # produces target/wasm32-unknown-unknown/release/<crate_name>.wasm
 
 # 2. Install matching wasm-bindgen-cli ONCE
-cargo install -f wasm-bindgen-cli --version 0.2.127 --quiet
+cargo install -f wasm-bindgen-cli --version 0.2.126 --quiet
 
 # 3. Generate JS bindings
 wasm-bindgen ../target/wasm32-unknown-unknown/release/<crate_name>.wasm \
@@ -130,7 +130,7 @@ jobs:
         with: { targets: wasm32-unknown-unknown }
       - uses: Swatinem/rust-cache@v2
       - run: cd client && cargo build --release --target wasm32-unknown-unknown
-      - run: cargo install wasm-bindgen-cli --version 0.2.127 --quiet
+      - run: cargo install wasm-bindgen-cli --version 0.2.126 --quiet
       - run: |
           wasm-bindgen ../target/wasm32-unknown-unknown/release/<crate>.wasm \
             --target web --out-dir www/pkg --out-name <crate> --no-typescript
@@ -269,7 +269,7 @@ Observed on this VM (GFW environment). Workaround: skip `wasm-pack` entirely, ru
 
 ### 12. wasm-bindgen version must match
 
-For euv 0.13.6: install `wasm-bindgen-cli --version 0.2.127`. Mismatch triggers a warning but still produces bindings.
+For euv 0.26.8: install `wasm-bindgen-cli --version 0.2.126`(与根 `Cargo.toml` 的 `wasm-bindgen = "0.2.126"` 对齐)。 Mismatch triggers a warning but still produces bindings.
 
 ### 13. GFW environment: SSH push to github.com is slow (20+ min)
 
@@ -301,7 +301,7 @@ Without `type="module"`, the script runs in classic mode and fails on `import`.
 
 If repo is `eastspire/visa-tracker`, GitHub Pages serves at `https://eastspire.github.io/visa-tracker/`. Relative paths like `./pkg/<crate>.js` work fine. Absolute paths like `/pkg/<crate>.js` will break.
 
-### 17. wasm-bindgen 0.2.127 flag `--no-pack` doesn't exist
+### 17. wasm-bindgen 0.2.126 flag `--no-pack` doesn't exist
 
 The flag was removed in newer wasm-bindgen. Just omit it.
 

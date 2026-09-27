@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 euv = "*"
-euv-engine = "0.1.0"
+euv-engine = "0.26.8"
 ```
 
 Add `wasm-pack` once for `euv build`:
