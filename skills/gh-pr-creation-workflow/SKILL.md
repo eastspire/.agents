@@ -350,6 +350,131 @@ public clones work fine.
     repo setting is off. As of 2026-09-25 all eastspire-owned repos
     have this flipped to `true` via batch `gh api -X PATCH`.
 
+15a. **"合并之前的 PR，新开一个" — user-owned merge cadence, not an
+    agent decision.** When the user says "之前的 PR 先合并，新开一个
+    PR 修复" / "merge the previous PR and open a new one", the
+    sequence is:
+
+    1. Merge all currently-open PRs the user mentioned — use
+       `gh pr merge <N> --squash --delete-branch --body-file /tmp/merge-comment.md`
+       (the `--body-file` keeps the squash commit descriptive). Stop
+       at green before merging if any CI is still pending.
+    2. After merge, reset the local default branch:
+       `git fetch origin <default> && git checkout <default> && git reset --hard origin/<default> && git branch -D <merged-branch>`.
+       Use `-D` not `-d` after squash merge (pitfall 6 above).
+    3. Verify the branch is gone on remote too: `git ls-remote origin <branch>` should return empty.
+    4. Only THEN open the new PR, on a fresh branch off clean
+       `origin/<default>`. Don't reuse the old branch — its SHA may
+       have been rewritten by squash.
+
+    If the new PR is a follow-up to the merged work and the user wants
+    a version bump, bump the workspace `version` in the same PR per
+    the per-project bump convention (e.g. ctares root only, hyperlane
+    root only, euv root only — child crates use `version.workspace =
+    true` and pick up the bump automatically). Don't ship a version
+    bump on its own commit after the merge; combine the bump with the
+    follow-up changes so the bump has a clear "this is the new
+    release" PR.
+
+## Multi-repo verifier-evolution cleanup ("rule changed, old PRs are all stale")
+
+When a project-level verifier rule tightens (e.g. rust-standards §13.7 evolved from round-3 alphabetic-only to round-4 entry-length sort), **every open PR that was opened against the old rule is now FAILING the new verifier**, even if its title claims it's compliant. This pattern appears as "N open PRs across M repos, all broken by the same rule tightening". Cleanup sequence:
+
+### 1. Audit by verifier, not by title
+
+Trust the verifier output, NOT the PR title. A PR titled "alphabetize workspace dependencies" may have actually used entry-length sort; a PR titled "round-4 sort" may have used the old key-length sort. Run the verifier against each PR's branch (use worktree, NOT the main checkout — see pitfall below) and group:
+
+- **Survivors** — verifier reports 0 violations. Keep these.
+- **Stale** — verifier reports ≥1 violations. Will need supersession.
+
+```bash
+# For each (repo, branch) pair:
+TMP="/tmp/verifier-audit-$(date +%s)"
+mkdir -p "$TMP"
+git -C /Users/sqs/code/<repo> worktree add --force "$TMP/<repo>-<branch>" <branch>
+python3 <verifier-script> "$TMP/<repo>-<branch>"   # exit 0 = survivor
+# cleanup
+git -C /Users/sqs/code/<repo> worktree remove --force "$TMP/<repo>-<branch>"
+```
+
+### 2. Close stale PRs with `--delete-branch` + explanatory comment
+
+```bash
+for repo_pr in "<repo> <pr-number>"; do
+  read -r repo pr <<< "$repo_pr"
+  gh pr close "$pr" --repo "$repo" --delete-branch --comment "Closing: superseded by round-N verifier update. This branch passes round-(N-1) but fails round-N. The surviving PR carries the canonical order. See <reference-link> for the rule evolution."
+done
+```
+
+`--delete-branch` deletes the head branch on the upstream repo (works for direct-push main flow; silently skipped for legacy Track 2 fork-PRs — see pitfall 7).
+
+### 3. Cleaning-up verification — `--delete-branch` is not exhaustive
+
+`gh pr close --delete-branch` does **not** clean up:
+
+- **Local refs** in the main worktree: `git -C /Users/sqs/code/<repo> branch -D <branch>` after every close.
+- **Orphan remote branches** (branches pushed but never attached to a PR, e.g. from a closed supersession that was force-pushed without reopening): verify with `git -C /Users/sqs/code/<repo> ls-remote origin <branch>` and delete with `git -C /Users/sqs/code/<repo> push origin --delete <branch>`.
+
+```bash
+# After closing all stale PRs in a repo, audit remote branches:
+for repo in <repos>; do
+  echo "===== $repo ====="
+  for branch in $(git -C /Users/sqs/code/$repo branch -a | grep 'remotes/origin/' | awk '{print $1}' | sed 's|remotes/origin/||'); do
+    # check if branch has any open PR
+    has_pr=$(gh api "repos/$repo/pulls?head=$branch&state=open" --jq 'length')
+    if [ "$has_pr" = "0" ]; then
+      # check if branch has any commits ahead of master
+      ahead=$(gh api "repos/$repo/compare/master...$branch" --jq '.ahead_by // 0' 2>/dev/null)
+      if [ "$ahead" != "0" ] && [ -n "$ahead" ]; then
+        echo "  orphan: $branch (ahead of master by $ahead commits)"
+      fi
+    fi
+  done
+done
+```
+
+Then delete confirmed orphans:
+
+```bash
+git -C /Users/sqs/code/<repo> push origin --delete <orphan-branch>
+```
+
+### 4. Pitfall — verifier-state vs checkout-state
+
+Running `<verifier-script> <repo_dir>` against the user's main checkout dir gives you the verifier output for **whatever branch that checkout is currently on**, NOT the branch you intend to verify. If your main checkout is on `master` and you want to verify a feature branch:
+
+```bash
+# WRONG: verifier reads main checkout's branch (master), not the feature branch
+python3 verify_dep_order.py /Users/sqs/code/euv
+
+# RIGHT: detached worktree at the feature branch, verifier against the worktree
+git -C /Users/sqs/code/euv worktree add --force /tmp/euv-feature feature-branch
+python3 verify_dep_order.py /tmp/euv-feature
+git -C /Users/sqs/code/euv worktree remove --force /tmp/euv-feature
+```
+
+The worktree pattern is essential for batch verification — for each branch, create a worktree, verify, clean up. Verifying 7 PRs across 3 repos without worktrees would require `git checkout` round-trips that leave the main checkout on a stale branch mid-task.
+
+### 5. Master fix surface
+
+If the verifier-evolved rule also uncovers violations on `master` itself (because the old PRs were the only line of defense), the **survivor PRs must be the canonical fix path**: when each survivor PR merges, its commits bring master into compliance. Verify that each survivor PR's diff vs master actually contains the fix to master's violations:
+
+```bash
+git -C /Users/sqs/code/<repo> log --oneline master..<survivor-branch>
+gh api "repos/<repo>/compare/master...<survivor-branch>" --jq '.files[].filename'
+```
+
+If a master violation is **not** covered by any survivor PR, it's a separate scope — open a new PR for it rather than amending a survivor.
+
+### When this applies
+
+- Verifier rule tightened and old PRs are now stale (most common)
+- Linter / formatter version bump made old PRs non-conformant
+- New mandatory CI check (e.g. security scanner, SBOM) added that old PRs lack
+- Any scenario where "the rule changed, N old PRs no longer fit"
+
+This is distinct from single-PR supersession (scope grew → amend + force-push). The key difference: here the old PRs were correct under the OLD rule but are stale under the NEW rule; force-pushing the same commits doesn't help because the rule itself moved.
+
 ## Supersede flow
 
 Already opened a PR but the scope grew? Don't open a second one — supersede:
@@ -477,6 +602,49 @@ If a fix-relevant PR is already open → append. Otherwise → new PR.
     git diff origin/<default>..HEAD | grep -E '^[+-]' | grep -v '^+++' | grep -v '^---' | wc -l
     # If line count matches your expected diff scope, you're clean.
     ```
+
+17. **Reply to an inline review comment via REST, not `gh pr comment`.**
+    `gh pr comment <N>` posts a top-level PR conversation comment —
+    useful for a final summary, but reviewers expect replies on each
+    review-thread comment to land as **a reply in that thread**, with
+    the original diff hunk still visible. Get the comment ID from
+    `gh api repos/<o>/<r>/pulls/<N>/comments --jq '.[] | "\(.id) \(.path):\(.line)"'`,
+    then POST to `repos/<o>/<r>/pulls/<N>/comments/<id>/replies`:
+
+    ```bash
+    gh api -X POST repos/hyperlane-dev/hyperlane/pulls/35/comments/4113690104/replies \
+        -f body="Done — moved the thread_local into static.rs per the convention."
+    ```
+
+    `--jq .id` returns the new reply ID. Common pattern: open the
+    `gh pr view N --comments` list (or the same REST endpoint) to find
+    the IDs before replying. Don't batch: each `gh pr comment` call
+    creates a separate conversation entry, which fragments the thread
+    and confuses reviewers.
+
+18. **`git push --force-with-lease` fails with `stale info` after a
+    rebase/cherry-pick in a fresh worktree.** Symptom: the rebase
+    produced a new commit SHA on the branch, but the reflog / local
+    tracking info still references the pre-rebase SHA, so the lease
+    check thinks the remote was modified by someone else and refuses.
+    **Fix** (in order):
+
+    ```bash
+    # Refresh the lease baseline from origin (the rebased branch is
+    # gone from origin, so this resolves to the missing-ref state, but
+    # then the second push works):
+    git fetch origin <branch>
+    git push --force-with-lease origin <branch>   # may still fail
+
+    # Fallback — plain --force when no one else could have updated the
+    # branch between the rebase and this push (single-writer scenario):
+    git push --force origin <branch>
+    ```
+
+    Verify with `git ls-remote origin <branch>` — should match the
+    local SHA after the successful push. Don't use `--force-with-lease`
+    blindly after every rebase; the lease guarantees nothing for a
+    single-writer branch, and the failure costs you an extra fetch.
 
 ## Commit message style (all flows)
 
