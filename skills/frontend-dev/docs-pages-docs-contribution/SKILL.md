@@ -1,43 +1,59 @@
 ---
 name: docs-pages-docs-contribution
-description: docs-pages/docs VuePress site — direct push master.
+description: docs-pages/docs euv-docs (Rust/WASM) site — direct push master, no PR.
 license: MIT
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
   category: frontend-dev
   related_skills:
     - frontend-dev/euv-docs-contribution
     - gh-pr-creation-workflow
     - rust-standards
-    - git-standards
     - rust-wasm-gh-pages-deploy-pitfalls
 ---
 
 # docs-pages-docs contribution (docs-pages/docs)
 
+## ⚠️ MIGRATION NOTICE — 2026-09
+
+**`docs-pages/docs` is now euv-docs (Rust/WASM)**, NOT VuePress. The legacy VuePress layout described in this skill (src/ tree, vuepress-theme-hope, .vuepress/sidebar.js, features: block in frontmatter, `cargo install euv-cli`, `yarn dev`) is **stale** — the repo migrated to euv-docs and all those structures no longer exist.
+
+If you're reading the sections below (Repo layout, Frontmatter template, Sidebar registration, Deploy chain, ltpp.vip 0-byte trap, Yarn build hangs), they're describing the old VuePress repo. They are kept for historical reference only — **don't follow them**.
+
+**For current work on `docs-pages/docs`, load `frontend-dev/euv-docs-contribution` instead.** That skill covers the euv-docs engine, the actual frontmatter shape (`home: true` + `heroText` + `actions:` + `stats:` + `sidebar_order:`), the `euv-docs` CLI build, the WASM bundle deploy chain, and all the framework-override patterns (active-vs-hover sidebar, nested group alignment, content-page first heading y-position).
+
+The remainder of this skill is **historical** — see `frontend-dev/euv-docs-contribution` for the live workflow.
+
+---
+
+# Legacy VuePress reference (DEPRECATED, do not follow)
+
 ## When to use this skill
 
-Load this skill when the user says any of:
+Load this skill only for historical / reference purposes. The VuePress project this describes no longer exists in `docs-pages/docs`.
 
-- "docs-pages/docs" / "ltpp.vip docs" / "VuePress docs site" / "ltpp 文档"
-- "补全子目录" / "对齐规范" / "补全 euv-docs 子目录" / "euv-docs 404"
-- "src/<crate>/ 加新页" / "在 docs 里加一个 crate 的文档"
-- references to a missing crate's pages (e.g. "点开 euv-docs 404")
+- "docs-pages/docs" / "ltpp.vip docs" (legacy VuePress era only — pre-2026-09)
+- "VuePress docs site" / "ltpp 文档" (legacy era)
 
-**Do not** load this skill if the user is talking about `euv-dev/euv-docs` (the Rust/WASM markdown docs site) — use `frontend-dev/euv-docs-contribution` instead. The Disambiguation table below covers both projects.
+**Do not** load this skill for current `docs-pages/docs` work — use `frontend-dev/euv-docs-contribution`. The current `docs-pages/docs` repo is an euv-docs site (Rust + WASM), not VuePress.
 
-**Do not** load this skill for editing the `docs-pages/pages` Vercel build artifact — that repo is overwritten by the next deploy and is not the source of truth.
+`docs-pages/docs` historically was the eastspire / ltpp documentation site: VuePress 2 + `vuepress-theme-hope`, deployed to Vercel (`pages/` build output pushed to `docs-pages/pages` → served at `https://ltpp.vip/`). Each crate got its own `src/<crate-name>/` directory; the home `src/README.md` features block + `src/.vuepress/sidebar.js` provided cross-links.
 
-`docs-pages/docs` is the eastspire / ltpp documentation site. VuePress 2 + `vuepress-theme-hope`, deployed to Vercel (`pages/` build output pushed to `docs-pages/pages` → served at `https://ltpp.vip/`). Each crate gets its own `src/<crate-name>/` directory; the home `src/README.md` features block + `src/.vuepress/sidebar.js` provide cross-links.
-
-**Disambiguation** — there are TWO projects called "euv-docs":
+**Disambiguation** — the user has called "euv-docs" both ways historically. As of 2026-09, **all "euv-docs" is one project — `docs-pages/docs` is the euv-docs engine fork, and `euv-dev/euv-docs` is the upstream framework**:
 
 | Project | Stack | Path | This skill covers? |
 |---|---|---|---|
-| `docs-pages/docs` | VuePress 2 + vuepress-theme-hope | `~/github/docs-pages/docs` | **Yes — default for "补全 euv-docs 子目录" / "ltpp.vip docs"** |
+| `docs-pages/docs` (current, post-2026-09 migration) | euv-docs (Rust + WASM) | `~/github/docs-pages/docs` | **No — use `frontend-dev/euv-docs-contribution`** |
+| `euv-dev/euv-docs` (framework) | Rust + euv WASM | `~/github/euv-dev/euv-docs` | No — see `frontend-dev/euv-docs-contribution` |
+
+The VuePress-era disambiguation is preserved below for historical PR archaeology only.
+
+| Project | Stack | Path | This skill covers? |
+|---|---|---|---|
+| `docs-pages/docs` (legacy VuePress, deprecated) | VuePress 2 + vuepress-theme-hope | `~/github/docs-pages/docs` (pre-2026-09) | Historical only |
 | `euv-dev/euv-docs` | Rust + euv WASM | `~/github/euv-dev/euv-docs` | No — see `frontend-dev/euv-docs-contribution` |
 
-When the user says "补全 euv-docs" + mentions `ltpp.vip` or `VuePress`, this skill is the right one. The `euv-dev/euv-docs` skill explicitly disclaims the VuePress project — see its Disambiguation section.
+When the user says "euv-docs" today, default to `docs-pages/docs` (the user's fork) — that is now the euv-docs engine. The `euv-dev/euv-docs` repo is the upstream framework, only relevant if you're editing framework internals.
 
 ## Repo layout (the contract)
 
