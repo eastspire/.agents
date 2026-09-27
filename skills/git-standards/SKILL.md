@@ -1,6 +1,6 @@
 ---
 name: git-standards
-description: 'Git commit + PR routing + text conventions for eastspire-owned repos. **Route by change type, not by repo: docs / config / comment-only changes commit straight to the default branch with no PR; only changes to executable code need a PR (branch → push → PR → merge → delete branch). A comment-only edit to a `.rs` file is a docs change; a statement change is a code change. Mechanical classifier: `scripts/classify_change.py` (DIRECT_PUSH | NEEDS_PR).** **All commits and PR descriptions must be written in English** (no Chinese in commit message subject/body, no Chinese in PR title/body, per user preference). **All commits must use the canonical author identity from `~/.gitconfig` (`eastspire <root@ltpp.vip>`) — never per-commit `-c user.email=…` or `GIT_AUTHOR_EMAIL` overrides (see §7).** Commit subject MUST follow Conventional Commits v1.0.0: `<type>(<scope>): <subject>` where type ∈ {feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert} and scope is the skill name (singular or short area). Subject ≤ 72 chars, imperative mood, no trailing period, no all-caps. Body wrapped at 72 cols, explain *what* and *why* not *how*, use bullet lists for multi-point changes. PR body uses 4-section template: Summary / Changes / Verification / Notes. Footer MUST include `🤖 Generated with [Hermes](https://...)` line (drop if not applicable). Triggers: git commit, commit message, PR body, PR description, Conventional Commits, git push, gh pr create, commit prefix, commit type, chore:, feat:, fix:, refactor:, docs:, ci:, 文档直推, 代码 PR, 注释改动, 需要 PR 还是直接提交, doc vs code, direct push, delete branch after merge, git author, user.email, user.name, eastspire.'
+description: 'Git commit + PR routing + text conventions for eastspire-owned repos. **Route by change type, not by repo: docs / config / frontend-style / comment-only changes commit straight to the default branch with no PR; only changes to executable code need a PR (branch → push → PR → merge → delete branch). `.css`/`.scss`/`.less` count as presentation, but a `.tsx` with a changed handler is still a PR. A comment-only edit to a `.rs` file is a docs change; a statement change is a code change. Mechanical classifier: `scripts/classify_change.py` (DIRECT_PUSH | NEEDS_PR).** **All commits and PR descriptions must be written in English** (no Chinese in commit message subject/body, no Chinese in PR title/body, per user preference). **All commits must use the canonical author identity from `~/.gitconfig` (`eastspire <root@ltpp.vip>`) — never per-commit `-c user.email=…` or `GIT_AUTHOR_EMAIL` overrides (see §7).** Commit subject MUST follow Conventional Commits v1.0.0: `<type>(<scope>): <subject>` where type ∈ {feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert} and scope is the skill name (singular or short area). Subject ≤ 72 chars, imperative mood, no trailing period, no all-caps. Body wrapped at 72 cols, explain *what* and *why* not *how*, use bullet lists for multi-point changes. PR body uses 4-section template: Summary / Changes / Verification / Notes. Footer MUST include `🤖 Generated with [Hermes](https://...)` line (drop if not applicable). Triggers: git commit, commit message, PR body, PR description, Conventional Commits, git push, gh pr create, commit prefix, commit type, chore:, feat:, fix:, refactor:, docs:, ci:, 文档直推, 代码 PR, 注释改动, 前端样式, css 提交, 需要 PR 还是直接提交, doc vs code, direct push, delete branch after merge, git author, user.email, user.name, eastspire.'
 license: MIT
 ---
 # git-standards — English-only commit + PR conventions
@@ -199,12 +199,15 @@ User rule (recorded 2026-09-27):
 > 才需要创建 pr，pr 合并之后分支需要删除」**
 >
 > **「修改代码的注释也是直接提交不需要创建 pr」**
+>
+> **「如果是修改前端样式代码也直接提交，不需要创建 pr」** (added 2026-09-27 —
+> frontend **style** sheets are presentation, so they direct-push too)
 
 Three obligations:
 
-1. **Docs / config / comment-only changes → commit straight to the default
-   branch.** No feature branch, no PR. Applies to *every* repo, not just
-   `eastspire/.agents`.
+1. **Docs / config / comment-only / frontend-style changes → commit straight to
+   the default branch.** No feature branch, no PR. Applies to *every* repo, not
+   just `eastspire/.agents`.
 2. **Code changes → full PR cycle** (§3.3 above, plus
    `gh-pr-creation-workflow`): branch → push → PR → merge.
 3. **After a PR merges, delete the branch** — remote and local
@@ -214,6 +217,11 @@ Three obligations:
 
 Note the second quote: **a comment-only edit to a `.rs` file is a docs change.**
 This is why the file extension cannot be the test — see §3.3b.
+
+Note the third quote: **a `.css`/`.scss`/`.less` change is a presentation
+change** (§3.3a.1a), for the same structural reason: a stylesheet has no
+statements to change. "前端样式代码" means the stylesheet, NOT JavaScript
+component logic — a `.tsx` file with a changed `onClick` is still a PR.
 
 #### 3.3a.1 Layer A — declarative data files (path decides)
 
@@ -247,6 +255,36 @@ hazard. It is therefore treated as **declarative data with warning scanning**:
 default DIRECT_PUSH, but every `RUN` line deserves a PR on sight. If the change
 adds a `RUN` step, split it: the pure `ENV`/`LABEL`/`WORKDIR` half can go
 direct, the `RUN` half goes through a PR.
+
+#### 3.3a.1a Layer A' — presentation-only sources (path decides)
+
+| File type | Category | Route | Example |
+|---|---|---|---|
+| `*.css`, `*.scss`, `*.less` | 样式 | 直推 | `theme.css`, `_variables.scss`, `legacy.less` |
+
+**Why a stylesheet is a structural path decision, like Layer A.** A stylesheet
+holds no business logic: a parser reads selectors, declarations and at-rules,
+and nothing *runs*. Changing a colour, a spacing token, a media query or a
+whole component block cannot alter program behaviour, so it commits straight to
+the default branch. The category is structural (no statements exist to change),
+not a judgement about what a particular diff did — a full stylesheet rewrite is
+still presentation, so the classifier does not lex it.
+
+**What "前端样式代码" does NOT cover.** The rule is about the *stylesheet*, not
+the component that uses it:
+
+| File | Changed | Route |
+|---|---|---|
+| `App.tsx` | `<div className="hero">`, layout wrappers, prop types only | PR (component logic is code) |
+| `App.tsx` | nothing — styles moved to `app.css` | 直推 for the `.css` file |
+| `theme.css` | `--brand-color: #6f5` | 直推 |
+| `theme.css` | `@import` of a JS module, or `url(javascript:…)` | PR — that is code reaching the browser |
+| `*.sass` | indented syntax | PR — not lexable by the C-like comment profile; treat as code |
+| `*.js` / `*.ts` with a `<style>` block | the style string | PR — the container decides, same argument as a comment inside `.rs` |
+
+The escape hatch is narrow on purpose: a stylesheet that starts *executing*
+something (`@import` of a script, `url()` pulling in a `.js`, a `behavior:`
+binding) has crossed from presentation into code and routes to a PR.
 
 #### 3.3a.2 Layer B — everything else (diff content decides)
 
@@ -428,9 +466,12 @@ with the diff content, the content wins.**
 |---|---|---|
 | `*.md`, `*.mdx`, `*.rst` | 文档 → 直推 | — (Layer A, never overridden) |
 | `*.yml`, `*.yaml`, `*.toml`, `*.json` | 配置 → 直推 | — (Layer A; risky *keys* raise a warning) |
+| `*.css`, `*.scss`, `*.less` | 样式 → 直推 | — (Layer A′; a stylesheet importing/executing JS is a PR) |
+| `*.sass` | 代码 → PR | indented syntax is not lexable; treat as code |
 | `*.rs`, `*.ts`, `*.py`, `*.go` | 代码 → PR | **comment-only or docstring-only edit → 直推** |
 | `*.sh`, `*.py` (script) | 代码 → PR | **comment-only edit → 直推** |
 | `*.rs` (Rust) | 代码 → PR | **`#` is an attribute, not a comment** — `#[derive(Debug)]` is always code |
+| `*.tsx`, `*.jsx` | 代码 → PR | a `<style>` block or inline style is still component code |
 | Binary / generated | PR | never overridden without a deliberate decision |
 
 **Example that breaks intuition:** editing the comment above a function in
@@ -443,8 +484,9 @@ which lines moved.
 - Do NOT add "ready for review" comment
 - Just stop. Wait for maintainer.
 
-For a direct push (docs / config / comment-only) there is no PR — after
-`git push origin master`, just report the commit hash + summary and stop.
+For a direct push (docs / config / frontend-style / comment-only) there is no
+PR — after `git push origin master`, just report the commit hash + summary and
+stop.
 
 ### 3.5 Quick routing check
 
@@ -475,8 +517,9 @@ explains why a mixed change is never direct-pushed.
 11. **Listing branches with `/branches` instead of `/git/refs/heads`** — `/branches` only returns protected/default branches, silently hiding the chore/fix branches you came to audit. Always `gh api repos/<owner>/<repo>/git/refs/heads` for full enumeration. Verified 2026-08-29: deleting "all non-master branches" under `euv-dev/euv` reported only `master` via `/branches`; `/git/refs/heads` exposed 2 leftover branches.
 12. **Cleaning branches on the wrong remote (source vs fork)** — when the user says "clean up branches under org X", they mean source repos (`X/<repo>`), not your personal fork (`<user>/<repo>`). Run `git remote -v` to confirm: `origin` = fork, `upstream` = source. Cross-check the target org on GitHub before deleting. Verified 2026-08-29: deleted a branch on `eastspire/euv-docs` thinking it was the source, but the source was `euv-dev/euv-docs` (no such branch there). `docs-pages/*` has never had a fork concept (single remote), so the "source vs fork" question is moot for that org — `git remote -v` will only show `origin = docs-pages/<repo>`. The pitfall still applies to `euv-dev`/`hyperlane-dev`/`crates-dev`/third-party repos, and to the legacy Track 2 fork layout.
 13. **Resetting `master` to a stale local tip before push** — direct-push repos get commits straight onto `master`, and other sessions often leave working-tree noise (`git status` shows 6+ modified files unrelated to yours). Flow: `git diff --stat` to identify YOUR files, `git add <only-yours>` precisely, then commit. If `master` is ahead of `origin/master` with commits that aren't yours, do NOT push blindly: `git fetch origin master && git rebase origin/master` (or, to take only your own commit: `git checkout master && git reset --hard origin/master && git cherry-pick <your-sha> && git push origin master && git branch -D <branch>`). For conflicts use `git show <sha>:<file> > /tmp/v && cp /tmp/v <file> && git add` to take your version verbatim.
-14. **Routing by repo instead of by change type** — the current rule (§3.3a) is: docs / config / comment-only → direct push; code → PR. Two failure modes to avoid in both directions. (a) Assuming a `.rs` / `.sh` / `.toml` edit always needs a PR — a comment-only or dependency-bump change does not. (b) Assuming "it's just docs" because most of a diff is prose — one changed code line anywhere sends the whole change through a PR (§3.3a.3, 从严). Run `scripts/classify_change.py` rather than eyeballing it.
+14. **Routing by repo instead of by change type** — the current rule (§3.3a) is: docs / config / frontend-style / comment-only → direct push; code → PR. Three failure modes to avoid in both directions. (a) Assuming a `.rs` / `.sh` / `.toml` edit always needs a PR — a comment-only or dependency-bump change does not. (b) Assuming "it's just docs" because most of a diff is prose — one changed code line anywhere sends the whole change through a PR (§3.3a.3, 从严). (c) Reading "frontend style" as "any file in a frontend repo" — only the stylesheet direct-pushes; a `.tsx` with a changed handler is still a PR (§3.3a.1a). Run `scripts/classify_change.py` rather than eyeballing it.
 15. **Per-commit author identity override** — the commit author must come from `~/.gitconfig`'s `[user]` block (`git config --global user.name "eastspire"` + `user.email "root@ltpp.vip"`); never use `git -c user.email=… commit`, `GIT_AUTHOR_EMAIL=… git commit`, or `git commit --amend --author=…` (see §7). Verified 2026-09-27: a `chore: bump version` commit on `euv-dev/euv` was authored as `eastspire@users.noreply.github.com` because of a forgotten `-c` override, which leaks the GitHub-anonymized address into history and doesn't match the canonical identity the user wants on every commit.
+16. **The classifier exited 2 on a brand-new file** — a path that exists on disk but not in the base ref has no `base:path` blob, and `read_blob` raised, aborting the WHOLE run so even the other paths went unclassified. It presented as "the script is broken" when it was one missing guard. Fixed by testing `git cat-file -e <base>:<path>` (does the BASE REF have this path) instead of `git ls-files` (does the INDEX have it) — a *staged* new file is already in `ls-files`, so the ls-files test never fired and the crash survived the first attempt at the fix. Layer A / A′ now reach a verdict before any base read, and a new code file gets an empty pre-image (→ NEEDS_PR) instead of a traceback. Verified 2026-09-27: new `.md` / `.css` / `.yml` / `.rs` all classify correctly and `permissions: write-all` still warns on a brand-new workflow.
 
 ## 5. Quick reference card
 
@@ -488,8 +531,8 @@ body:     wrapped 72, what + why, bullet lists
 footer:   BREAKING CHANGE: | Refs #N | Closes #N | Fixes #N
 PR body:  Summary | Changes | Verification | Notes  (all English)
 
-route:    docs / config / comment-only  → commit on default branch, NO PR
-          any executable code line      → branch + PR, then --squash --delete-branch
+route:    docs / config / frontend-style / comment-only  → default branch, NO PR
+          any executable code line (.js/.ts/.tsx/.rs/.py) → branch + PR, then --squash --delete-branch
           mixed                         → PR (从严), never split
           binary / generated / lockfile → PR
 author:   git config --global user.name  "eastspire"
@@ -508,7 +551,8 @@ check:    python3 ~/.agents/skills/git-standards/scripts/classify_change.py
 | [§3.1](#31-pre-commit-cleanup) | Pre-commit cleanup (`__pycache__`, `.pyc`) |
 | [§3.2](#32-commit) | Commit invocation |
 | [§3.3](#33-push--open-pr) | Full PR flow (code changes) |
-| [§3.3a](#33a-route-by-change-type-not-by-repo--文档配置直推代码走-pr) | **Routing rule** — 文档/配置直推, 代码走 PR; classifier script |
+| [§3.3a](#33a-route-by-change-type-not-by-repo--文档配置直推代码走-pr) | **Routing rule** — 文档/配置/样式直推, 代码走 PR; classifier script |
+| [§3.3a.1a](#33a1a-layer-a--presentation-only-sources-path-decides) | **Layer A′** — `.css`/`.scss`/`.less` frontend style direct-push, and what it excludes |
 | [§3.3b](#33b-why-the-file-extension-cannot-be-the-test) | Why extension is not the test; auxiliary pre-judgment table |
 | [§3.4](#34-after-pr-is-open) | After the PR is open |
 | [§3.5](#35-quick-routing-check) | One-command routing check |

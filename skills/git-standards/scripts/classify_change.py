@@ -9,10 +9,13 @@ which repo it lands in, not by the file extension. User rule (2026-09-27):
     "对于修改文档和修改配置的改动请直接提交不要创建 pr，只有对于代码造成了改动
      才需要创建 pr"
     "修改代码的注释也是直接提交不需要创建 pr"
+    "如果是修改前端样式代码也直接提交，不需要创建 pr"
 
 So a `.rs` file is NOT automatically a code change: a diff that only adds
 `///` doc comments is a documentation change and commits straight to the default
-branch. A diff that touches a statement needs a PR. Extension is a *hint*;
+branch. A diff that touches a statement needs a PR. Neither is a `.css` file
+automatically a style change: the CSS family is presentation (Layer A'), so it
+direct-pushes regardless of how much of it moved. Extension is a *hint*;
 content is the *judge*.
 
 Usage
@@ -43,6 +46,15 @@ Markdown/text, YAML, TOML, JSON, dotfiles, `.gitignore`, `*.svg`, `*.po`.
 These formats have no executable statements: a value is read by a parser, not
 run. Bad values are caught by schema/CI checks, not by eyeballing diff shape.
 
+**Layer A' — presentation-only stylesheets (path allowlist) → DIRECT_PUSH.**
+`.css` / `.scss` / `.less` (user rule 2026-09-27: 「如果是修改前端样式代码也直接
+提交，不需要创建 pr」). A stylesheet holds no business logic — a parser reads
+selectors, declarations and at-rules, and nothing runs — so a change there cannot
+alter behaviour, however large. A PATH decision, same rationale as Layer A: the
+category is structural. Not `.sass` (indentation nesting is not lexable by the
+C-like comment profile) and not a `<style>` block inside `.tsx`/`.jsx` (the
+container decides, same argument that makes a comment inside `.rs` a docs change).
+
 **Layer B — everything else → decided by diff content.**
 Source files, scripts, build files, Dockerfiles, lockfiles, binary blobs. The
 file is lexed on both sides of the diff and every line is tagged
@@ -50,9 +62,15 @@ file is lexed on both sides of the diff and every line is tagged
 removed) is compared per hunk. The change is DIRECT_PUSH only when no changed
 code line exists anywhere in the diff.
 
-Layer A is the only path-based shortcut, and it is deliberately narrow. If a
-file is lexable, its content decides — which is what makes "a comment-only edit
-to a shell script" and "a comment-only edit to a `.rs` file" behave the same.
+Layer A and A' are the only path-based shortcuts, and they are deliberately
+narrow. Anything lexable has its content decide — which is what makes "a
+comment-only edit to a shell script" and "a comment-only edit to a `.rs` file"
+behave the same.
+
+A BRAND-NEW file has no pre-image in the base ref, so it is routed from its
+category alone (a new `.md`/`.css` direct-pushes; a new code file is NEEDS_PR
+because every line in it is new executable code) rather than crashing on a
+missing blob.
 
 Comment detection is string-aware
 ---------------------------------
@@ -350,6 +368,32 @@ def is_declarative(path: str) -> bool:
 
 
 # --------------------------------------------------------------------------
+# Layer A': presentation-only sources (user rule 2026-09-27)
+# --------------------------------------------------------------------------
+# A stylesheet holds no business logic: a parser reads selectors, declarations and
+# at-rules, and nothing *runs*. Changing a colour, a spacing token or a media query
+# cannot alter behaviour, so it commits straight to the default branch like a doc
+# or a config file. User rule:
+#     "如果是修改前端样式代码也直接提交，不需要创建 pr"
+#
+# This is a PATH decision, not a content one, for the same reason Layer A is: the
+# category is structural (no statements exist to change), not a judgement about what
+# a particular diff did. `.css`/`.scss`/`.less` have no comment-and-code structure
+# worth lexing — a full stylesheet rewrite is still presentation.
+#
+# Deliberately NOT included: `.sass` (indentation-sensitive nesting whose comment
+# sigils are not lexable by the C-like profile) and any `.js`/`.ts`/`.jsx`/`.tsx`
+# file, whose `<style>` blocks and inline styles are code by the same argument that
+# makes a comment-only `.rs` edit a docs change: the container decides.
+STYLE_EXTS = {".css", ".scss", ".less"}
+
+
+def is_style(path: str) -> bool:
+    """Layer A': the file is presentation-only (CSS family)."""
+    return Path(path).suffix.lower() in STYLE_EXTS
+
+
+# --------------------------------------------------------------------------
 # strict categories (decided before any content analysis)
 # --------------------------------------------------------------------------
 
@@ -476,6 +520,57 @@ def classify_text(path: str, pre: str, post: str, hunks=None) -> dict:
 MAX_EVIDENCE = 3
 
 
+def _read_worktree(repo: Path, path: str, staged: bool) -> str:
+    """Current content of ``path`` — the index copy when staging, else the worktree.
+
+    Used by the Layer A branches for a file the base ref does not have, so a NEW
+    ``.yml`` still gets its ``permissions:`` / ``pull_request_target`` warning scan
+    instead of silently skipping it because there is no pre-image to diff against.
+    """
+    if staged:
+        try:
+            return git(repo, ["show", ":" + path])
+        except RuntimeError:
+            pass
+    p = repo / path
+    if p.exists():
+        try:
+            return p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+    return ""
+
+
+def _set_declarative(res: dict, path: str, post: str) -> None:
+    """Layer A verdict (DIRECT_PUSH) plus the risky-config key scan.
+
+    Shared by the tracked and brand-new branches: a new ``.md``/``.yaml`` reaches
+    the same verdict as a modified one, and both get their ``pull_request_target``
+    / ``permissions:`` style warnings.
+    """
+    category = "documentation" if Path(path).suffix.lower() in (
+        ".md", ".markdown", ".mdx", ".rst", ".adoc", ".txt", ".text", ".po", ".pot") else "configuration"
+    res.update(category=category, route="DIRECT_PUSH",
+               reason="declarative data file: a parser reads it, nothing executes it. "
+                      "Content is not inspected; risky keys are flagged as warnings below")
+    for line in post.split("\n"):
+        for needle, why in WARN_SUBSTRINGS:
+            if needle in line:
+                msg = "contains %r — %s" % (needle, why)
+                if msg not in res["warnings"]:
+                    res["warnings"].append(msg)
+                break
+
+
+def _set_style(res: dict, path: str) -> None:
+    """Layer A' verdict: a presentation-only source, DIRECT_PUSH (user rule 2026-09-27)."""
+    res.update(category="presentation", route="DIRECT_PUSH",
+               reason="presentation-only stylesheet (%s): a parser reads selectors and "
+                      "declarations, nothing executes, so a change here cannot alter "
+                      "behaviour — commits straight to the default branch per the "
+                      "frontend-style rule" % Path(path).suffix.lower())
+
+
 def classify_file(repo: Path, path: str, base: str, staged: bool) -> dict:
     res = {"path": path, "category": None, "route": None, "reason": "",
            "evidence": [], "warnings": []}
@@ -490,9 +585,38 @@ def classify_file(repo: Path, path: str, base: str, staged: bool) -> dict:
     except RuntimeError:
         tracked = False
 
+    # Layer A / A' first, and they must not touch the base ref. A BRAND-NEW file has
+    # no ``base:path`` blob, so reading one raised and aborted the whole run — which
+    # meant every newly added skill/script/stylesheet in the repo was unclassifiable,
+    # and the only way to learn its route was to fail.
+    #
+    # The test is "does the BASE REF have this path", NOT ``ls-files``: once a new
+    # file is staged it is already listed there, so an ls-files test sees a staged
+    # new file as tracked and falls through to the crash. ``cat-file -e`` answers
+    # the question we actually mean — does this ref contain the path?
+    in_base = False
+    if tracked:
+        try:
+            git(repo, ["cat-file", "-e", base + ":" + path])
+            in_base = True
+        except RuntimeError:
+            in_base = False
+
+    if not in_base and is_declarative(path):
+        _set_declarative(res, path, _read_worktree(repo, path, staged))
+        return res
+
+    if not in_base and is_style(path):
+        _set_style(res, path)
+        return res
+
     if tracked:
         diff_text = git(repo, ["diff", "-U0", "-M"] + (["--cached"] if staged else []) + [base, "--", path])
-        pre = read_blob(repo, base + ":" + path)
+        # A staged new file is in ls-files but absent from the base ref, so there is
+        # no pre-image blob to read. Its pre-content is empty by definition, which is
+        # exactly what makes a brand-new code file a NEEDS_PR (every line it contains
+        # is new executable code).
+        pre = read_blob(repo, base + ":" + path) if in_base else ""
     else:
         diff_text = ""
         pre = ""
@@ -532,18 +656,13 @@ def classify_file(repo: Path, path: str, base: str, staged: bool) -> dict:
 
     # 4. Layer A — declarative data
     if is_declarative(path):
-        category = "documentation" if Path(path).suffix.lower() in (
-            ".md", ".markdown", ".mdx", ".rst", ".adoc", ".txt", ".text", ".po", ".pot") else "configuration"
-        setverdict(category, "DIRECT_PUSH",
-                   "declarative data file: a parser reads it, nothing executes it. "
-                   "Content is not inspected; risky keys are flagged as warnings below")
-        for line in post.split("\n"):
-            for needle, why in WARN_SUBSTRINGS:
-                if needle in line:
-                    msg = "contains %r — %s" % (needle, why)
-                    if msg not in res["warnings"]:
-                        res["warnings"].append(msg)
-                    break
+        _set_declarative(res, path, post)
+        return res
+
+    # 4b. Layer A' — presentation-only stylesheet (also covers a brand-new one,
+    # which returned above before the base blob was read).
+    if is_style(path):
+        _set_style(res, path)
         return res
 
     # 5. Layer B — content decides
