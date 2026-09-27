@@ -685,14 +685,17 @@ PY
 # The companion script `verify_dep_order.py` implements this. Its
 # exit code is the only source of truth for pass/fail. We pipe its
 # stdout through `grep -v` to drop the success-path trailer line
-# (`N files checked, 0 violations`) — that line would otherwise be
-# counted as a hit by the audit wrapper. The actual violation lines
-# (file paths + actual vs expected) MUST flow through unfiltered.
+# (`N files checked, M violations`) — that line would otherwise be
+# counted as a hit by the audit wrapper. The filter matches ANY count, not
+# just `0 violations`: a nonzero summary line is still a summary line, and
+# counting it inflates the reported hit total by exactly 1.
+# The actual violation lines (file paths + actual vs expected) MUST flow
+# through unfiltered.
 # Repos with no Cargo.toml print "No Cargo.toml files found ..." to
 # stderr and exit 2 — also filtered out (not a violation).
 cd {{target}}
 python3 "{{audit_script_dir}}/verify_dep_order.py" "{{target}}" 2>/dev/null \
-    | grep -v -E '^[0-9]+ files checked, 0 violations$|^OK: 0 Cargo.toml'
+    | grep -v -E '^[0-9]+ files checked, [0-9]+ violations?$|^OK: 0 Cargo.toml'
 exit_code=${PIPESTATUS[0]}
 if [ "$exit_code" -ne 0 ]; then
     echo "FAIL: verify_dep_order.py exited $exit_code" >&2
@@ -700,7 +703,114 @@ fi
 exit "$exit_code"
 '''),
 
-    # check 22 — §17 CI never bumps versions / never writes `version =`
+    # check 21b — §13.7 (round 5, 2026-09-27): the elements INSIDE each
+    # dependency's `features = [...]` array follow the same length-first
+    # ordering as the entries around them.
+    ('Cargo.toml features array order (§13.7 round 5)', '''
+# verify_dep_order.py orders dependency ENTRIES within a
+# [dependencies]-style block but does not look inside a dependency's
+# `features = [...]` array. §13.7 applies the same key to both:
+#
+#   * Primary: element length in characters, ascending.
+#   * Secondary: element text, ASCII lexicographic ascending.
+#
+# This is the same (length, key) pair entry_sort_key() returns in
+# verify_dep_order.py, so a features array reads in the same visual
+# rhythm as the block containing it.
+#
+# Scope: dependency features arrays only. `required-features = []` on a
+# `[[bin]]` target is a different key and is skipped. Arrays containing
+# comments are skipped too — re-ordering could silently re-associate a
+# comment with a different element.
+#
+# Summary line filtered for ANY violation count, not just `0 violations`:
+# `run_check` counts stdout LINES as hits, so an unfiltered nonzero summary
+# line would inflate this check's reported hit total by 1.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_features_order.py" "{{target}}" 2>/dev/null \
+    | grep -v -E '^[0-9]+ files checked, [0-9]+ violations?$|^No Cargo.toml files found'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_features_order.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 22b — §L (2026-09-27 user 钦定): lombok accessor attributes
+    # must not spell out `pub`; the macro already defaults to Public.
+    ('no redundant explicit `pub` in lombok accessor attrs (§L)', '''
+# lombok_macros::Visibility derives `Default = Public`
+# (lombok-macros/src/visibility/enum.rs). So an accessor attribute with
+# NO visibility already generates a `pub` accessor:
+#
+#     #[get(pub)]              ->  #[get]              (redundant)
+#     #[get(pub, type(copy))]  ->  #[get(type(copy))]  (redundant)
+#     #[set(pub)]              ->  #[set]              (redundant)
+#     #[get_mut(pub)]          ->  #[get_mut]          (redundant)
+#
+# Narrowing visibility is a different matter and stays:
+#
+#     #[get(pub(crate))]  /  #[get_mut(pub(crate))]   — meaningful, kept
+#
+# The verifier matches a bare `pub` token (not followed by `(`), so every
+# `pub(crate)` / `pub(super)` form passes untouched.
+#
+# The summary line is filtered for ANY count, not just `0 violations`: the
+# `run_check` helper counts stdout LINES as hits, so a trailing
+# "N files checked, M violations" line would be counted as an extra violation
+# and the audit would report M+1 (verified 2026-09-27: 1 real violation was
+# reported as "2 hits"). Only the `0 violations` form was filtered before, so
+# every FAIL was off by one.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_redundant_accessor_pub.py" "{{target}}" 2>/dev/null \
+    | grep -v -E '^[0-9]+ files checked, [0-9]+ violations?$'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_redundant_accessor_pub.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 22c — §L (2026-09-27 user 钦定): a BARE lombok accessor attribute
+    # is redundant, because `#[derive(Data)]` already generates the accessor.
+    # Sibling of check 22b (which catches the redundant explicit `pub`); this one
+    # catches what is left after the `pub` is dropped.
+    ('no bare redundant lombok accessor attrs (§L)', '''
+# `#[derive(Data)]` IS `Getter + GetterMut + Setter`, so a field of a derived
+# struct already gets its accessor. A bare attribute restates that default:
+#
+#     #[derive(Data)]
+#     pub struct S {
+#         #[get]        // redundant — Data already makes get_name()
+#         #[get_mut]    // redundant — Data already makes get_mut_count()
+#         #[set]        // redundant — Data already makes set_flag()
+#         name: String,
+#     }
+#
+# The attribute is KEPT when it carries information the derive cannot infer:
+#
+#     #[get(pub(crate))]      — narrows visibility (§17.14 exposure rule)
+#     #[get(type(copy))]      — changes the return type
+#     #[get(skip)] / #[set(skip)]  — opts the field OUT of generation
+#
+# A file with no accessor-generating derive is skipped entirely (there the
+# attribute would be the only thing creating the accessor, so it is not
+# redundant), and comment lines never count.
+#
+# The summary line is filtered for ANY count, not just `0 violations`:
+# `run_check` counts stdout LINES as hits, so a trailing
+# "N files checked, M violations" would inflate the audit's count to M+1.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_redundant_accessor_attr.py" "{{target}}" 2>/dev/null \
+    | grep -v -E '^[0-9]+ files checked, [0-9]+ violations?$'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_redundant_accessor_attr.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+
+    # check 23 — §17 CI never bumps versions / never writes `version =`
     # (2026-09-26 added). Companion script: verify_ci_no_bump.py.
     ('CI workflow forbids version bumps and version writes (§17)', '''
 # Forbid any `.github/workflows/*.yml` step that bumps a Cargo.toml
@@ -1122,6 +1232,42 @@ python3 "{{audit_script_dir}}/verify_section_blanks.py" "{{target}}" \
 exit_code=${PIPESTATUS[0]}
 if [ "$exit_code" -ne 0 ]; then
     echo "FAIL: verify_section_blanks.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''
+),
+    # check 41 — §6.6 same-root `use` statements must be aggregated into
+    # one brace form (2026-09-27 user directive).  Two or more independent
+    # TOP-LEVEL `use` statements sharing the same root segment (e.g.
+    # `use std::ffi::c_void;` + `use std::path::Path;`) must be written as
+    # `use std::{ffi::c_void, path::Path};`.
+    #
+    # Grouping is PER (root, visibility) — this is measured, not assumed.
+    # rustfmt 1.9.0-stable reorders but never merges (imports_granularity
+    # is nightly-only), and even nightly `imports_granularity = "Crate"`
+    # keeps `pub use std::...` separate from private `use std::...`, i.e.
+    # a visibility split is intentional re-export semantics, not drift.
+    # Cross-visibility pairs are therefore EXEMPT.
+    #
+    # Other exemptions (all fixture-covered): different roots, glob +
+    # non-glob coexistence, fn-body use (§6.4), #[cfg(test)] mod tests,
+    # cfg-gated imports (merging would hoist the attribute onto the whole
+    # group), rootless brace re-export blocks (§6.1 territory), and
+    # same-root pairs separated by another §6.1 stage — §6.1 three-stage
+    # order WINS over §6.6 aggregation (check 27 must not regress).
+    #
+    # Companion script: verify_use_aggregation.py.
+    ('same-root `use` statements aggregated into one brace form (§6.6)', '''
+# Per rust-standards §6.6 (2026-09-27 user directive): same crate/module
+# root imports must be merged into a single brace form.  Grouping is
+# per (root, visibility); §6.1 three-stage order takes precedence.
+# Companion script: verify_use_aggregation.py.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_use_aggregation.py" "{{target}}" \
+    | grep -v -E '^=== use-aggregation:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_use_aggregation.py exited $exit_code" >&2
 fi
 exit "$exit_code"
 '''

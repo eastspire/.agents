@@ -65,8 +65,10 @@ SUFFIX = ".head-baseline"
 VERIFIERS = {
     "verify_doc_comment_format": "doc-comment §2.1/§2.2",
     "verify_no_import_rename": "import rename §6.5",
+    "verify_use_aggregation": "use aggregation §6.6",
     "verify_no_self_field_access": "self.field access §17.3/§17.12",
     "verify_lib_rs_doc_comment": "lib.rs //! block §2.4",
+    "verify_no_redundant_accessor_attr": "bare accessor attr §L",
 }
 
 # Verifiers that only make sense for a specific file name.

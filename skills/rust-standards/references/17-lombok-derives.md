@@ -421,6 +421,94 @@ pub struct ServerData {
 - integration tests(tests/ 目录)是**外部消费者**,只能调 pub accessor——收紧后测试 E0624 即说明该 accessor 原为 pub API,应恢复 pub。
 - 未使用的 pub(crate) accessor 会连锁触发 `field is never read`(accessor 死代码→字段死代码):该字段若无任何读者,要么 accessor 提为 pub(内省 API),要么字段本来就不该存。
 
+### §17.14.1 显式 `pub` 是冗余的,禁止书写(2026-09-27 user 钦定)
+
+§17.14 讲「什么时候**必须**加可见性」;本节是它的反面 —— 「什么时候**不许**加」。
+
+`lombok_macros::Visibility` 的 `Default` 就是 `Public`(`lombok-macros/src/visibility/enum.rs`):
+
+```rust
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum Visibility {
+    #[default]
+    Public,        // ← 默认就是 Public
+    PublicCrate,
+    PublicSuper,
+    Private,
+}
+```
+
+所以**不写可见性 = 生成 pub accessor**,显式写 `pub` 与省略完全等价,只是噪声:
+
+| 冗余(禁止) | 正确写法 |
+|---|---|
+| `#[get(pub)]` | **删掉整行**(见 §17.14.2 —— 裸 `#[get]` 同样禁止) |
+| `#[get(pub, type(copy))]` | `#[get(type(copy))]` |
+| `#[get(type(copy), pub)]` | `#[get(type(copy))]` |
+| `#[set(pub)]` | **删掉整行**(见 §17.14.2 —— 裸 `#[set]` 同样禁止) |
+| `#[get_mut(pub)]` | **删掉整行**(见 §17.14.2 —— 裸 `#[get_mut]` 同样禁止) |
+| `#[get(pub, type(clone))]` | `#[get(type(clone))]` |
+| `#[new(pub)]` / `#[with(pub)]` | 这两个属性**没有可见性槽位**,出现即为错 |
+
+> **⚠️ 删掉 `pub` 不等于合规**: §17.14.1 修完 `#[get(pub)]` 会得到裸 `#[get]`,而**裸 `#[get]` / `#[get_mut]` / `#[set]` 本身也是禁止的**(§17.14.2)—— 因为 `#[derive(Data)]` 已经生成了全部 accessor。正确做法是**整个属性行删掉**,不是只删 `pub`。
+
+**收窄可见性不受影响、必须保留** —— `pub(crate)` / `pub(super)` 是 §17.14 要求的收紧,不是冗余:
+
+```rust
+#[get(pub(crate))]              // 保留
+#[set(pub(crate))]              // 保留
+#[get_mut(pub(crate))]          // 保留
+#[get(pub(crate), type(copy))]  // 保留
+```
+
+**判据一句话**: 裸 `pub` token(后面**不**跟 `(`)是冗余;`pub(...)` 是收窄,合法。
+
+**执行脚本**: `scripts/verify_no_redundant_accessor_pub.py`,audit check 23 调用。Fixture `~/.hermes/cache/scratch/accessor-pub-fixtures/{violating,compliant,tricky}`。实测 euv 仓 111 处、hyperlane 仓 12 处真违规。
+
+
+### §17.14.2 裸 `#[get]` / `#[get_mut]` / `#[set]` 也禁止 —— 默认都是生成的(2026-09-27 user 钦定)
+
+user 原话:「新增校验 `#[get]`,`#[get_mut]` 和 `#[set]` 不应该存在,默认都是生成的」。
+
+§17.14.1 禁的是「显式写 `pub`」;本节禁的是「**连 `pub` 都不写的裸属性**」—— 两者是**同一规则的两级**,不是重复。
+
+`#[derive(Data)]` **就是** `Getter + GetterMut + Setter` 三合一,所以 derived struct 的字段**本来就有** accessor。无参数属性只是把 derive 的默认行为又说一遍:
+
+```rust
+#[derive(Clone, Data, Default, New)]
+pub struct S {
+    #[get]      // ❌ 冗余 —— Data 已经生成 get_name()
+    #[get_mut]  // ❌ 冗余 —— Data 已经生成 get_mut_count()
+    #[set]      // ❌ 冗余 —— Data 已经生成 set_flag()
+    name: String,
+    count: u32,
+    flag: bool,
+}
+```
+
+**正确做法是删掉整个属性行**,不是只删 `pub` —— §17.14.1 修完 `#[get(pub)]` 得到的裸 `#[get]` 依然违规。
+
+**携带真实信息的属性必须保留**(derive 推断不出来的信息):
+
+| 保留 | 原因 |
+|---|---|
+| `#[get(pub(crate))]` / `#[set(pub(crate))]` / `#[get_mut(pub(crate))]` | 收窄可见性(§17.14 暴露面规则) |
+| `#[get(type(copy))]` | 改返回类型 |
+| `#[get(pub(crate), type(copy))]` | 两者都要 |
+| `#[get(skip)]` / `#[set(skip)]` | 把字段**排除出**生成 |
+| `#[set(Into)]` / `#[set(clone)]` | 参数类型转换 |
+
+`#[new(...)]` / `#[with(...)]` **不在本规则范围** —— `New` / `With` 是独立 derive,`Data` 不蕴含,属性永远有意义。
+
+**两个关键豁免**(verifier 实现):
+
+1. **文件内没有任何 accessor 生成型 derive**(`Data` / `Getter` / `GetterMut` / `Setter`)→ 整个文件跳过。那时 `#[get]` 是**唯一**创建 accessor 的东西,不是冗余。
+2. **注释行永不计数** —— `// 这里提到 #[get]` 是文档不是属性。
+
+`get_mut` 在 `get` **之前**匹配(否则 `get` 前缀会吞掉它);`#[getter]` / `#[get_all]` / `#[setter]` 这类更长属性名不误报。
+
+**执行脚本**: `scripts/verify_no_redundant_accessor_attr.py`,audit check 24 调用,并已注册进 `staged_file_gate.py` commit hook。Fixture `~/.hermes/cache/scratch/accessor-attr-fixtures/{compliant,violating,tricky}`。**三仓实测: euv 70 处 / hyperlane 23 处 / ctares 0 处真违规。**
+
 
 ## §17.15 `&mut self` 方法封装:disjoint-borrow 在 target struct 上更干净的解法(2026-09-27)
 
