@@ -77,49 +77,37 @@ echo "============================================================"
 VIOLATIONS=0
 FAILED_FILES=()
 
-# --- .toml files: dep order check (only on .toml files modified) ---
+# --- .toml files: dep order check -------------------------------------
+# verify_dep_order.py only accepts a DIRECTORY, so the whole repo is
+# verified on any .toml change (cheap; < 100ms for typical workspaces).
 TOML_FILES=$(echo "$STAGED_FILES" | grep '\.toml$' || true)
 if [[ -n "$TOML_FILES" ]]; then
-    while IFS= read -r f; do
-        [[ -z "$f" ]] && continue
-        full="$REPO_ROOT/$f"
-        [[ ! -f "$full" ]] && continue
-        # verify_dep_order.py only accepts a directory — verify the
-        # WHOLE repo on any .toml change (cheap; < 100ms for typical)
-        if ! python3 "$SCRIPTS_DIR/verify_dep_order.py" "$REPO_ROOT" >/dev/null 2>&1; then
-            # Diff against HEAD to confirm violation is in OUR staged change
-            if git diff --cached --name-only --diff-filter=ACMR | grep -q "^$f$"; then
-                # Only flag if THIS file's diff introduced the violation.
-                # We can't easily per-file diff Cargo.toml ordering without
-                # parsing; for now report as "dep-order §13.7 on $f".
-                VIOLATIONS=$((VIOLATIONS + 1))
-                FAILED_FILES+=("$f (dep-order §13.7 — run verify_dep_order.py)")
-            fi
-        fi
-    done <<< "$TOML_FILES"
+    if python3 "$SCRIPTS_DIR/verify_dep_order.py" "$REPO_ROOT" >/dev/null 2>&1; then
+        : # compliant
+    else
+        VIOLATIONS=$((VIOLATIONS + 1))
+        FAILED_FILES+=("${TOML_FILES//$'\n'/, } (dep-order §13.7 — run verify_dep_order.py \"$REPO_ROOT\")")
+    fi
 fi
 
-# --- .rs files: doc-comment / import-rename / self-field / lib-rs-doc ---
+# --- .rs files: new-violation gate (staged vs HEAD) -------------------
+# Historical bug (2026-09-27): the loop below invoked each verifier with a
+# FILE path, but every verify_*.py ends main() with `if not root.is_dir():
+# return 2`. That made EVERY commit touching a .rs file fail regardless of
+# content. It also counted working-tree violations, so files carrying legacy
+# debt (lombok-macros/src/generate/fn.rs had 48 pre-existing doc-comment
+# findings) stayed blocked forever.
+#
+# staged_file_gate.py imports the verifiers and diffs violation counts
+# between HEAD and the worktree, so only NEW violations block. It owns the
+# per-file loop now.
 RS_FILES=$(echo "$STAGED_FILES" | grep '\.rs$' || true)
 if [[ -n "$RS_FILES" ]]; then
-    while IFS= read -r f; do
-        [[ -z "$f" ]] && continue
-        full="$REPO_ROOT/$f"
-        [[ ! -f "$full" ]] && continue
-
-        for verifier in \
-            verify_doc_comment_format.py \
-            verify_no_import_rename.py \
-            verify_no_self_field_access.py \
-            verify_lib_rs_doc_comment.py; do
-            if [[ -f "$SCRIPTS_DIR/$verifier" ]]; then
-                if ! python3 "$SCRIPTS_DIR/$verifier" "$full" >/dev/null 2>&1; then
-                    VIOLATIONS=$((VIOLATIONS + 1))
-                    FAILED_FILES+=("$f ($verifier)")
-                fi
-            fi
-        done
-    done <<< "$RS_FILES"
+    # shellcheck disable=SC2086
+    if ! python3 "$SCRIPTS_DIR/staged_file_gate.py" "$REPO_ROOT" --file $RS_FILES; then
+        VIOLATIONS=$((VIOLATIONS + 1))
+        FAILED_FILES+=("staged .rs files (staged_file_gate.py — new violations vs HEAD)")
+    fi
 fi
 
 # -------------------------------------------------------------------

@@ -389,3 +389,70 @@ hyperlane 94 / euv 203 / ctares 91 处违规(request crate 虽经 §17.12 清扫
 ### disjoint borrow 的合规逃生口:解构
 
 accessor 方法每次调用都借用整个 self,**一个表达式里要同时 mut 借用两个字段时 accessor 无法表达**(如 `ReadBuf::new(&mut self.buffer)` + `poll_read(&mut self.stream)`)。合规写法是解构 `let Self { buffer, stream, .. } = self;` 拿到 disjoint 字段借用 —— 解构模式不匹配 `self.<ident>` 语法,不属于"直接字段访问"禁令范围(hyperlane `PooledReader::poll_fill_buf` / `fill_http_from_stream` 的 `Request { headers, host, .. }` 解构实测)。
+
+### Pitfall(method 名以 `get_` 开头 ≠ 豁免 accessor body,2026-09-27 ctares 第二波清扫实测)
+
+`verify_no_self_field_access.py` 用 `fn <name>` 的名字匹配 (`get_*` / `set_*` / `try_get_*` / `new`) 来豁免 accessor body —— 但 `fn get_display_str_cow` 这种**计算型 method**(不返回字段、计算并构造新值)、`fn get_udp_socket_or_local_addr`(读锁 + 内部字段组合)、`fn get_chunk_str`(组装字符串),名字正好以 `get_` 开头 → verifier 误判为 accessor body 豁免 → 直访 `self.field` 不报错,**实际却是业务方法**。
+
+修复 verifier:豁免判断必须按 **(a) fn 签名返回类型与目标字段类型完全一致且 (b) 函数体只有 1~2 行 deref-or-copy** 才豁免。计算型 method(body > 2 行 / 含 format! / 含 if/match 分支)无论命名如何一律不豁免。当前 verifier 仅按名字判断,会有 false-negative —— 跑 verify 报 0 之后**必跑人工 grep**:`grep -nE 'fn (get|set|try_get)_[a-z_]+' --include='*.rs' -A1 <repo> | grep 'self\.[a-z]'` 确认每条以 `get_*` / `set_*` 开头的 fn 体内自访都 ≤ 2 行。
+
+### Pitfall(struct.rs 之外文件里手写 getter/setter 也要按 §17.11 三件套命名,2026-09-27 hyperlane 重构实测)
+
+lombok `derive(Data)` 静默失效时(字段含 `&'a mut T`、已发布 API 兼容性、attribute macro 干扰),手写 accessor 三件套**必须**放 `impl.rs`(不在 struct.rs 关键字文件里),命名严格对齐 Lombok:`get_x()` / `get_x_ref()` / `get_x_mut()` / `set_x()`。命名不一致(例如手写 `pub fn buffer_mut(&mut self) -> &mut [u8]` 与 Lombok `get_buffer_mut` 不一致)→ 调用点混用 grep 检索失效、`self.field` 收敛时容易漏改、§17.14 visibility 检查脚本以 `get_*` / `set_*` 名匹配会漏。
+
+## §17.14 accessor 可见性必须显式匹配字段暴露面(2026-09-27,user 原话:"注意api可见性,默认get和set都是pub的,对于不应该暴露的你应该使用pub crate或者pub super限制")
+
+lombok 宏生成的 accessor **默认 `pub`**。字段不是 pub 的,accessor 必须带显式可见性属性,使生成面 = 字段暴露面,不允许放大:
+
+```rust
+#[derive(Data)]
+pub struct ServerData {
+    #[get(pub(crate))]        // getter 给 crate 内读
+    #[get_mut(pub(crate))]
+    #[set(pub(crate))]        // setter 不暴露给外部
+    pub(super) hook: ServerHookList,
+}
+```
+
+- 属性可组合:`#[get(pub(crate), type(copy))]`(可见性 + 类型转换同 attr,逗号分隔)。
+- 字段本身是 `pub` 的 → pub accessor 不放大暴露面,无需 attr。
+- **既有 pub accessor API 不回收**(semver):已发布 crate 的存量 `pub fn get_x()`(如 ctares jwt-service/color-log/server-manager、udp config/response/panic/context、tcplane ServerData getter)换成宏后保持 pub;只有"新增 accessor"或"原为 pub(crate)/字段直访"的才收紧。
+- 收紧档位选 `pub(crate)`(跨模块可用)而非 `pub(super)`(仅限父模块下),除非确认只在本模块树用。
+- integration tests(tests/ 目录)是**外部消费者**,只能调 pub accessor——收紧后测试 E0624 即说明该 accessor 原为 pub API,应恢复 pub。
+- 未使用的 pub(crate) accessor 会连锁触发 `field is never read`(accessor 死代码→字段死代码):该字段若无任何读者,要么 accessor 提为 pub(内省 API),要么字段本来就不该存。
+
+
+## §17.15 `&mut self` 方法封装:disjoint-borrow 在 target struct 上更干净的解法(2026-09-27)
+
+§17.13 给出"解构"作为 disjoint-borrow 的 escape hatch。但 free-standing fn 拿不到外部 `&mut self`,解构模式不适用。**更干净的替代**:把 free fn 改成 target struct 的 `&mut self` 方法,把 disjoint-borrow 收进 fn 体内部:
+
+```rust
+// before: free fn,4 个参数其中 2 个是同一 struct 的 mut borrow
+pub(crate) async fn get_http_headers<R>(
+    reader: &mut R, config: &RequestConfig,
+    headers: &mut RequestHeaders, host: &mut RequestHost,
+) -> Result<usize, RequestError>
+
+// after: target struct 的方法,内部解构
+impl Request {
+    pub(crate) async fn get_http_headers<R>(
+        &mut self, reader: &mut R, config: &RequestConfig,
+    ) -> Result<usize, RequestError>
+    where R: AsyncBufReadExt + Unpin,
+    {
+        let Request { headers, host, .. } = self;  // 内部解构拿到 disjoint 借用
+        // ...
+    }
+}
+
+// 调用方:从 4 参变成 3 参,且不再需要预先 `let Request { headers, host, .. } = request;`
+request.get_http_headers(&mut reader, &config).await?
+```
+
+收益:
+- 调用方签名变小,无需预先解构
+- 目标 struct 拿到全部 4 个字段的 disjoint borrow,封装性更好
+- 调用方不会再有"我能不能同时 mut borrow 两个字段"的疑问
+- 编译器报错的视线从 caller 移到被调 fn 内,定位更快
+
+适用场景:目标 struct 已经有 `&mut self` 方法语义;free fn 是从更早的"无 self"API 演化过来的过渡形态。check 38 仍 PASS(方法体内 `let Request { headers, host, .. } = self;` 是解构,不是 `self.<ident>` 直访),clippy 仍 0 warning。

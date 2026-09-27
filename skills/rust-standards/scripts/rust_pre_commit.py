@@ -52,20 +52,36 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Auto-fixers — MUST be run BEFORE audit (audit reads post-fix state).
+#
+# SCOPING (2026-09-27): each fixer is a whole-repo REWRITER by default, so
+# every template now carries a `--files` placeholder. `{rs_files}` /
+# `{toml_files}` expand to the caller's changed-file list; when the relevant
+# list is empty the fixer is SKIPPED rather than run unscoped (an empty
+# `--files` with `nargs="*"` means "whole repo" to argparse, which is the
+# exact footgun this scoping exists to prevent).
 AUTO_FIXERS: list[tuple[str, list[str], str]] = [
     (
         "fix_dep_order",
-        ["python3", str(SCRIPT_DIR / "fix_dep_order.py"), "--write", "{root}"],
+        [
+            "python3", str(SCRIPT_DIR / "fix_dep_order.py"),
+            "--write", "{root}", "--files", "{toml_files}",
+        ],
         "Cargo.toml §13.7 round 4 dep-block order (write mode)",
     ),
     (
         "strictify_tests_layout",
-        ["python3", str(SCRIPT_DIR / "strictify_tests_layout.py"), "{root}"],
+        [
+            "python3", str(SCRIPT_DIR / "strictify_tests_layout.py"),
+            "{root}", "--files", "{rs_files}",
+        ],
         "tests/ §14.4 / §14.5 / §14.7 layout + comment cleanup",
     ),
     (
         "doc_comment_audit",
-        ["python3", str(SCRIPT_DIR / "doc_comment_audit.py"), "--root", "{root}"],
+        [
+            "python3", str(SCRIPT_DIR / "doc_comment_audit.py"),
+            "--root", "{root}", "--files", "{rs_files}",
+        ],
         "doc-comment Layer 1 (existence) + Layer 2 (# Arguments / # Returns)",
     ),
 ]
@@ -102,15 +118,135 @@ def _expand(argv: list[str], root: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def phase_fixers(root: Path, skip: bool) -> tuple[bool, list[str]]:
-    """Run all auto-fixers in order.  Each is idempotent — second run
-    is a no-op.  Return (all_ok, [failure_labels])."""
+def _git(root: Path, *args: str) -> tuple[int, str]:
+    result = subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True
+    )
+    return result.returncode, result.stdout
+
+
+def _changed_paths(root: Path, base: str | None) -> list[str]:
+    """Repo-relative paths changed vs `base` (default: origin/HEAD, else HEAD).
+
+    Covers all three ways a change can exist: committed ahead of the base,
+    uncommitted worktree edits, and untracked files. Returns [] only when
+    there is genuinely nothing to fix.
+    """
+    if not (root / ".git").exists():
+        return []
+    diff_base = base
+    if diff_base is None:
+        for candidate in ("origin/HEAD", "origin/main", "origin/master", "HEAD"):
+            code, _ = _git(root, "rev-parse", "--verify", "--quiet", candidate)
+            if code == 0:
+                diff_base = candidate
+                break
+        else:
+            return []
+    paths: set[str] = set()
+
+    # 1. Committed ahead of the base.
+    code, out = _git(root, "diff", "--name-only", f"{diff_base}...HEAD")
+    if code != 0:
+        code, out = _git(root, "diff", "--name-only", diff_base)
+    if code == 0:
+        paths |= {p for p in out.splitlines() if p.strip()}
+
+    # 2. Uncommitted worktree / index changes. Without this, an edit made
+    #    right before running the script (the normal case) is invisible and
+    #    the fixers get an empty scope.
+    for extra in (["--cached"], []):
+        code, out = _git(root, "diff", "--name-only", *extra)
+        if code == 0:
+            paths |= {p for p in out.splitlines() if p.strip()}
+
+    # 3. Untracked files.
+    code, untracked = _git(root, "ls-files", "--others", "--exclude-standard")
+    if code == 0:
+        paths |= {p for p in untracked.splitlines() if p.strip()}
+
+    return sorted(paths)
+
+
+def _sandbox_snapshot(root: Path) -> dict[str, int]:
+    """Cheap fingerprint of every tracked source file, used to detect
+    auto-fixer writes that fall OUTSIDE the caller's change scope."""
+    snapshot: dict[str, int] = {}
+    for path in root.rglob("*.rs"):
+        if "target" in path.parts or ".cargo" in path.parts:
+            continue
+        try:
+            snapshot[str(path)] = path.stat().st_size
+        except OSError:
+            continue
+    return snapshot
+
+
+def _sandbox_drift(before: dict[str, int], after: dict[str, int], scope: set[str]) -> list[str]:
+    """Files whose size changed but that are NOT in `scope`."""
+    drift: list[str] = []
+    for path, size in after.items():
+        if before.get(path) == size:
+            continue
+        if str(Path(path).resolve()) in scope:
+            continue
+        drift.append(path)
+    return sorted(drift)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — auto-fixers
+# ---------------------------------------------------------------------------
+
+
+def phase_fixers(
+    root: Path, skip: bool, scope: list[str] | None
+) -> tuple[bool, list[str], list[str]]:
+    """Run all auto-fixers in order, each scoped to `scope`.
+
+    Returns (all_ok, [failure_labels], [out_of_scope_drift_files]).
+
+    Scope matters: all three fixers are whole-repo REWRITERS by default.
+    `doc_comment_audit.py` in particular inserts doc comments into every
+    tracked .rs file lacking them — running it unscoped on a repo with
+    legacy debt rewrote 84 files / +7165 lines in one invocation
+    (2026-09-27, ctares). With a scope, only the caller's own change is
+    touched.
+    """
     failures: list[str] = []
+    drift: list[str] = []
     if skip:
         print("  Phase 1 [SKIP] auto-fixers (--no-fix)")
-        return True, failures
-    for label, argv_template, desc in AUTO_FIXERS:
+        return True, failures, drift
+
+    rs_scope = [f for f in scope or [] if f.endswith(".rs")]
+    toml_scope = [f for f in scope or [] if f.endswith("Cargo.toml")]
+
+    if scope == []:
+        # Scope computed, nothing changed -> nothing to fix. Running the
+        # fixers here would mean a whole-repo sweep, which is exactly the
+        # 7165-line rewrite this scoping was added to stop.
+        print("  Phase 1 [SKIP] auto-fixers (no changed .rs / Cargo.toml in scope)")
+        return True, failures, drift
+    scope_note = "scoped" if scope else "WHOLE-REPO (--no-scope)"
+
+    for label, template, desc in AUTO_FIXERS:
+        argv_template = list(template)
+        if "{rs_files}" in argv_template:
+            argv_template[argv_template.index("{rs_files}")] = " ".join(rs_scope)
+        if "{toml_files}" in argv_template:
+            argv_template[argv_template.index("{toml_files}")] = " ".join(toml_scope)
         argv = _expand(argv_template, root)
+        # A scoped fixer with an empty file list must not fall back to
+        # whole-repo: drop the flag entirely and skip the run instead.
+        if scope and not (rs_scope or toml_scope):
+            continue
+        if "{rs_files}" in template and not rs_scope:
+            continue
+        if "{toml_files}" in template and not toml_scope:
+            continue
+
+        before = _sandbox_snapshot(root)
         t0 = time.monotonic()
         rc, stdout, stderr = _run(label, argv, root, timeout=120)
         dt = time.monotonic() - t0
@@ -120,10 +256,13 @@ def phase_fixers(root: Path, skip: bool) -> tuple[bool, list[str]]:
             if stderr:
                 print(f"    stderr: {stderr.strip()[:200]}")
         else:
-            # Count how many files the fixer touched (look for "N file(s)"
-            # or similar in stdout).
-            print(f"  Phase 1 [{label:24s}] PASS  ({dt:.1f}s)  {desc}")
-    return not failures, failures
+            after = _sandbox_snapshot(root)
+            scope_resolved = {
+                str((root / f).resolve()) for f in (scope or [])
+            }
+            drift.extend(_sandbox_drift(before, after, scope_resolved))
+            print(f"  Phase 1 [{label:24s}] PASS  ({dt:.1f}s)  {desc} [{scope_note}]")
+    return not failures, failures, drift
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +440,18 @@ def main() -> int:
         default=3,
         help="Max iterations of Phase 1 -> Phase 2 loop (default: 3)",
     )
+    ap.add_argument(
+        "--base",
+        default=None,
+        help=("Git ref the change scope is computed against "
+              "(default: origin/HEAD, else origin/main / origin/master / HEAD)."),
+    )
+    ap.add_argument(
+        "--no-scope",
+        action="store_true",
+        help=("Run auto-fixers over the WHOLE repo (legacy behaviour). The "
+              "auto-fixers are rewriters; use only when a full sweep is wanted."),
+    )
     args = ap.parse_args()
 
     root = Path(args.repo).resolve()
@@ -320,14 +471,40 @@ def main() -> int:
     audit_only = args.audit_only
     skip_fix = args.no_fix
 
+    # Change scope for the auto-fixers.
+    #
+    #   None            -> scope deliberately disabled (--no-scope): whole-repo.
+    #   non-empty list  -> only these files may be rewritten.
+    #   empty list      -> scope was COMPUTED but nothing changed, so the
+    #                      fixers have nothing to do. This is NOT a licence to
+    #                      sweep the repo.
+    scope: list[str] | None
+    if args.no_scope:
+        scope = None
+        print("scope: WHOLE-REPO (--no-scope) — fixers may rewrite any file")
+    else:
+        scope = _changed_paths(root, args.base)
+        if scope:
+            rs_n = len([f for f in scope if f.endswith(".rs")])
+            toml_n = len([f for f in scope if f.endswith("Cargo.toml")])
+            base_label = args.base or "auto"
+            print(f"scope: {len(scope)} changed file(s) vs {base_label} "
+                  f"({rs_n} .rs, {toml_n} Cargo.toml)")
+        else:
+            print("scope: no changes detected — auto-fixers will be SKIPPED")
+            print("       (pass --no-scope to force a whole-repo sweep)")
+    print()
+
     # ------------------------------------------------------------------
     # Phase 1 + Phase 2 loop: fixers may unblock audit findings, so we
     # iterate up to max_iters times.
     # ------------------------------------------------------------------
     if not audit_only:
+        all_drift: list[str] = []
         for iteration in range(1, args.max_iters + 1):
             print(f"--- iteration {iteration}/{args.max_iters} ---")
-            fix_ok, fix_failures = phase_fixers(root, skip_fix)
+            fix_ok, fix_failures, drift = phase_fixers(root, skip_fix, scope)
+            all_drift.extend(drift)
             if not fix_ok:
                 print(f"\nFAIL: Phase 1 fixer(s) failed: {', '.join(fix_failures)}")
                 print(f"  These are script bugs, not code issues — investigate manually.")
@@ -343,6 +520,15 @@ def main() -> int:
                 overall_ok = False
                 break
             print(f"  -> audit has violations; re-running auto-fixers (iteration {iteration + 1})")
+            print()
+        if all_drift:
+            unique = sorted(set(all_drift))
+            print(f"  WARNING: auto-fixers modified {len(unique)} file(s) OUTSIDE the change scope:")
+            for path in unique[:10]:
+                print(f"    - {path}")
+            if len(unique) > 10:
+                print(f"    ... ({len(unique) - 10} more)")
+            print("  Review with `git diff`; revert anything unrelated to your change.")
             print()
         print()
     else:

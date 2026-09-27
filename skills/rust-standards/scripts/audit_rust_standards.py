@@ -1097,6 +1097,36 @@ if [ "$exit_code" -ne 0 ]; then
 fi
 exit "$exit_code"
 '''),
+
+    # check 40 -- 13.8 Cargo.toml top-level section header separation
+    # (2026-09-27 user directive).  User original: "Cargo.toml different
+    # configuration fields need a blank line between".  Every top-level
+    # [section] header in any Cargo.toml MUST be preceded by exactly one
+    # blank line if it follows non-section content.  Applies to all cargo
+    # sections (package / workspace / workspace.dependencies /
+    # dependencies / dev-dependencies / build-dependencies / lib /
+    # bin / profile.dev / profile.release / patch.* / etc.).
+    # Does NOT apply inside dep blocks (that's section 13.7 round-4).
+    #
+    # Companion script: verify_section_blanks.py.  Excludes target/,
+    # ~/.cargo/registry/, and */tmp/test_*/ (crate-cli fixtures).
+    ('Cargo.toml section headers separated by blank line (section 13.8)', '''
+# Per rust-standards section 13.8 (2026-09-27, user directive):
+# "Cargo.toml different configuration fields need a blank line between".
+# Every top-level [section] header in any Cargo.toml MUST be preceded
+# by exactly one blank line if it follows non-section content.
+# Companion script: verify_section_blanks.py.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_section_blanks.py" "{{target}}" \
+    | grep -v -E '^[0-9]+ files checked, [0-9]+ violations$|^No Cargo.toml'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_section_blanks.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''
+),
+
 ]
 
 

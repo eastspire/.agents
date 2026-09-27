@@ -613,11 +613,29 @@ def fix_one(path: str) -> tuple[int, int]:
         doc = _extract_doc_block(new_lines, fn_idx)
         if doc is None:
             continue
-        _, doc_end = doc
+        doc_start, doc_end = doc
         name, _, non_self, ret_str, has_non_unit_return = _fn_signature_full(new_lines, fn_idx)
-        arg_lines, ret_lines = build_full_fn_doc_sections(
-            name, non_self, ret_str if has_non_unit_return else ""
-        )
+
+        # IDEMPOTENCE GUARD (2026-09-27). Without this, Layer 2 appends a
+        # fresh `# Arguments` / `# Returns` block to EVERY fn that already
+        # has one, tripling the doc block on each run — a fixer that is not
+        # idempotent cannot be run safely even when file-scoped. The audit
+        # side (_scan_fn_docs) already checks presence, so the fixer must
+        # too. Only the sections that are genuinely absent are added.
+        doc_text = "\n".join(new_lines[doc_start:doc_end + 1])
+        has_arguments = "# Arguments" in doc_text
+        has_returns = "# Returns" in doc_text
+
+        arg_lines: list[str] = []
+        ret_lines: list[str] = []
+        if non_self and not has_arguments:
+            arg_lines, ret_lines = build_full_fn_doc_sections(
+                name, non_self, ret_str if has_non_unit_return else ""
+            )
+        elif has_non_unit_return and not has_returns:
+            _, ret_lines = build_full_fn_doc_sections(
+                name, non_self, ret_str if has_non_unit_return else ""
+            )
         if not arg_lines and not ret_lines:
             continue
         layer2_count += 1
@@ -631,6 +649,17 @@ def fix_one(path: str) -> tuple[int, int]:
         with open(path, "w") as fh:
             fh.write("\n".join(new_lines) + "\n")
     return len(inserts), layer2_count
+
+
+def _scope_paths(root: str, files: list[str] | None) -> list[str]:
+    """Return the repo-relative .rs paths to process.
+
+    `files=None` means whole-repo scope (explicit CLI opt-in). A non-empty
+    `files` list restricts the run to just those paths.
+    """
+    if files:
+        return [f for f in files if f.endswith(".rs")]
+    return _list_rust_files(root)
 
 
 # ---------- driver ---------------------------------------------------------
@@ -657,9 +686,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="Audit only; do not modify files. Exits non-zero on any violation.")
     ap.add_argument("--root", default=".",
                     help="Project root (defaults to current dir). Affects git ls-files scope.")
+    ap.add_argument("--files", nargs="*", default=None,
+                    help=("Restrict the run to these repo-relative .rs paths. "
+                          "Omit for whole-repo scope (which rewrites every tracked .rs)."))
     args = ap.parse_args(argv)
 
-    rust_files = _list_rust_files(args.root)
+    rust_files = _scope_paths(args.root, args.files)
     if args.check:
         total: dict[str, int] = defaultdict(int)
         files_with_issues = 0

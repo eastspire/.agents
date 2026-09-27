@@ -32,6 +32,8 @@ Run from repo root:
 It rewrites files in place. Re-running on a clean repo exits 0 with all
 counts = 0.
 """
+from __future__ import annotations
+
 import re
 import sys
 from pathlib import Path
@@ -152,12 +154,23 @@ def clean_loose_rs(text: str) -> str:
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        print("Usage: strictify_tests_layout.py <repo_root>")
+        print("Usage: strictify_tests_layout.py <repo_root> [--files ...]")
         return 2
     repo_root = Path(argv[1])
     if not repo_root.is_dir():
         print(f"FAIL: {repo_root} is not a directory")
         return 2
+
+    # Optional file scope. Without it the run is whole-repo (rewrites every
+    # tests/ tree under the root). Callers that only want to touch their own
+    # change should pass the paths they edited.
+    only: set[str] | None = None
+    if "--files" in argv:
+        idx = argv.index("--files")
+        only = {str(Path(p).resolve()) for p in argv[idx + 1:] if p}
+
+    def in_scope(path: Path) -> bool:
+        return only is None or str(path.resolve()) in only
 
     total_sub_mod = total_sub_fn = total_loose = 0
 
@@ -167,7 +180,7 @@ def main(argv: list[str]) -> int:
 
         for sub_dir in sorted(p for p in test_root.iterdir() if p.is_dir()):
             mod_path = sub_dir / "mod.rs"
-            if mod_path.is_file():
+            if mod_path.is_file() and in_scope(mod_path):
                 current = mod_path.read_text()
                 cleaned = normalize_sub_mod_rs(current)
                 if cleaned != current:
@@ -175,7 +188,7 @@ def main(argv: list[str]) -> int:
                     total_sub_mod += 1
 
             fn_path = sub_dir / "fn.rs"
-            if fn_path.is_file():
+            if fn_path.is_file() and in_scope(fn_path):
                 current = fn_path.read_text()
                 cleaned = clean_sub_fn_rs(current)
                 if cleaned != current:
@@ -184,6 +197,8 @@ def main(argv: list[str]) -> int:
 
         for loose in sorted(test_root.glob("*.rs")):
             if loose.name == "mod.rs":
+                continue
+            if not in_scope(loose):
                 continue
             current = loose.read_text()
             cleaned = clean_loose_rs(current)
