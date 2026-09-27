@@ -183,10 +183,62 @@ EOF
   --head <branch>
 ```
 
+### 3.3a `.agents` skill library — commit directly to master, no PR
+
+The `eastspire/.agents` repo is the **skill library itself**, not a downstream
+code project.  It is treated as a personal working repo, not a fork/PR target.
+User preference (recorded across sessions, reaffirmed 2026-09-27):
+**"全部直接提交代码，不需要 pr"** — direct commit to master, no PR.
+
+Default flow for any skill-library change (new skill, SKILL.md edit, fixture
+add, references/ update, script add):
+
+```bash
+cd ~/.agents
+git status --short                              # review what's staged
+git add <only-your-files>                        # stage precisely, no -A
+git commit -m "<type>(<scope>): <subject>" \
+           -m "<body>" \
+           -m "" \
+           -m "<footer>"
+# Rebase first if origin/master has moved
+git fetch origin master
+git rebase origin/master                         # clean rebase expected
+git push origin master                           # direct to master, no PR
+```
+
+The standard PR flow (§3.3) does NOT apply here.  Reasons:
+- The skill library is curated by the user alone — no external reviewer
+  pool to consult
+- Multiple-session overlap (skill changes span several sessions, not one
+  PR's scope) — atomic commits > atomic PRs
+- `gh pr create` would mean maintaining a long-lived `master`-only repo
+  with feature branches that auto-delete, adding ceremony with no review
+  benefit
+
+Pitfall (`.agents`-specific, not in §4): **commit message `🤖 Generated
+with [Hermes](...)` footer is OPTIONAL here, not required**.  §1.5 marks it
+"optional, only when AI-assisted" — every commit here is AI-assisted, but
+the user has not asked for it on `.agents` commits, so omit by default.
+Add it back only if user asks.
+
+Pitfall (`.agents`-specific): **`<scope>` is the skill name**, not a file
+path.  `feat(rust-standards)` not `feat(skills/rust-standards/scripts)`.
+Multiple files in one skill → one commit with `<scope>` = skill name + a
+`## Changes` style bullet list in the body.
+
+Pitfall (`.agents`-specific, 2026-09-27 实测): **`skills/_pending/` is
+intentionally untracked**.  The daily skill-sync cron writes there as a
+staging area; committing it pollutes the repo with intermediate diffs.
+If you see it in `git status` after work, leave it alone.
+
 ### 3.4 After PR is open
 - Do NOT add "ping" or "bump" comments
 - Do NOT add "ready for review" comment
 - Just stop. Wait for maintainer.
+
+For `.agents` direct commits there is no PR — after push, just report the
+commit hash + summary and stop.
 
 ## 4. Common pitfalls
 

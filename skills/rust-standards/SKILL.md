@@ -117,6 +117,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | 我在做什么 | 跳到 |
 |-----------|------|
 | 新建 / 改项目目录结构、9 种关键字文件怎么放 | [01-directory-structure.md](references/01-directory-structure.md) |
+| 加新 rust-standards audit check / 加强现有 rule(Layer N → Layer N+1) | [audit-pipeline.md](references/audit-pipeline.md) — verifier → fixtures → wrapper → rollout 五步走 + 三 fixture 模式 |
 | 写 / 改 doc comment、`lib.rs` 顶部 `//!`、`mod.rs` 为何不能加注释 | [02-documentation.md](references/02-documentation.md) |
 | 设计模块、抽象、trait 边界、blanket impl 放哪 | [03-architecture.md](references/03-architecture.md) |
 | `#[inline(always)]` / `#[inline]` 何时用、WASM 禁标注 | [04-performance.md](references/04-performance.md) |

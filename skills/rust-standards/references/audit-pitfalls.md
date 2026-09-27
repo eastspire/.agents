@@ -2586,3 +2586,7 @@ python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo>
 ```
 
 **euv sweep 节奏建议**(参考 §66 经验):sweep PR 不在 audit 接入同一 commit。先独立 PR 收敛 euv 203 violations(分 crate 或分模块批量),然后 audit 38 自然为 0 PASS。
+
+## §67 §17.11(accessor 集中在 struct.rs) vs check 23(struct.rs 禁 impl)的规则冲突(2026-09-26 第七轮发现)
+
+§17.11 要求手写 accessor "在 struct.rs 的 impl 块顶部集中加入",但 check 23(§1.3 关键字文件纯净)规定 struct.rs column-0 只能有 struct 声明,任何 `impl X {}` 都算违规。两者直接冲突。hyperlane request crate 现状选了 §17.11 一侧(proxy/struct.rs 已有 `impl Proxy {}` 等 20 处基线违规),本轮 check 38 收敛新增 `impl ProxyTunnelStream/SyncProxyTunnelStream` 两个 accessor 块,check 23 hits 20 → 22(+2,同类既有模式)。**待 user 裁决**:要么修 §17.11 改成"accessor 集中放 impl.rs",要么给 check 23 对 accessor-only impl 块开豁免。裁决前新代码跟随所在文件既有模式。

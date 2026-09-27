@@ -381,3 +381,11 @@ pub fn set_field(&mut self, value: FieldType) -> &mut Self {
 ### 三仓收敛基线(2026-09-26 第七轮启动时)
 
 hyperlane 94 / euv 203 / ctares 91 处违规(request crate 虽经 §17.12 清扫,但 AsyncRead/AsyncWrite wrapper 委托与 builder 残留 50 处当时未覆盖 —— 本轮规则文本已含 trait impl)。
+
+### 已知冲突(待裁决)
+
+§17.11 的"accessor 集中在 struct.rs impl 块"与 §1.3/check 23 的"struct.rs 禁 impl 声明"冲突,详见 references/audit-pitfalls.md §67。裁决前跟随所在文件既有模式。
+
+### disjoint borrow 的合规逃生口:解构
+
+accessor 方法每次调用都借用整个 self,**一个表达式里要同时 mut 借用两个字段时 accessor 无法表达**(如 `ReadBuf::new(&mut self.buffer)` + `poll_read(&mut self.stream)`)。合规写法是解构 `let Self { buffer, stream, .. } = self;` 拿到 disjoint 字段借用 —— 解构模式不匹配 `self.<ident>` 语法,不属于"直接字段访问"禁令范围(hyperlane `PooledReader::poll_fill_buf` / `fill_http_from_stream` 的 `Request { headers, host, .. }` 解构实测)。
