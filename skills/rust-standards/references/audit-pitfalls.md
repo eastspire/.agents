@@ -2794,3 +2794,39 @@ hook 不跑 `audit_rust_standards.py` 38 项 audit,只跑 5 个 verifier,选择�
 - check 32 let type annotation:扫整个 impl block 的上下文
 
 这些检查的正确执行点 = `rust_pre_commit.py` Phase 2,不是 hook。
+
+## §84 verify_dep_order.py 跨段空行规则的实现陷阱(2026-09-27)
+
+`check_cross_section_blanks` 实现时踩了 2 个真实坑,记下来给后续维护者。
+
+**坑 1:初版把段内 entry 间空行也算成跨段违规**(已修复)。
+
+初版 naive 实现:`gap = lines[idx+1 : next_idx]`,然后数 `gap` 里所有 blank line 数。这样段内 local/third-party 边界空行(§13.7.3 那个)也被算进去,导致 euv / hyperlane / ctares 三仓报 6+6 violations,虽然文件实际**完全合规**。
+
+正确做法:**段最后一个 entry 之后** 到 **下个段头之前** 才是"跨段"语义。verifier 必须先定位 last_entry_line(`gap` 从尾部向前找 `key_pattern` match,跳过 multi-line `{ ... }` continuation),然后只数 `lines[last_entry_line+1 : next_idx]` 之间的空行。
+
+验证:euv 仓 8 个 Cargo.toml 跑下来 0 violations;新增 violating fixture(0 空行 + 2 空行各 1 hit)= 2 violations,符合预期。
+
+**坑 2:multi-line entry 的尾行识别**。
+
+`key = {` 后接多行 `{ version = "1", features = [...] }`,verifier 从尾部向前找 key_pattern 时,会先看到 `]`,然后 `features = [`,然后 `version = "1",`,然后 `key = {` —— `key = {` 是 entry start line,记为 `last_entry_line`。这样 multi-line entry 的"尾行"对得上,空行计数正确。
+
+如果 last_entry_line 没找到(`gap` 全是 blank),fallback 到 section header 自身(`last_entry_line = idx`),这样空 sections 之间不会有 false positive(但 `cargo new` 不会生成空 section)。
+
+## §85 §13.7.2a 真仓命中数据(2026-09-27)
+
+跑 `python3 verify_dep_order.py` 在三仓:
+
+| 仓 | Cargo.toml 数 | 跨段违规 |
+|---|---|---|
+| euv | 8 | 0(全部合规)|
+| hyperlane | 35 | 0(全部合规)|
+| ctares | (待测)| (待测)|
+
+**euv / hyperlane 完全合规**:这两仓早期 round-3 阶段 user 已经手动整理过文件,跨段都正好 1 空行。新规则没产生 false positive,也不用大规模 sweep PR。
+
+**Fixture**:`~/.hermes/cache/scratch/verifier-fixtures/cross-section-blank-{compliant,violating}`:compliant 0/exit 0(3 段每段之间 1 空行),violating 2/exit 1(0 空行 + 2 空行各 1 hit)。
+
+**audit 接入**:已挂在 `verify_dep_order.py` 末段,自动被 `audit_rust_standards.py` check 21 + `rust_pre_commit.py` Phase 2 + `~/.git-hooks/pre-commit` 全部覆盖 —— **不需要单独改 audit script**,因为 check 21 本来就调 `verify_dep_order.py` 整个脚本。
+
+**Skill §13.7.2a 文档**:`references/13-dependency.md` 新增 §13.7.2 一节(注:不是 §13.7.3,因为它是"跨段规则",与"块内规则 §13.7.3"并列;原 §13.7.2 块内顺序往后挪到 §13.7.3),原 §13.7.3-§13.7.9 全部 +1 编号到 §13.7.4-§13.7.10。inline cross-reference 也同步更新。

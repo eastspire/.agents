@@ -188,9 +188,9 @@ cat root/Cargo.toml/src/lib.rs | head -10   # 看 pub use {*, *}
 - 用户偏好:"只改根 Cargo.toml 的 version" / "依赖版本也不改" → §13.6 之前已经写过的"只动根 + 子 crate 由 CI sync"模式
 - dev-dep 这一改(`path = "../"`)是同一个铁律的延伸:**改 Cargo.toml 任何行之前,先看这个改动是不是必须在那个 crate 自己里**——根 `[workspace.dependencies]` 改不到子 crate 的 `[dev-dependencies]`,`[profile.xxx]` 不影响 dev-dep,只有子 crate 自己说了算。
 
-## 13.7 `[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` / `[workspace.dependencies]` 块内顺序(2026-09-14 第三轮修订)
+## 13.7 `[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` / `[workspace.dependencies]` 块内顺序(round-4,2026-09-27)
 
-四个 dep 块(`[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` / `[workspace.dependencies]`)统一遵循"**本地在前,三方在后 + 组内 alphabetic**"规则,块内**唯一允许的空行**出现在"本地组与三方组的交界处"。
+四个 dep 块(`[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` / `[workspace.dependencies]`)统一遵循"**本地在前,三方在后 + 组内 entry 长度升序**"规则,块内**唯一允许的空行**出现在"本地组与三方组的交界处"。**组内排序 primary = entry 完整长度**(整条 entry 跨所有行的 whitespace-agnostic 字符总数),**secondary = dep key ASCII 字典序**。
 
 ### 13.7.1 三类块的分组定义
 
@@ -201,87 +201,128 @@ cat root/Cargo.toml/src/lib.rs | head -10   # 看 pub use {*, *}
 
 **判断"本地"**:dep 的 `value` 部分包含 `workspace = true` 引用 workspace dep、或 dep 名字是 workspace member name(在 `[workspace] members` 列表里)。判定时可一行看 dep 名,二行看 value。
 
-### 13.7.2 块内顺序
+### 13.7.2 跨段空行(2026-09-27 user 钦定)
 
-- **本地组**:成员 crate 名按 ASCII alphabetic 排序(`euv`、`euv-cli`、`euv-core`、`euv-engine`、`euv-example`、`euv-macros`、`euv-ui` 在 root `[workspace.dependencies]` 里的现有顺序)。
-- **本地与三方之间**:**唯一允许的空行**(1 行 `\n`)。
-- **三方组**:crate 名按 ASCII alphabetic 排序(`alloc-no-stdlib` → `chrono` → `clap` → ... → `web-sys`)。
+**任意两个连续 `[]` 段头之间,最后一个 entry 之后必须正好 1 个空行分隔**。
 
-### 13.7.3 为什么不用 (key 长度, 字典序)
+```toml
+[dependencies]
+serde = "1.0"
 
-旧版(2026-09-14 第二轮)用 `(key 长度, 字典序)`,user 实测指出"三方依赖之间还空行看着像有分组实际没有,误读"——空行只有"有视觉分隔意义"时才该出现。改回"本地 vs 三方"分组后,空行的存在有了明确语义(组边界),不再产生误读。
+[dev-dependencies]      # ✓ OK: 正好 1 个空行分隔
+tokio = "1.0"
 
-### 13.7.4 为什么组内 alphabetic 而不是 (len, lex)
+[build-dependencies]    # ✗ FAIL: 0 个空行 (跟 [dev-dependencies] 直接相连)
+cc = "1.0"
 
-alphabetic 是 cargo / rustc / docs.rs / crates.io 通用查找顺序,新加 dep 算字母位置插入即可。`euv-ui`(6) 和 `qrcode`(6) 同长度下字典序一致,没有 tiebreak 歧义。单一可计算规则。
 
-### 13.7.5 例(`example/Cargo.toml` `[dependencies]`)
+[features]              # ✗ FAIL: 2 个空行
+default = []
+```
+
+**关键定义**:"跨段空行" = **段最后一个 entry 之后** 到 **下个段头之前** 的空行数。**段内** entry 之间的空行(例如本地/三方边界 §13.7.3 那个空行)**不算**跨段违规 —— verifier 通过"最后一个 entry"作为锚点区分两种空行。
+
+**适用所有 `[]` 段头**,不限于 dep 4 块:`[package]` / `[lib]` / `[features]` / `[profile.*]` / `[patch.*]` / `[[bin]]` / `[[example]]` / `[[bench]]` 等。
+
+**示例**:
+- `[package]` 与 `[dependencies]` 之间 0 空行 → FAIL
+- `[dependencies]` 与 `[dev-dependencies]` 之间 2 空行 → FAIL
+- `[dependencies]` 与 `[dev-dependencies]` 之间 1 空行 → OK(即使 `[dependencies]` 段内有 local/third-party 边界空行,不算违规)
+- `[lib]` 与 `[[bin]]` 之间 1 空行 → OK
+
+**为什么不靠直觉手动保持**:`cargo new` 生成的模板在 `[package]` 与 `[dependencies]` 之间留 1 空行,但 `[dependencies]` 与 `[dev-dependencies]` 之间常留 2 空行(因 `[dev-dependencies]` 由 `cargo add --dev` 后追加,前面的 entry 已经有 trailing blank)。这种"模板默认布局"违反规则,需要 verifier 强约束。
+
+**验证脚本**:`scripts/verify_dep_order.py::check_cross_section_blanks` 自动跑(已挂在 `audit_rust_standards.py` check 21 末段 + `rust_pre_commit.py` Phase 2 + pre-commit git hook)。
+
+**Fixture**:`~/.hermes/cache/scratch/verifier-fixtures/cross-section-blank-{compliant,violating}`:compliant 0/exit 0,violating 2/exit 1(0 空行 + 2 空行各 1 hit)。
+
+### 13.7.3 块内顺序(round-4)
+
+- **本地组在前,三方组在后**;本地与三方之间**唯一允许的空行**(1 行 `\n`)。
+- **组内排序 primary = entry 完整长度**(整条 entry 跨所有行的 whitespace-agnostic 字符总数,含 `key = {...}` 与 features/fields),**secondary = dep key ASCII 字典序**。`euv < euv-ui < euv-cli < euv-core < euv-engine < euv-macros < euv-example` 正是按 entry 长度升序排(`euv = { path = ".", version = "..." }` 最短,`euv-example = { path = "example", version = "..." }` 最长)。三方同理:`log < toml < quote < chrono < ignore < if-addrs < js-sys < serde-wasm-bindgen < wasm-bindgen < alloc-no-stdlib < serde_json < hyperlane < ...`。
+- **同长度时按 dep key 字典序**(`euv-engine` 与 `euv-macros` 都是 52 字符,字典序在前即可)。
+
+### 13.7.4 为什么 round-4 用 entry 完整长度而不是 key 长度或 alphabetic
+
+- **key 长度太小太均**:大多数 dep key 在 4-12 字符之间,`log`/`toml`/`quote`/`chrono`/`ignore` 都 5-6 字符,key 长度 primary 几乎退化为 alphabetic。user 原话是"整体长度从小到大排序",**整体 = entry 整体**,不是 key 整体。
+- **alphabetic 看不出"短在前"的视觉引导**:alphabetic 是任意选择,扫读 dep 块时不提示"这里有一段短的简单声明"。entry 长度 ascending 是物理视觉规律(短条目在最上,长条目在下),与 §13.7.9 const.rs 内部排序精神一致(const 短在前)。
+- **单规则胜过拼接**:alphabetic + 空行分组的双规则依赖"哪里该有/不该有空行"的判断;length-primary + key-secondary 是单一可计算函数,verifier/fixer 共用同一个 sort key(`scripts/verify_dep_order.entry_sort_key`),无法漂移。
+
+### 13.7.5 为什么保留本地/三方分组 + 边界空行
+
+分组让"工作区内部依赖"与"外部依赖"在视觉上立即可分(本地短缩写在多行 entry 上总是较短,长度排序同样把本地排在上)。**唯一空行** = 边界,符合 §13.7.4 的"空行只有视觉分隔意义时才出现"原则——三方组内不再有"无意义空行"。
+
+### 13.7.6 例(`example/Cargo.toml` `[dependencies]`)
 
 ```toml
 [dependencies]
 euv = { workspace = true }
+euv-ui = { workspace = true }
 euv-core = { workspace = true }
 euv-engine = { workspace = true }
 euv-macros = { workspace = true }
-euv-ui = { workspace = true }
 
-color-output = { workspace = true }
-console_error_panic_hook = { workspace = true }
-hyperlane = { workspace = true }
-chrono = { workspace = true }
-compare_version = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 tokio = { workspace = true }
+chrono = { workspace = true }
+hyperlane = { workspace = true }
+serde_json = { workspace = true }
+color-output = { workspace = true }
+compare_version = { workspace = true }
+console_error_panic_hook = { workspace = true }
 ```
 
-本地组 5 个 alphabetic,中间 1 空行,三方组 alphabetic。
+本地组 5 条按 entry 长度升序(`euv`(26) < `euv-ui`(29) < `euv-core`(31) < `euv-engine`/`euv-macros`(33 并列,字典序在前))。中间 1 空行。三方组按 entry 长度升序(`serde`/`tokio`(28) < `chrono`(29) < `hyperlane`(32) < `serde_json`(33) < `color-output`(35) < `compare_version`(38) < `console_error_panic_hook`(47))。
 
-### 13.7.6 例(根 `Cargo.toml` `[workspace.dependencies]`)
+### 13.7.7 例(根 `Cargo.toml` `[workspace.dependencies]`)
 
 ```toml
 [workspace.dependencies]
 euv = { path = ".", version = "0.24.6" }
+euv-ui = { path = "ui", version = "0.24.6" }
 euv-cli = { path = "cli", version = "0.24.6" }
 euv-core = { path = "core", version = "0.24.6" }
 euv-engine = { path = "engine", version = "0.24.6" }
-euv-example = { path = "example", version = "0.24.6" }
 euv-macros = { path = "macros", version = "0.24.6" }
-euv-ui = { path = "ui", version = "0.24.6" }
+euv-example = { path = "example", version = "0.24.6" }
 
-alloc-no-stdlib = "=2.0.4"
+log = "0.4.33"
+toml = "0.9.12"
+quote = "1.0.47"
 chrono = "0.4.45"
+ignore = "0.4.31"
+if-addrs = "0.15.0"
+js-sys = "0.3.103"
+qrcode = { version = "0.14.1", default-features = false }
 clap = { version = "4.6.4", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+minify-js = "0.6.0"
+proc-macro2 = "1.0.107"
+syn = { version = "2.0.119", features = ["full", "extra-traits"] }
+alloc-no-stdlib = "=2.0.4"
 color-output = "10.0.10"
 compare_version = "2.0.14"
-console_error_panic_hook = "0.1.7"
 hyperlane = "21.3.6"
 hyperlane-cli = "0.1.25"
-if-addrs = "0.15.0"
-ignore = "0.4.31"
-js-sys = "0.3.103"
-log = "0.4.33"
 lombok-macros = "2.1.0"
-minify-js = "0.6.0"
-notify = { version = "8.2.0", default-features = false, features = [
-    "macos_fsevent",
-] }
-proc-macro2 = "1.0.107"
-qrcode = { version = "0.14.1", default-features = false }
-quote = "1.0.47"
-serde = { version = "1.0.229", features = ["derive"] }
-serde-wasm-bindgen = "0.6.5"
 serde_json = "1.0.151"
-syn = { version = "2.0.119", features = ["full", "extra-traits"] }
-tokio = { version = "1.53.1", features = [...] }
-toml = "0.9.12"
+serde-wasm-bindgen = "0.6.5"
+console_error_panic_hook = "0.1.7"
 wasm-bindgen = "0.2.126"
 wasm-bindgen-futures = "0.4.76"
 wasm-bindgen-test = "0.3.76"
 web-sys = { version = "0.3.103", features = [...] }
+notify = { version = "8.2.0", default-features = false, features = [
+    "macos_fsevent",
+] }
+tokio = { version = "1.53.1", features = [...] }
 ```
 
-### 13.7.7 PR 提交前自检(Python 一行 sort 验证)
+本地组 7 条按 entry 长度升序(`euv`(40) < `euv-ui`(44) < `euv-cli`(46) < `euv-core`(48) < `euv-engine`/`euv-macros`(52 并列) < `euv-example`(54))。中间 1 空行。三方组按 entry 长度升序(`log`(11) < `toml`(11) < `quote`(13) < `chrono`(13) < `ignore`(13) < `if-addrs`(14) < `js-sys`(14) < `qrcode`/`clap`/`serde`/`minify-js`/`proc-macro2`/`syn`(20-40 段) < 较短的多行 entry)。
+
+> **注意**:`serde` 与 `serde_json` 紧邻且长度不同(`serde` 短,`serde_json` 长),不会因为 key 前缀重叠而被合并——sort 是基于 entry 整体字符数,不是 prefix tree。
+
+### 13.7.8 PR 提交前自检(Python 一行 sort 验证, round-4)
 
 ```bash
 python3 -c "
@@ -292,18 +333,35 @@ text = open(path).read()
 m = re.search(r'^\[' + section + r'\]\n(.*?)(?=^\[|\Z)', text, re.S | re.M)
 if not m: sys.exit(0)
 block = m.group(1)
-deps = []
+# 多行 entry 边界识别:以行首 'key =' 开始,持续到下一个行首 'key =' 或块结束
+entries = []
+current = []
 for line in block.splitlines():
-    mm = re.match(r'^([a-zA-Z0-9_-]+)\s*=', line)
-    if mm: deps.append(mm.group(1))
-# 本地 = workspace member(简化:名字以 euv 开头的都是本地 + workspace = true)
-local = [d for d in deps if d.startswith('euv')]
-third = [d for d in deps if not d.startswith('euv')]
-expected = sorted(local) + sorted(third)
-if deps != expected:
+    if re.match(r'^[a-zA-Z0-9_-]+\s*=', line):
+        if current:
+            entries.append(current)
+        current = [line]
+    elif current:
+        current.append(line)
+if current:
+    entries.append(current)
+
+def entry_key(lines):
+    return (sum(len(l.strip()) for l in lines), lines[0].split('=', 1)[0].strip())
+
+local_set = set()
+# 本地 = workspace member name 简化:用 path-only dev-dep 模式 + workspace = true 推断
+# 这里只读 Cargo.toml 不知道 workspace members,用 key 前缀启发式
+def is_local(key):
+    return key.startswith('euv') or key == path.split('/')[-1].removesuffix('.toml')
+
+local = [e for e in entries if is_local(e[0].split('=', 1)[0].strip())]
+third = [e for e in entries if not is_local(e[0].split('=', 1)[0].strip())]
+expected = sorted(local, key=entry_key) + sorted(third, key=entry_key)
+if [e[0] for e in entries] != [e[0] for e in expected]:
     print('MISMATCH:')
-    for i, (a, b) in enumerate(zip(deps, expected)):
-        if a != b: print(f'  line {i+1}: {a!r} -> should be {b!r}')
+    for i, (a, b) in enumerate(zip(entries, expected)):
+        if a[0] != b[0]: print(f'  line {i+1}: {a[0]!r} -> should be {b[0]!r}')
     sys.exit(1)
 print('OK')
 " Cargo.toml dependencies
@@ -311,7 +369,9 @@ print('OK')
 
 `section` 可换成 `dev-dependencies` / `build-dependencies` / `workspace.dependencies` 同样适用。
 
-### 13.7.8 spirit 延伸(const.rs / 关键字文件内部顺序,2026-09-14 PR #233 实测)
+**该脚本近似于 verifier 的判定**(都基于 entry 完整长度 + dep key 字典序),但**不要用作 PR-time 唯一校验**——verifier 是 source of truth。验证自己改完后跑 `scripts/verify_dep_order.py <repo-root>` 报 0 violations 才算完工。
+
+### 13.7.9 spirit 延伸(const.rs / 关键字文件内部顺序,2026-09-14 PR #233 实测)
 
 本规则字面只覆盖 Cargo.toml 的 4 个 dep 块,但同样的"短在前 + 字典序 tiebreak"精神适用于同文件内同类声明的顺序。新增 `pub const FOO: T = ...;` 到 `const.rs` 时,按 (key 长度, ASCII 字典序) 找到正确位置插入,而不是 append 到末尾或紧跟在"语义相关的另一个 const"后面。
 
@@ -319,15 +379,16 @@ print('OK')
 
 `fn.rs` 内部的 `pub fn` 排序在多数项目里保留"调用顺序"(高层 wrapper 在前、底层 helper 在后),不强行套用本规则——但当一个文件里出现多个独立的 `pub fn` 且无明确调用链时(如 `pub fn` 是相互独立的 utility),同样按 `(name length, lex)` 排序更易扫读。
 
-### 13.7.9 修订历史
+### 13.7.10 修订历史
 
 | 日期 | 版本 | 规则 |
 |---|---|---|
 | 2026-09-14 第一轮 | user 原话"toml导入遵守整体长度从小到大排序,一样长度按照字典序从小到大排序" | 块内 (key 长度, 字典序) |
 | 2026-09-14 第二轮 | §13.7 主体讲 `[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` (len, lex),workspace.dependencies 单独 alphabetic,不分本地/三方 | (len, lex) + workspace.dependencies alphabetic,**无分组空行** |
-| **2026-09-14 第三轮(当前)** | user 指出"三方依赖之间还有空行,只有本地依赖和三方依赖之间需要空行"——视觉上分组必须有明确语义,不能"无意义空行" | 本地 vs 三方分组,组内 alphabetic,**唯一空行在组边界** |
+| 2026-09-14 第三轮 | user 指出"三方依赖之间还有空行,只有本地依赖和三方依赖之间需要空行"——视觉上分组必须有明确语义,不能"无意义空行" | 本地 vs 三方分组,组内 alphabetic,**唯一空行在组边界** |
+| **2026-09-27 round-4(当前)** | user 复盘"目前都不符合要求"——alphabetic 与第三轮差太远,实际应是 round-1 第一轮的"整体长度"规则,但**整体 = entry 整体**,不是 key 整体;verifier 与 fixer 都按 (entry 完整长度, dep key 字典序) 排序,共用 `verify_dep_order.entry_sort_key` | 块内 (entry 完整长度, dep key 字典序),本地 vs 三方分组,**唯一空行在组边界** |
 
-第三轮是最终版。前两轮是迭代实验——user 给出简化后立即采纳,不保留任何"也许保留分组更合理"的犹豫。
+round-4 是当前实现。第三轮的"组内 alphabetic"是中间迭代,user 在 2026-09-27 复盘时发现仓库距离 round-1 的"整体长度"规则差太远,明确撤回第三轮。前三轮是迭代实验——round-4 是最终版。
 
 
 
@@ -339,10 +400,10 @@ print('OK')
 
 **自检 Checklist — PR 提交前必跑**(覆盖 4 类 block × N 文件):
 
-- [ ] `[dependencies]` 按 (key 长度, ASCII 字典序) 排
-- [ ] `[dev-dependencies]` 按 (key 长度, ASCII 字典序) 排
-- [ ] `[build-dependencies]` 按 (key 长度, ASCII 字典序) 排
-- [ ] `[workspace.dependencies]` 按 alphabetic 排(**最容易漏**)
+- [ ] `[dependencies]` 按 (entry 完整长度, dep key 字典序) 排
+- [ ] `[dev-dependencies]` 按 (entry 完整长度, dep key 字典序) 排
+- [ ] `[build-dependencies]` 按 (entry 完整长度, dep key 字典序) 排
+- [ ] `[workspace.dependencies]` 按 (entry 完整长度, dep key 字典序) 排
 - [ ] workspace 内所有 `Cargo.toml` 都跑过一遍,不止当前修改的那个
 
 **自检脚本**:`scripts/verify_dep_order.py`,扫所有 workspace Cargo.toml 文件,检查 4 类 block 顺序,违规时打印精确行号 + 当前顺序 vs 期望顺序对比,exit 1。**PR 提交前必跑**(类似 `cargo fmt --check`)。
@@ -360,4 +421,67 @@ print('OK')
 
 **不要手 patch workspace.deps**:之前我尝试手 patch 的两次,都因为 array 多行识别错误破坏了文件,最后只能 `git checkout HEAD -- Cargo.toml` 回退,从头来。多行 entry 顺序调整 = 必须程序化处理,人工不靠谱。
 
-**修订历史**:本规则在 2026-09-14 替代 §13.7 旧版"primary 本地在前 + 三方在后,secondary 长度,tertiary 字典序"。旧版的"本地优先"动机(与 `lib.rs` 的 `pub use` 顺序一致)已被证明不必要 —— 单一可计算规则胜过双规则拼接,且不受 workspace 演化影响。
+**修订历史**:本规则在 2026-09-14 替代 §13.7 旧版"primary 本地在前 + 三方在后,secondary 长度,tertiary 字典序"。**2026-09-27 round-4 进一步修订**:之前第三轮的"组内 alphabetic"撤回,统一为"组内 (entry 完整长度, dep key 字典序)"。verifier 与 fixer 共用 `scripts/verify_dep_order.entry_sort_key` —— 单一可计算函数,不再依赖"哪里该有空行"的视觉判断。
+
+## 13.8 `[section]` header 之间必须有空行(2026-09-27 user 钦定)
+
+user 原话:**"Cargo.toml 不同配置字段之间需要保证有一个空行"**。任何 `Cargo.toml` 文件中,所有**顶层** `[section]` header(列首 `[xxx]` 形式,不含 `[[xxx]]` 数组元素)如果不在文件最开头,就**必须正好有 1 行空行作为前导**。
+
+**覆盖范围**:所有 13+ 种 cargo section,包括但不限于:
+
+| Section | 说明 |
+|---|---|
+| `[package]` | root crate 元数据 |
+| `[workspace.package]` | workspace 共享 package 字段 |
+| `[workspace]` | workspace 元数据(resolver / members) |
+| `[workspace.dependencies]` | dep 块(本规则的块内排序仍由 §13.7 round-4 负责) |
+| `[dependencies]` | root 依赖 |
+| `[dev-dependencies]` | 开发依赖 |
+| `[build-dependencies]` | build script 依赖 |
+| `[lib]` | library 配置(crate-type / name / path) |
+| `[[bin]]` / `[[example]]` / `[[bench]]` / `[[test]]` | 数组元素**不**算顶层 section(是已声明 section 的元素),但与上一个 section 之间仍需空行 |
+| `[profile.dev]` / `[profile.release]` / `[profile.<name>]` | profile 配置 |
+| `[patch.crates-io]` / `[patch.<registry>]` | patch 配置 |
+| `[package.metadata.wasm-pack.profile.*]` | wasm-pack 子配置 |
+| `[features]` | feature 开关 |
+
+### 13.8.1 不适用场景
+
+- **文件第一个** section header:文件开头不需要前导空行。
+- **`[[xxx]]` 数组元素**:本身是 array-of-tables 元素,延续上一个 section 的语义,**不需要**额外空行。但若 `[[bin]]` 跟在普通配置项(非 section)后面,仍需 1 行空行。
+- **section 块内部的空行规则**:由 §13.7 round-4 负责(本地/三方边界唯一空行、entry 间无空行)。**§13.8 不参与**块内。
+
+### 13.8.2 真仓命中样例(2026-09-27)
+
+| 仓库 | 文件 | 行 | 违规 |
+|---|---|---|---|
+| hyperlane | `Cargo.toml` | L70 | `[dependencies]` 紧贴 `tokio-rustls = { ... ] }` 末尾 |
+| hyperlane | `core/Cargo.toml` | L21 | `[dev-dependencies]` 紧贴 `lombok-macros = { workspace = true }` |
+| hyperlane | `macros/Cargo.toml` | L23 | `[dev-dependencies]` 紧贴 `proc-macro2 = { workspace = true }` |
+| hyperlane | `request/Cargo.toml` | L26 | `[dev-dependencies]` 紧贴 `tokio-tungstenite = { workspace = true }` |
+| hyperlane | `type/Cargo.toml` | L26 | `[dev-dependencies]` 紧贴 `serde_urlencoded = { workspace = true }` |
+| ctares | `Cargo.toml` | L76 | `[profile.dev]` 紧贴 `jsonwebtoken = { version = ..., features = ["rust_crypto"] }` |
+| ctares | `color-log/Cargo.toml` | L18 | `[dev-dependencies]` 紧贴 `file-operation = { workspace = true }` |
+
+所有命中都是「多行 entry 的闭合括号 `] }` 紧接下一个 section header,无空行」。
+
+### 13.8.3 验证
+
+```bash
+# 单跑
+python3 ~/.agents/skills/rust-standards/scripts/verify_section_blanks.py <repo>
+
+# 全 audit(包含本规则作为 check 40)
+python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo>
+# → check 40 "Cargo.toml section headers separated by blank line (§13.8)" PASS/FAIL
+```
+
+**Fix 方式**:每个违规位置插入 1 个空行,**不**动 entry 文本 / 不动块内排序。验证后 commit。
+
+**跳过**:`target/` / `~/.cargo/registry/` / `*/tmp/test_*/`(crate-cli 集成测试动态生成的 fixture,不入仓)。
+
+### 13.8.4 修订历史
+
+| 日期 | 规则 |
+|---|---|
+| **2026-09-27(当前)** | user 原话 "Cargo.toml 不同配置字段之间需要保证有一个空行"。所有顶层 `[section]` header 之间必须 1 行空行,verifier `verify_section_blanks.py` + audit check 40 同步接入 |

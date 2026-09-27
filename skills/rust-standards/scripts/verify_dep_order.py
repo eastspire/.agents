@@ -63,7 +63,7 @@ def read_local_crate_names(path: Path) -> set[str]:
     # [workspace] members → look up each member dir's [package] name
     m = re.search(r"members\s*=\s*\[(.*?)\]", text, re.S)
     if m:
-        for d in re.findall(r'"(\w+)"', m.group(1)):
+        for d in re.findall(r'"([^"]+)"', m.group(1)):
             sub = path.parent / d / "Cargo.toml"
             if sub.exists():
                 sn = re.search(
@@ -123,14 +123,25 @@ def parse_block(text: str, section_name: str) -> list[tuple[str, list[str]]]:
     return entries
 
 
+def entry_sort_key(it: dict) -> tuple[int, str]:
+    """Round-4 sort key (rust-standards §13.7).
+
+    Primary: total whitespace-agnostic character count across all lines
+    in the entry (entry 'length' as printed).
+    Secondary: dep key lexicographic order.
+    """
+    total = sum(len(line.strip()) for line in it["lines"])
+    return (total, it["key"])
+
+
 def expected_order_with_blank(entries, local_set):
     local = sorted(
         [(k, l) for k, l in entries if k in local_set],
-        key=lambda kv: kv[0],
+        key=lambda kv: (sum(len(line.strip()) for line in kv[1]), kv[0]),
     )
     third = sorted(
         [(k, l) for k, l in entries if k not in local_set],
-        key=lambda kv: kv[0],
+        key=lambda kv: (sum(len(line.strip()) for line in kv[1]), kv[0]),
     )
     if local and third:
         return local + [("", [""])] + third
@@ -222,8 +233,8 @@ def check_file_v2(path: Path, local_set: set[str]) -> list[str]:
                 actual_seq.append(("", True))
 
         # Build expected sequence
-        local = sorted([it for it in items if it["key"] in local_set], key=lambda x: x["key"])
-        third = sorted([it for it in items if it["key"] not in local_set], key=lambda x: x["key"])
+        local = sorted([it for it in items if it["key"] in local_set], key=entry_sort_key)
+        third = sorted([it for it in items if it["key"] not in local_set], key=entry_sort_key)
         expected_seq: list[tuple[str, bool]] = []
         for it in local:
             expected_seq.append((it["key"], False))
@@ -232,8 +243,12 @@ def check_file_v2(path: Path, local_set: set[str]) -> list[str]:
         for it in third:
             expected_seq.append((it["key"], False))
 
-        # Trim trailing blanks on both sides for comparison tolerance
-        while actual_seq and actual_seq[-1][1]:
+        # Trim trailing blanks on both sides for comparison tolerance.
+        # Do NOT trim a trailing blank on actual_seq if expected_seq has
+        # the local/third-party boundary there — the whole point of the
+        # rule is that the boundary MUST carry a blank. We only trim
+        # blanks that exist past the last expected entry.
+        while actual_seq and actual_seq[-1][1] and len(actual_seq) > len(expected_seq):
             actual_seq.pop()
         while expected_seq and expected_seq[-1][1]:
             expected_seq.pop()
@@ -246,7 +261,89 @@ def check_file_v2(path: Path, local_set: set[str]) -> list[str]:
                 f"  actual:   {actual_repr}\n"
                 f"  expected: {expected_repr}"
             )
-        return violations
+    return violations
+
+
+def check_cross_section_blanks(path: Path) -> list[str]:
+    """§13.7.2a: between any two consecutive `[]` table-header sections,
+    there must be EXACTLY ONE blank line.
+
+    Definition: the "separator" between two sections is the blank lines
+    AFTER the last dep entry of the preceding section and BEFORE the
+    next section header. Internal blanks INSIDE a section (e.g. the
+    local/third-party boundary blank within [dependencies]) do NOT
+    count toward the cross-section separator count.
+
+    Examples of what this catches:
+        [dependencies]
+        foo = "1"            ← VIOLATION: [dev-dependencies] follows with 0 blanks
+        [dev-dependencies]
+
+        [dependencies]
+        foo = "1"
+
+        local = "1"
+                              ← VIOLATION: 2+ blanks after last entry
+
+        local = "1"           ← OK: exactly 1 blank separator
+                              ← OK: internal blank doesn't count
+        third = "1"
+        [dev-dependencies]
+
+    Returns list of violation strings; empty list = OK.
+    """
+    text = path.read_text()
+    if not text:
+        return []
+    lines = text.splitlines()
+    section_pattern = re.compile(r"^\[\s*[A-Za-z0-9_.\-]+\s*\]\s*$")
+    section_indices = []
+    for i, line in enumerate(lines):
+        if section_pattern.match(line):
+            section_indices.append(i)
+    if len(section_indices) < 2:
+        return []
+    violations = []
+    key_pattern = re.compile(r"^[a-zA-Z0-9_-]+\s*=")
+    for n, idx in enumerate(section_indices[:-1]):
+        next_idx = section_indices[n + 1]
+        # The structural separator is the blanks AFTER the last entry
+        # of section `idx`. Internal blanks (between dep entries) don't
+        # count — we skip them by finding the last non-blank line in
+        # lines[idx+1 : next_idx].
+        gap = lines[idx + 1 : next_idx]
+        # Strip trailing entries' continuation lines (multi-line `key = {
+        #   ... }`) by walking from the END: find the last line that is
+        # either an entry start (matches key_pattern) or the section
+        # header itself. Then count blanks strictly after that line.
+        last_entry_line = idx  # the section header itself
+        for j in range(len(gap) - 1, -1, -1):
+            ln = gap[j]
+            if not ln.strip():
+                continue
+            if key_pattern.match(ln):
+                last_entry_line = idx + 1 + j
+                break
+            # Non-empty, non-entry line: could be a continuation of an
+            # entry (e.g. inside a multi-line `{ ... }`). Keep walking
+            # backwards to find the actual entry start.
+            continue
+        # Now count blanks AFTER last_entry_line and BEFORE next_idx
+        sep_lines = lines[last_entry_line + 1 : next_idx]
+        blank_count = sum(1 for ln in sep_lines if not ln.strip())
+        if blank_count != 1:
+            actual_desc = (
+                f"{blank_count} blank lines"
+                if blank_count > 1
+                else "no blank line"
+            )
+            violations.append(
+                f"{path}:{idx + 1}: between {lines[idx].strip()} and "
+                f"{lines[next_idx].strip()} expected exactly 1 blank line "
+                f"after the last entry (rule: §13.7.2a cross-section-blank); "
+                f"got {actual_desc}"
+            )
+    return violations
 
 
 def main() -> int:
@@ -276,11 +373,17 @@ def main() -> int:
 
     total_violations = 0
     for f in files:
+        # Skip crate-cli test fixtures (they live under */tmp/test_*/)
+        if "/tmp/test_" in str(f):
+            continue
         # Sub-crates may also be standalone (publish = false). Use the
         # workspace-wide local set so e.g. example's [dependencies] sees
         # euv / euv-engine / euv-ui as local.
         local_set_for_file = read_local_crate_names(f) | local_set_global
         for v in check_file_v2(f, local_set_for_file):
+            print(v)
+            total_violations += 1
+        for v in check_cross_section_blanks(f):
             print(v)
             total_violations += 1
 
