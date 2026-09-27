@@ -331,7 +331,42 @@ python3 ~/.agents/skills/rust-standards/scripts/rust_pre_commit.py <repo-root>
 python3 rust_pre_commit.py --audit-only <repo>     # 只跑 audit(快速 check)
 python3 rust_pre_commit.py --no-fix <repo>         # 跳过 fixer,只 audit + fmt + clippy + test
 python3 rust_pre_commit.py --max-iters 5 <repo>    # 改 loop 上限(默认 3)
+python3 rust_pre_commit.py --base origin/main <repo>  # 指定变更范围基准 ref
+python3 rust_pre_commit.py --no-scope <repo>       # 强制全仓 sweep(危险,见下)
 ```
+
+#### ⚠️ Phase 1 auto-fixer 的作用域与幂等性(2026-09-27 实测修复)
+
+**三个 auto-fixer 全都是 whole-repo rewriter**,不是 per-file 检查器:
+
+| fixer | 默认行为 | 新增参数 |
+|--------|---------|---------|
+| `fix_dep_order.py` | `find` 全仓每个 `Cargo.toml` 并重写 | `--files <paths...>` |
+| `strictify_tests_layout.py` | 全仓每个 `tests/` 树重写 | `--files <paths...>` |
+| `doc_comment_audit.py` | `git ls-files` 遍历**每个** tracked `.rs` 插注释 | `--files <paths...>` |
+
+`rust_pre_commit.py` 现在默认从 git 计算**变更范围**(三来源并集:`{base}...HEAD` 已提交差异 + index/worktree 未提交改动 + untracked),把该范围作为 `--files` 传下去,相关列表为空则**跳过该 fixer**。实测:ctares 上一行 `attrs` 修复只会碰 1 个文件,而不是原来 84 文件 / **+7165 行**。
+
+**三个必须记住的坑:**
+
+1. **`--files` 空值 = 全仓(argparse footgun)**。`nargs="*"` 的 `--files` 后面不接值时,`args.files == []`,而 `if files:` 判 falsy → 退回全仓。这正是"跳过而非运行"逻辑存在的原因 —— 调用方在列表为空时**不传这个 flag**,绝不能让空列表触发全仓 sweep。
+2. **`doc_comment_audit.py` Layer 2 曾不幂等**(已修)。它无条件给**已有** `# Arguments` / `# Returns` 的 fn 再追加一份完整 block,每次运行 doc 段翻三倍 —— 所以"限定到单文件"也救不了,单文件就能炸出 555 行。现已加幂等 guard:只在 section 真正缺失时补。验证:已合规文件跑 → 0 改动且字节相同;含 1 个未文档化 fn 的文件跑 → +14 行(仅该 fn);再跑一次 → 字节相同。
+3. **空 scope 的语义不是"未确定"而是"无需修"**。原实现把"算出来是空"和"算不出来(非 git 仓)"混为一谈,打印 `WHOLE-REPO (no scope detected)` 但实际又跳过 fixer,自相矛盾。现在三态清晰:`None` = `--no-scope` 显式全仓;非空 list = 限定范围;**空 list = 跳过**。
+
+**越界写入的兜底检测**:每个 fixer 前后各做一次 `.rs` 文件 size 快照,任何"size 变了但不在声明范围内"的文件都会在最终结论前列成 `WARNING: auto-fixers modified N file(s) OUTSIDE the change scope`。这是防 auto-fixer 失控的最后一道网 —— 即使某个 fixer 再出现新的越界行为,也会显式报警而不是静默改 84 个文件。
+
+#### ⚠️ commit hook 必须用 staged_file_gate.py,不能直接调 verify_*(2026-09-27 实测修复)
+
+`~/.git-hooks/pre-commit` 曾把**文件路径**传给四个 `verify_*.py`,但它们 `main()` 都以 `if not root.is_dir(): return 2` 收尾 → **任何 `.rs` commit 永久被阻断**(ctares 装 hook 后一个 `.rs` commit 都没成功过)。且 hook 数的是 working tree 违规总数,带历史债的文件永远过不了 —— 这跟 hook 自己注释里写的"block NEW violations, not legacy debt"直接矛盾。
+
+新增 `scripts/staged_file_gate.py`:用 `importlib` 直接调各 verifier 的 `audit_one()`(绕过 argv 契约),对每个 staged `.rs` 比对 **HEAD vs 工作区**违规数,只报增量。HEAD 内容用 `.head-baseline` 后缀写在**原文件旁边**而非 scratch 目录 —— 因为 `verify_lib_rs_doc_comment` 需向上找 `Cargo.toml` 读 `[package].name`,放 scratch 会读不到;该后缀不匹配 `*.rs`/`lib.rs`,verifier 自己的 `find` 看不见,`finally` 删除。`verify_lib_rs_doc_comment` 只对 `lib.rs` 生效故按文件名跳过。
+
+```bash
+python3 <path>/staged_file_gate.py <repo> --staged      # 用 git staged 列表
+python3 <path>/staged_file_gate.py <repo> --file a.rs b.rs
+```
+
+四向实测:真实 1 行修复(带 48 条历史债)→ exit 0;注入 `use ... as ...` → exit 1 报 +2;新建未跟踪文件 → exit 1;真实 `git commit` 带 hook → exit 0。
 
 **架构说明**:详细 5 步流程 + 双 fixture 模式 + 三仓收敛节奏见 `references/audit-pipeline.md`。
 
@@ -379,14 +414,21 @@ git config --global core.hooksPath ~/.git-hooks
 |---------|------|
 | 当前仓无 `Cargo.toml` | skip(非 Rust 仓) |
 | 没 staged `.rs` / `.toml` | skip |
-| 有 staged Rust 文件 | 跑 `verify_doc_comment_format.py` + `verify_no_import_rename.py` + `verify_no_self_field_access.py` + `verify_lib_rs_doc_comment.py` + `verify_dep_order.py`(按文件) |
+| 有 staged `.rs` | 跑 `staged_file_gate.py` —— 对每个 staged `.rs` 比对 HEAD vs 工作区违规数,只对**新增**违规阻断 |
+| 有 staged `.toml` | 跑 `verify_dep_order.py "$REPO_ROOT"`(该 verifier 只接受目录,故全仓验一次) |
 | 任一失败 | **commit 阻断**,exit 1,输出违规文件 + verifier 名 |
 | 全 PASS | "0 violations — commit allowed",exit 0 |
 
-**关键设计**:**只检查 staged 文件,不扫整个 repo**。这样:
-- 历史违规(`euv` 808 doc-comment / `hyperlane` 26 keyword-file 之类)不会被 hook 拦
+**关键设计**:**只检查 staged 文件,不扫整个 repo,且只算增量**。这样:
+
+- 历史违规(`euv` 808 doc-comment / `hyperlane` 26 keyword-file / ctares `fn.rs` 48 doc-comment 之类)不会被 hook 拦
 - **新引入的违规**才被拦 — 这是 user 的真实意图("挡新错,不挡旧债")
 - 跑得快(< 1 秒,小文件)
+
+**2026-09-27 修的两个 bug —— 修之前 hook 100% 阻断任何 `.rs` commit**:
+
+1. **参数类型错**:旧代码 `python3 verify_*.py "$full"` 传的是**文件路径**,而四个 verifier 的 `main()` 都以 `if not root.is_dir(): return 2` 收尾 → 恒失败。ctares 装 hook 之后一个 `.rs` commit 都没成功过。现 `.rs` 走 `staged_file_gate.py`,它 `importlib` 调各 verifier 的 `audit_one()`,绕开 argv 契约。
+2. **无 baseline**:旧代码数 working tree 违规总数,带历史债的文件(如 `lombok-macros/src/generate/fn.rs` 48 条)永远过不了 —— 与 hook 自己注释里写的"block NEW violations, not legacy debt"直接矛盾。现按 HEAD vs 工作区**差值**判定。
 
 **Escape hatch**:`git commit --no-verify`(NOT 推荐;真要 bypass 前先想清楚为啥 hook 报 FAIL)。SKILL.md 已留 `--no-verify` 注释提示。
 
