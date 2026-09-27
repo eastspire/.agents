@@ -1,6 +1,6 @@
 ---
 name: git-standards
-description: 'Git commit + PR conventions for eastspire/.agents skill repo. **All commits and PR descriptions must be written in English** (no Chinese in commit message subject/body, no Chinese in PR title/body, per user preference). Commit subject MUST follow Conventional Commits v1.0.0: `<type>(<scope>): <subject>` where type ∈ {feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert} and scope is the skill name (singular or short area). Subject ≤ 72 chars, imperative mood, no trailing period, no all-caps. Body wrapped at 72 cols, explain *what* and *why* not *how*, use bullet lists for multi-point changes. PR body uses 4-section template: Summary / Changes / Verification / Notes. Footer MUST include `🤖 Generated with [Hermes](https://...)` line (drop if not applicable). Triggers: git commit, commit message, PR body, PR description, Conventional Commits, git push, gh pr create, commit prefix, commit type, chore:, feat:, fix:, refactor:, docs:, ci:.'
+description: 'Git commit + PR routing + text conventions for eastspire-owned repos. **Route by change type, not by repo: docs / config / comment-only changes commit straight to the default branch with no PR; only changes to executable code need a PR (branch → push → PR → merge → delete branch). A comment-only edit to a `.rs` file is a docs change; a statement change is a code change. Mechanical classifier: `scripts/classify_change.py` (DIRECT_PUSH | NEEDS_PR).** **All commits and PR descriptions must be written in English** (no Chinese in commit message subject/body, no Chinese in PR title/body, per user preference). **All commits must use the canonical author identity from `~/.gitconfig` (`eastspire <root@ltpp.vip>`) — never per-commit `-c user.email=…` or `GIT_AUTHOR_EMAIL` overrides (see §7).** Commit subject MUST follow Conventional Commits v1.0.0: `<type>(<scope>): <subject>` where type ∈ {feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert} and scope is the skill name (singular or short area). Subject ≤ 72 chars, imperative mood, no trailing period, no all-caps. Body wrapped at 72 cols, explain *what* and *why* not *how*, use bullet lists for multi-point changes. PR body uses 4-section template: Summary / Changes / Verification / Notes. Footer MUST include `🤖 Generated with [Hermes](https://...)` line (drop if not applicable). Triggers: git commit, commit message, PR body, PR description, Conventional Commits, git push, gh pr create, commit prefix, commit type, chore:, feat:, fix:, refactor:, docs:, ci:, 文档直推, 代码 PR, 注释改动, 需要 PR 还是直接提交, doc vs code, direct push, delete branch after merge, git author, user.email, user.name, eastspire.'
 license: MIT
 ---
 # git-standards — English-only commit + PR conventions
@@ -159,6 +159,10 @@ git commit -m "<type>(<scope>): <subject>" \
 git commit -F /tmp/commit-msg.txt
 ```
 
+**Author identity must come from the global git config**, never from
+`-c user.name=…` / `-c user.email=…` / `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`
+overrides. See §7.
+
 ### 3.3 Push + open PR
 ```bash
 git push -u origin <branch>
@@ -183,62 +187,278 @@ EOF
   --head <branch>
 ```
 
-### 3.3a `.agents` skill library — commit directly to master, no PR
+### 3.3a Route by change type, not by repo — 文档/配置直推,代码走 PR
 
-The `eastspire/.agents` repo is the **skill library itself**, not a downstream
-code project.  It is treated as a personal working repo, not a fork/PR target.
-User preference (recorded across sessions, reaffirmed 2026-09-27):
-**"全部直接提交代码，不需要 pr"** — direct commit to master, no PR.
+**This is the routing rule. It replaces every older "which repo are we in"
+heuristic, including the retired `.agents`-only exception.** The decision axis
+is *what the diff changes*, not which repository it lands in.
 
-Default flow for any skill-library change (new skill, SKILL.md edit, fixture
-add, references/ update, script add):
+User rule (recorded 2026-09-27):
+
+> **「对于修改文档和修改配置的改动请直接提交不要创建 pr，只有对于代码造成了改动
+> 才需要创建 pr，pr 合并之后分支需要删除」**
+>
+> **「修改代码的注释也是直接提交不需要创建 pr」**
+
+Three obligations:
+
+1. **Docs / config / comment-only changes → commit straight to the default
+   branch.** No feature branch, no PR. Applies to *every* repo, not just
+   `eastspire/.agents`.
+2. **Code changes → full PR cycle** (§3.3 above, plus
+   `gh-pr-creation-workflow`): branch → push → PR → merge.
+3. **After a PR merges, delete the branch** — remote and local
+   (`gh pr merge --squash --delete-branch`, then `git branch -D`). See
+   `gh-pr-creation-workflow` §6 and pitfall 15: `--delete-branch` is a no-op
+   unless the repo has `delete_branch_on_merge=true`.
+
+Note the second quote: **a comment-only edit to a `.rs` file is a docs change.**
+This is why the file extension cannot be the test — see §3.3b.
+
+#### 3.3a.1 Layer A — declarative data files (path decides)
+
+A file whose format has **no executable statements** — a parser reads it,
+nothing runs it. The file cannot decide what the program does; wrong values
+are caught by schema checks and CI, not by eyeballing the diff. These are
+always DIRECT_PUSH, content not inspected.
+
+| File type / path | Category | Route | Example |
+|---|---|---|---|
+| `*.md`, `*.mdx`, `*.rst`, `*.adoc` | 文档 | 直推 | `README.md`, `skills/git-standards/SKILL.md` |
+| `*.txt`, `*.csv`, `*.tsv`, `*.po`, `*.pot` | 文档 | 直推 | `CHANGELOG.txt`, `i18n/messages.pot` |
+| `*.yaml`, `*.yml` | 配置 | 直推 | `.github/workflows/ci.yml`, `mkdocs.yml` |
+| `*.json`, `*.jsonc`, `*.json5` | 配置 | 直推 | `tsconfig.json`, `.eslintrc.json` |
+| `*.toml`, `*.ini`, `*.cfg`, `*.conf`, `*.properties` | 配置 | 直推 | `Cargo.toml`, `rustfmt.toml`, `pyproject.toml` |
+| dotfiles: `.gitignore`, `.gitattributes`, `.gitmodules`, `.editorconfig` | 配置 | 直推 | `.gitignore`, `.gitattributes` |
+| `Dockerfile`, `.terraformrc` (config *as data*) | 配置 | 直推 | `Dockerfile` — see the note below |
+
+**Why `Cargo.toml` / `rustfmt.toml` / `.gitignore` / CI workflows count as
+配置, not 代码.** A dependency version bump or a CI trigger change introduces
+no new statement that the compiler or interpreter runs. It changes the *inputs*
+to a build, which is the definition of configuration. The risky part is
+trust, not code review: `git = "…"` adds a supply-chain dependency,
+`permissions: write-all` widens a token. Those get flagged as **warnings** (§3.3a.4),
+not reclassified as code.
+
+**`Dockerfile` — the one real conflict.** It is named like a build file but
+every meaningful instruction (`RUN`, `COPY`, `ENTRYPOINT`) *is* an executable
+step in the image build, and a `RUN curl … | sh` line is a supply-chain
+hazard. It is therefore treated as **declarative data with warning scanning**:
+default DIRECT_PUSH, but every `RUN` line deserves a PR on sight. If the change
+adds a `RUN` step, split it: the pure `ENV`/`LABEL`/`WORKDIR` half can go
+direct, the `RUN` half goes through a PR.
+
+#### 3.3a.2 Layer B — everything else (diff content decides)
+
+Source files, scripts, build files, lockfiles and binaries are **lexed** and
+judged by their content. The file extension is only a hint at which lexer to
+use.
+
+```
+DIRECT_PUSH  ⇔  改动行全部是注释 / 空行 / 纯空白
+NEEDS_PR     ⇔  改动行中存在任何一行可执行代码
+```
+
+Concretely, per file:
+
+1. Lex the **old** and **new** content, tagging each line `code` / `comment` / `blank`.
+   A `comment` line's **fingerprint is the line with comment characters
+   removed** — for a pure comment line that leaves nothing.
+2. Build each side's **code sequence** = the ordered fingerprints of its
+   `code` lines.
+3. **The two code sequences are identical → DIRECT_PUSH. Any difference → NEEDS_PR.**
+
+Sequence identity is exactly "no changed line of executable code": added,
+removed, edited *and reordered* code all perturb the sequence, while comments,
+blank lines and trailing whitespace never enter it. Comparing whole sequences
+rather than diff hunks is deliberate — git's minimal diff will happily relocate
+an *unchanged* code line across a hunk boundary when only blank lines moved,
+which a hunk-local comparison would misread as a code change.
+
+| Changed content | Route | Real example |
+|---|---|---|
+| Added `///` / `//!` doc comments | 直推 | `/// Adds two numbers.` above an untouched `fn add` |
+| Added `//` or `/* … */` comments | 直推 | a block comment inserted above a `let x = 1;` |
+| Edited an existing comment | 直推 | `let x = 1; // one` → `// the one` |
+| Edited a Python docstring (module/class/def doc) | 直推 | `"""Old."""` → `"""New."""` |
+| Blank lines added/removed/moved; trailing-whitespace or EOF-newline fix | 直推 | re-indenting blank lines between two statements |
+| Changed a statement, signature, macro call, attribute, type | PR | `a + b` → `a - b`; `pub fn f(x: u32)` → `(x: u64)` |
+| Added `#[derive(Debug)]` / `#![no_std]` | PR | attributes are code, not comments |
+| Changed string-literal contents (incl. a URL) | PR | `"https://a.example"` → `"https://b.example"` |
+| Moved a code line (same lines, different order) | PR | reordering statements changes behaviour |
+| Deleted/renamed a code file or a code block | PR | `rm src/old.rs`; `git mv` of a `.rs` file |
+| New executable file (untracked `.rs`, `.sh`, …) | PR | a brand-new `src/new.rs` |
+
+**The `//`-inside-a-string trap.** `"https://example.com"` is **code**, not a
+comment — the string *is* the data the program ships. The lexer is
+string-aware, so a `//` inside a literal never opens a comment, while a `//`
+inside a `///` comment that merely mentions a URL stays a comment. Rust raw
+strings (`r#"a // b"#`), Python docstrings vs. plain triple-quoted strings, and
+per-language comment sigils are all handled: **Rust has no `#` line comments**,
+so `#[derive(Debug)]` is code, whereas `#` opens a comment in Python, shell,
+YAML and TOML.
+
+#### 3.3a.3 Mixed changes — 从严, always NEEDS_PR
+
+If one change touches both comments and code → **NEEDS_PR, no exceptions and
+no splitting.** The rule is asymmetric on purpose:
+
+- A reviewer who is told "docs only" and then finds a statement change stops
+  trusting the label — every subsequent "docs only" claim gets re-verified by
+  hand, which costs more than the PR ceremony ever saved.
+- The cost of a needless PR is one round-trip. The cost of a silent code change
+  shipped direct is an unreviewed behaviour change on the default branch.
+- Splitting a coherent change into "the doc part" and "the code part" produces
+  two commits where the second is unbuildable or the first is a lie.
+
+So: **直推 only when the entire diff is comments, docs, or config.** A single
+changed code line anywhere in the change sends the whole change through a PR.
+
+#### 3.3a.4 Generated files, binaries, and risky config
+
+| Case | Route | Rule |
+|---|---|---|
+| `Cargo.lock`, `package-lock.json`, `yarn.lock`, `go.sum`, `flake.lock` | PR | Generated output, not an authored edit. `git checkout --` it if accidental; if the change is real it belongs inside the PR that caused it. Supply-chain sensitive → a human reads the diff. |
+| `dist/`, `build/`, `target/`, `node_modules/`, `__pycache__/`, `coverage/`, Vercel build output (`docs-pages/pages/`) | PR | Same reasoning, plus §4 pitfall 10: never commit these at all. |
+| Binary / undecodable (`.png`, `.pdf`, `.bin`, images) | PR | The code-vs-docs question is undecidable, so the strict default is a PR. Override *deliberately*; never silently direct-push a diff nobody can read. |
+| `pull_request_target`, `workflow_run`, `write-all`, `permissions:`, `secrets.`, `git =`, `--registry` inside a config file | 直推 + **WARNING** | Flagged, not reclassified. Use `--strict-warnings` to make any warning escalate the verdict to NEEDS_PR. |
+
+#### 3.3a.5 The classifier — `scripts/classify_change.py`
+
+The rules above are implemented, not aspirational:
+
+```bash
+# what am I about to commit?  (exit 0 = DIRECT_PUSH, 1 = NEEDS_PR, 2 = error)
+python3 ~/.agents/skills/git-standards/scripts/classify_change.py
+
+# staged changes only / another repo / any base ref
+python3 ~/.agents/skills/git-standards/scripts/classify_change.py --staged
+python3 ~/.agents/skills/git-standards/scripts/classify_change.py --repo ~/code/euv --base origin/master
+
+# machine-readable, for hooks and agents
+python3 ~/.agents/skills/git-standards/scripts/classify_change.py --json
+
+# the 29 built-in fixtures (no repo required)
+python3 ~/.agents/skills/git-standards/scripts/classify_change.py --self-test
+```
+
+Exit `1` for NEEDS_PR is a **routing signal, not a failure** — read the verdict.
+Environment errors always exit `2`, so a broken run can never be mistaken for
+"safe to direct-push". This is a routing classifier, not an audit verifier: it
+does not follow rust-standards' `audit_one()` contract and has no baseline diff.
+
+Verified output on a scratch repo (2026-09-27):
+
+```
+$ classify_change.py --repo <fixture>
+DIRECT_PUSH configuration .github/workflows/ci.yml
+DIRECT_PUSH configuration Cargo.toml
+DIRECT_PUSH documentation README.md
+DIRECT_PUSH documentation src/lib.rs          # only a /// doc comment added
+VERDICT: DIRECT_PUSH
+
+# a + b -> a - b in src/lib.rs
+NEEDS_PR    code          src/lib.rs
+            evidence: - a + b
+            evidence: + a - b
+VERDICT: NEEDS_PR
+
+# "https://a.example" -> "https://b.example"
+NEEDS_PR    code          src/lib.rs
+            evidence: - let _ = "https://a.example";
+            evidence: + let _ = "https://b.example";
+VERDICT: NEEDS_PR
+```
+
+#### 3.3a.6 Direct-push flow (docs / config / comments)
 
 ```bash
 cd ~/.agents
 git status --short                              # review what's staged
-git add <only-your-files>                        # stage precisely, no -A
+git add <only-your-files>                       # stage precisely, no -A
 git commit -m "<type>(<scope>): <subject>" \
-           -m "<body>" \
-           -m "" \
-           -m "<footer>"
-# Rebase first if origin/master has moved
-git fetch origin master
-git rebase origin/master                         # clean rebase expected
-git push origin master                           # direct to master, no PR
+           -m "<body>" -m "" -m "<footer>"
+git fetch origin master && git rebase origin/master   # if master moved
+git push origin master                          # direct to the default branch, no PR
 ```
 
-The standard PR flow (§3.3) does NOT apply here.  Reasons:
-- The skill library is curated by the user alone — no external reviewer
-  pool to consult
-- Multiple-session overlap (skill changes span several sessions, not one
-  PR's scope) — atomic commits > atomic PRs
-- `gh pr create` would mean maintaining a long-lived `master`-only repo
-  with feature branches that auto-delete, adding ceremony with no review
-  benefit
+`.agents` (the skill library) is the canonical example of this route: every
+`SKILL.md`, `references/`, `scripts/` and frontmatter change lands on `master`
+directly. That is a *consequence* of the rule, not a repo-specific exemption —
+the same flow applies to a `README.md` fix in `euv-dev/euv` or a
+`Cargo.toml` bump in `crates-dev/*`.
 
-Pitfall (`.agents`-specific, not in §4): **commit message `🤖 Generated
-with [Hermes](...)` footer is OPTIONAL here, not required**.  §1.5 marks it
-"optional, only when AI-assisted" — every commit here is AI-assisted, but
-the user has not asked for it on `.agents` commits, so omit by default.
-Add it back only if user asks.
+For code changes the §3.3 PR flow applies unchanged, and the branch is deleted
+after merge (`gh-pr-creation-workflow` §6).
 
-Pitfall (`.agents`-specific): **`<scope>` is the skill name**, not a file
-path.  `feat(rust-standards)` not `feat(skills/rust-standards/scripts)`.
-Multiple files in one skill → one commit with `<scope>` = skill name + a
-`## Changes` style bullet list in the body.
+Pitfalls specific to the direct-push route:
 
-Pitfall (`.agents`-specific, 2026-09-27 实测): **`skills/_pending/` is
-intentionally untracked**.  The daily skill-sync cron writes there as a
-staging area; committing it pollutes the repo with intermediate diffs.
-If you see it in `git status` after work, leave it alone.
+- **The `🤖 Generated with [Hermes](...)` footer is OPTIONAL on direct pushes**,
+  not required (§1.5 marks it optional; omit unless the user asks).
+- **`<scope>` is the skill name**, not a file path. `feat(rust-standards)` not
+  `feat(skills/rust-standards/scripts)`. Several files in one skill → one
+  commit, `<scope>` = skill name, with a `## Changes` bullet list in the body.
+- **`skills/_pending/` is intentionally untracked** — the daily skill-sync cron
+  writes there as a staging area. Leave it alone if it appears in `git status`.
+- **Comment-only does not mean unreviewable.** A comment can rot: a rewritten
+  doc comment that no longer matches the function is worse than no comment.
+  Reading your own diff before pushing is still expected.
+
+### 3.3b Why the file extension cannot be the test
+
+An earlier draft of this rule classified by extension — "`.rs`/`.ts`/`.py` =
+code, `.md`/`.yml` = docs". The user rule **「修改代码的注释也是直接提交不需要创建
+pr」** breaks that axis outright: a `///` doc comment lives *inside* a `.rs` file,
+so an extension test would send every comment improvement through a PR while the
+user has explicitly said it should not be.
+
+Hence the two-layer design:
+
+- **Layer A (§3.3a.1)** — a *format* allowlist for files that contain no
+  executable statements at all. Here the path genuinely is the right question,
+  because there is nothing to lex.
+- **Layer B (§3.3a.2)** — everything else is decided by lexing the diff's actual
+  content. The extension only selects the lexer (Rust `//` vs. Python `#` vs.
+  HTML `<!-- -->`).
+
+The auxiliary table below is for **fast pre-judgment only. When it conflicts
+with the diff content, the content wins.**
+
+| Looks like | Usual verdict | But the content can override |
+|---|---|---|
+| `*.md`, `*.mdx`, `*.rst` | 文档 → 直推 | — (Layer A, never overridden) |
+| `*.yml`, `*.yaml`, `*.toml`, `*.json` | 配置 → 直推 | — (Layer A; risky *keys* raise a warning) |
+| `*.rs`, `*.ts`, `*.py`, `*.go` | 代码 → PR | **comment-only or docstring-only edit → 直推** |
+| `*.sh`, `*.py` (script) | 代码 → PR | **comment-only edit → 直推** |
+| `*.rs` (Rust) | 代码 → PR | **`#` is an attribute, not a comment** — `#[derive(Debug)]` is always code |
+| Binary / generated | PR | never overridden without a deliberate decision |
+
+**Example that breaks intuition:** editing the comment above a function in
+`euv-engine/src/vdom/mod.rs` is a 直推. Changing the `match` arm under that
+comment is a PR. Same file, same `git diff`, different route — decided purely by
+which lines moved.
 
 ### 3.4 After PR is open
 - Do NOT add "ping" or "bump" comments
 - Do NOT add "ready for review" comment
 - Just stop. Wait for maintainer.
 
-For `.agents` direct commits there is no PR — after push, just report the
-commit hash + summary and stop.
+For a direct push (docs / config / comment-only) there is no PR — after
+`git push origin master`, just report the commit hash + summary and stop.
+
+### 3.5 Quick routing check
+
+Before committing, one command answers "PR or direct push?":
+
+```bash
+python3 ~/.agents/skills/git-standards/scripts/classify_change.py
+# VERDICT: DIRECT_PUSH  → commit on the default branch, no PR
+# VERDICT: NEEDS_PR     → branch → push → PR → merge --squash --delete-branch
+```
+
+When the script and your reading disagree, the **script wins** and you should
+find out why you misread the diff — §3.3a.2 has the full rule, and §3.3a.3
+explains why a mixed change is never direct-pushed.
 
 ## 4. Common pitfalls
 
@@ -253,8 +473,10 @@ commit hash + summary and stop.
 9. **Auto-merging own PR or merging before user confirms** — never `gh pr merge --auto`, `gh pr merge --squash`, or `enablePullRequestAutoMerge` unless the user has just typed "merge it" / "go ahead". Default = "stop at green, wait for the user". If the next task depends on this PR landing, report and wait — do not unstick yourself by force-merging. Full rule in `skills/github/github-pr-workflow/SKILL.md` §6.
 10. **Committing `__pycache__/` or `.pyc`** — clean before every commit; the `.gitignore` should already cover these but stale files leak through.
 11. **Listing branches with `/branches` instead of `/git/refs/heads`** — `/branches` only returns protected/default branches, silently hiding the chore/fix branches you came to audit. Always `gh api repos/<owner>/<repo>/git/refs/heads` for full enumeration. Verified 2026-08-29: deleting "all non-master branches" under `euv-dev/euv` reported only `master` via `/branches`; `/git/refs/heads` exposed 2 leftover branches.
-12. **Cleaning branches on the wrong remote (source vs fork)** — when the user says "clean up branches under org X", they mean source repos (`X/<repo>`), not your personal fork (`<user>/<repo>`). Run `git remote -v` to confirm: `origin` = fork, `upstream` = source. Cross-check the target org on GitHub before deleting. Verified 2026-08-29: deleted a branch on `eastspire/euv-docs` thinking it was the source, but the source was `euv-dev/euv-docs` (no such branch there). **(2026-09-05)** `docs-pages/*` no longer has a fork concept (Track 1 direct-push), so the "source vs fork" question is moot for that org — `git remote -v` will only show `origin = docs-pages/<repo>`. The pitfall still applies to `euv-dev`/`hyperlane-dev`/`crates-dev`/third-party repos where fork layout is normal.
-13. **Resetting `master` to a stale local tip before push** — the user's personal skill repos (`eastspire/.agents`) get direct-pushed to master. Other sessions often leave working-tree noise (`git status` shows 6+ modified files unrelated to yours). Flow: `git diff --stat` to identify YOUR files, `git add <only-yours>` precisely, commit on a feature branch, then `git checkout master && git reset --hard origin/master && git cherry-pick <your-sha> && git push origin master && git branch -D <branch>`. For conflicts use `git show <sha>:<file> > /tmp/v && cp /tmp/v <file> && git add` to take your version verbatim.
+12. **Cleaning branches on the wrong remote (source vs fork)** — when the user says "clean up branches under org X", they mean source repos (`X/<repo>`), not your personal fork (`<user>/<repo>`). Run `git remote -v` to confirm: `origin` = fork, `upstream` = source. Cross-check the target org on GitHub before deleting. Verified 2026-08-29: deleted a branch on `eastspire/euv-docs` thinking it was the source, but the source was `euv-dev/euv-docs` (no such branch there). `docs-pages/*` has never had a fork concept (single remote), so the "source vs fork" question is moot for that org — `git remote -v` will only show `origin = docs-pages/<repo>`. The pitfall still applies to `euv-dev`/`hyperlane-dev`/`crates-dev`/third-party repos, and to the legacy Track 2 fork layout.
+13. **Resetting `master` to a stale local tip before push** — direct-push repos get commits straight onto `master`, and other sessions often leave working-tree noise (`git status` shows 6+ modified files unrelated to yours). Flow: `git diff --stat` to identify YOUR files, `git add <only-yours>` precisely, then commit. If `master` is ahead of `origin/master` with commits that aren't yours, do NOT push blindly: `git fetch origin master && git rebase origin/master` (or, to take only your own commit: `git checkout master && git reset --hard origin/master && git cherry-pick <your-sha> && git push origin master && git branch -D <branch>`). For conflicts use `git show <sha>:<file> > /tmp/v && cp /tmp/v <file> && git add` to take your version verbatim.
+14. **Routing by repo instead of by change type** — the current rule (§3.3a) is: docs / config / comment-only → direct push; code → PR. Two failure modes to avoid in both directions. (a) Assuming a `.rs` / `.sh` / `.toml` edit always needs a PR — a comment-only or dependency-bump change does not. (b) Assuming "it's just docs" because most of a diff is prose — one changed code line anywhere sends the whole change through a PR (§3.3a.3, 从严). Run `scripts/classify_change.py` rather than eyeballing it.
+15. **Per-commit author identity override** — the commit author must come from `~/.gitconfig`'s `[user]` block (`git config --global user.name "eastspire"` + `user.email "root@ltpp.vip"`); never use `git -c user.email=… commit`, `GIT_AUTHOR_EMAIL=… git commit`, or `git commit --amend --author=…` (see §7). Verified 2026-09-27: a `chore: bump version` commit on `euv-dev/euv` was authored as `eastspire@users.noreply.github.com` because of a forgotten `-c` override, which leaks the GitHub-anonymized address into history and doesn't match the canonical identity the user wants on every commit.
 
 ## 5. Quick reference card
 
@@ -265,4 +487,131 @@ subject:  ≤ 72 chars, imperative, lowercase first, no trailing period
 body:     wrapped 72, what + why, bullet lists
 footer:   BREAKING CHANGE: | Refs #N | Closes #N | Fixes #N
 PR body:  Summary | Changes | Verification | Notes  (all English)
+
+route:    docs / config / comment-only  → commit on default branch, NO PR
+          any executable code line      → branch + PR, then --squash --delete-branch
+          mixed                         → PR (从严), never split
+          binary / generated / lockfile → PR
+author:   git config --global user.name  "eastspire"
+          git config --global user.email "root@ltpp.vip"
+          (never -c user.email=… or GIT_AUTHOR_EMAIL, see §7)
+check:    python3 ~/.agents/skills/git-standards/scripts/classify_change.py
+          → VERDICT: DIRECT_PUSH | NEEDS_PR   (exit 0 / 1 / 2=error)
 ```
+
+## 6. Index
+
+| Section | Topic |
+|---|---|
+| [§1](#1-commit-message-format-conventional-commits-v100) | Commit message format (Conventional Commits v1.0.0), `type` / `scope` / subject / body / footer |
+| [§2](#2-pr-title--body-english-only) | PR title + 4-section body template, English-only |
+| [§3.1](#31-pre-commit-cleanup) | Pre-commit cleanup (`__pycache__`, `.pyc`) |
+| [§3.2](#32-commit) | Commit invocation |
+| [§3.3](#33-push--open-pr) | Full PR flow (code changes) |
+| [§3.3a](#33a-route-by-change-type-not-by-repo--文档配置直推代码走-pr) | **Routing rule** — 文档/配置直推, 代码走 PR; classifier script |
+| [§3.3b](#33b-why-the-file-extension-cannot-be-the-test) | Why extension is not the test; auxiliary pre-judgment table |
+| [§3.4](#34-after-pr-is-open) | After the PR is open |
+| [§3.5](#35-quick-routing-check) | One-command routing check |
+| [§4](#4-common-pitfalls) | Common pitfalls (15) |
+| [§5](#5-quick-reference-card) | Quick reference card |
+| [§6](#6-index) | This index |
+| [§7](#7-author-identity-global-config-only) | Author identity — global config only, no per-commit override |
+
+Companion skills: `gh-pr-creation-workflow` (branch/PR/merge/delete-branch
+end-to-end, and the change-type dimension of the decision tree),
+`github/github-pr-workflow` (PR lifecycle and merge approval rules).
+
+## 7. Author identity — global config only, no per-commit override
+
+**Every commit in every eastspire-owned repo MUST have the canonical author
+identity set in the global git config.** Per-commit overrides (flag or env)
+are forbidden — the identity must come from one source so it can never drift.
+
+User rule (recorded 2026-09-27):
+
+> **「代码的提交用户只能是eastspire，邮箱是root@ltpp.vip ,设置到全局git」**
+>
+> **「所有仓库的代码提交用户必须是我自己」**
+
+### 7.1 The required identity
+
+```
+name:     eastspire
+email:    root@ltpp.vip
+scope:    --global (in ~/.gitconfig)
+```
+
+### 7.2 One-time setup on a fresh machine
+
+```bash
+git config --global user.name  "eastspire"
+git config --global user.email "root@ltpp.vip"
+```
+
+Verify:
+
+```bash
+git config --global --get user.name    # eastspire
+git config --global --get user.email   # root@ltpp.vip
+```
+
+The values land in `~/.gitconfig` under `[user]`. Repo-local overrides
+(`git config user.email …` inside a single repo) are not used in the
+eastspire-owned namespaces; if one ever appears it is treated as a defect.
+
+### 7.3 Forbidden — and the historical accident to avoid
+
+| Form | Result | Why forbidden |
+|---|---|---|
+| `git commit -c user.email="eastspire@users.noreply.github.com"` | writes the **GitHub noreply** address into the commit | The noreply address is GitHub's web-only anonymized alias; it doesn't reach the user, doesn't match `~/.gitconfig`, and doesn't survive `git config --global` resets. |
+| `GIT_AUTHOR_EMAIL=… GIT_COMMITTER_EMAIL=… git commit` | writes whatever env var says | One env var on one shell session drifts the identity from the global config; the next session silently goes back, leaving mixed authorship across a single PR. |
+| `git -c user.email=… commit && git -c user.email=… push` | same as above, just via flag | Same drift problem. |
+| `gh repo clone` then commit without `git config` set up first | inherits system / no identity | Fails with `Please tell me who you are`, or commits as the OS user (`sqs@hostname`). |
+
+### 7.4 Verification before any push
+
+The commit author is decided when `git commit` runs, not when `git push` runs,
+so verification goes after the commit but before the push:
+
+```bash
+git log -1 --format='%an <%ae>'
+# MUST print exactly:  eastspire <root@ltpp.vip>
+
+# machine-readable for hooks / CI
+git log -1 --format='%an%n%ae' | { read an; read ae;
+  [ "$an" = "eastspire" ] && [ "$ae" = "root@ltpp.vip" ] || {
+    echo "REJECT: commit author is $an <$ae>, expected eastspire <root@ltpp.vip>" >&2; exit 1;
+  }
+}
+```
+
+A commit that fails this check must be rewritten before push. The cheapest
+rewrite is `git commit --amend --reset-author` (only works if the env / flags
+were the only thing setting the wrong identity — i.e. `GIT_AUTHOR_EMAIL` was
+not set, and the override flags were not used). If the override was via
+`-c user.email=…` you must redo the commit without the flag.
+
+### 7.5 What about merge commits?
+
+Merge commits opened via `gh pr merge --squash` keep the **author** of the
+squashed commits and set the **committer** to the GitHub user who clicked
+merge — that is correct and expected. The identity rule applies to the
+**author** field, which is the human who wrote the change. The committer
+field is the GitHub machine identity, and remains `eastspire <root@ltpp.vip>`
+in practice because the user is the one clicking merge.
+
+### 7.6 What about bot commits?
+
+Bot commits (`github-actions[bot]`, `dependabot[bot]`) are not subject to this
+rule — they are machine identities set by the workflow itself, never by a
+human override of `--global` config. CI workflows that commit on behalf of
+the user must use the global identity too (`git config user.name
+"github-actions[bot]"` *inside the workflow step* is fine; the workflow is
+not the user).
+
+### 7.7 What if the global config is missing?
+
+Stop and ask the user. Do NOT silently set it from the agent's own knowledge —
+the user may want a different identity for a specific period of work, and the
+choice belongs to them. The verify-then-commit script in §7.4 will fail loudly
+when the identity is unset; that failure is a feature, not a bug.
