@@ -1,6 +1,6 @@
 ---
 name: git-standards
-description: 'Git commit + PR routing + text conventions for eastspire-owned repos. **Route by change type, not by repo: docs / config / frontend-style / comment-only changes commit straight to the default branch with no PR; only changes to executable code need a PR (branch → push → PR → merge → delete branch). `.css`/`.scss`/`.less` count as presentation, but a `.tsx` with a changed handler is still a PR. A comment-only edit to a `.rs` file is a docs change; a statement change is a code change. Mechanical classifier: `scripts/classify_change.py` (DIRECT_PUSH | NEEDS_PR).** **All commits and PR descriptions must be written in English** (no Chinese in commit message subject/body, no Chinese in PR title/body, per user preference). **All commits must use the canonical author identity from `~/.gitconfig` (`eastspire <root@ltpp.vip>`) — never per-commit `-c user.email=…` or `GIT_AUTHOR_EMAIL` overrides (see §7).** Commit subject MUST follow Conventional Commits v1.0.0: `<type>(<scope>): <subject>` where type ∈ {feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert} and scope is the skill name (singular or short area). Subject ≤ 72 chars, imperative mood, no trailing period, no all-caps. Body wrapped at 72 cols, explain *what* and *why* not *how*, use bullet lists for multi-point changes. PR body uses 4-section template: Summary / Changes / Verification / Notes. Footer MUST include `🤖 Generated with [Hermes](https://...)` line (drop if not applicable). Triggers: git commit, commit message, PR body, PR description, Conventional Commits, git push, gh pr create, commit prefix, commit type, chore:, feat:, fix:, refactor:, docs:, ci:, 文档直推, 代码 PR, 注释改动, 前端样式, css 提交, 需要 PR 还是直接提交, doc vs code, direct push, delete branch after merge, git author, user.email, user.name, eastspire.'
+description: 'Git commit + PR routing + text conventions for eastspire-owned repos. **Route by change type, not by repo: docs / config / frontend-style / comment-only changes commit straight to the default branch with no PR; only changes to executable code need a PR (branch → push → PR → merge → delete branch). `.css`/`.scss`/`.less` count as presentation, but a `.tsx` with a changed handler is still a PR. A comment-only edit to a `.rs` file is a docs change; a statement change is a code change. Mechanical classifier: `scripts/classify_change.py` (DIRECT_PUSH | NEEDS_PR).** **All commits and PR descriptions must be written in English** (no Chinese in commit message subject/body, no Chinese in PR title/body, per user preference) — enforced by `scripts/verify_english_only.py`, not just documented. **All commits must use the canonical author identity from `~/.gitconfig` (`eastspire <root@ltpp.vip>`, the personal account of the user) — never a bot identity, never per-commit `-c user.email=…` or `GIT_AUTHOR_EMAIL` overrides (see §7).** Commit subject MUST follow Conventional Commits v1.0.0: `<type>(<scope>): <subject>` where type ∈ {feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert} and scope is the skill name (singular or short area). Subject ≤ 72 chars, imperative mood, no trailing period, no all-caps. Body wrapped at 72 cols, explain *what* and *why* not *how*, use bullet lists for multi-point changes. PR body uses 4-section template: Summary / Changes / Verification / Notes. Footer MUST include `🤖 Generated with [Hermes](https://...)` line (drop if not applicable). Triggers: git commit, commit message, PR body, PR description, Conventional Commits, git push, gh pr create, commit prefix, commit type, chore:, feat:, fix:, refactor:, docs:, ci:, 文档直推, 代码 PR, 注释改动, 前端样式, css 提交, 需要 PR 还是直接提交, doc vs code, direct push, delete branch after merge, git author, user.email, user.name, eastspire.'
 license: MIT
 ---
 # git-standards — English-only commit + PR conventions
@@ -193,10 +193,46 @@ EOF
 heuristic, including the retired `.agents`-only exception.** The decision axis
 is *what the diff changes*, not which repository it lands in.
 
+User rule (recorded 2026-09-28, verbatim):
+
+> **「更新 git 提交规范,创建 pr,标题和说明必须要纯英文。commit 作者必须要是我的
+> 个人账号,提交信息必须要英文,符合 git 提交规范」**
+
+Three obligations, all enforceable by `scripts/verify_english_only.py`:
+
+1. **Every commit message and every PR title/body is pure English** — no CJK
+   characters, no bilingual mix, not even inside a quoted user instruction.
+   This is the obligation most often broken: §1/§2/§7 already stated it in
+   prose, and prose stops nothing. The two PRs opened earlier on 2026-09-28
+   had Chinese titles and Chinese bodies *while the rule was already in the
+   file*. Verify before `git commit` and before `gh pr create`.
+2. **The commit author is the user's personal account** — `eastspire <
+   root@ltpp.vip>`, read from `~/.gitconfig` (§7). Never a bot identity, never
+   a GitHub-anonymized `noreply` address, never a per-commit override.
+3. **Commit messages follow Conventional Commits** — `<type>(<scope>): <subject>`,
+   subject ≤ 72 chars, imperative, no trailing period (§1).
+
+```bash
+# before git commit
+python3 scripts/verify_english_only.py commit /tmp/msg.txt --repo .
+# before gh pr create
+python3 scripts/verify_english_only.py pr "<title>" --body /tmp/pr-body.md
+```
+
+`pr` mode also enforces the 4-section template (§2.2), so one call covers both
+the language rule and the shape rule. Exit 0 = clean, 1 = violations (one per
+line, each naming the line/column and the character), 2 = usage error.
+
+A rule written only in prose is not a rule, it is a suggestion. The
+`rust-standards` skill hit the same lesson twice in one session: §17.14.1's
+table named `#[get]` as the fix for `#[get(pub)]`, which the next check
+forbids. Here the fix is that the language rule has a script, not a
+paragraph.
+
 User rule (recorded 2026-09-27):
 
 > **「对于修改文档和修改配置的改动请直接提交不要创建 pr，只有对于代码造成了改动
-> 才需要创建 pr，pr 合并之后分支需要删除」**
+> 才需要创建 pr,pr 合并之后分支需要删除」**
 >
 > **「修改代码的注释也是直接提交不需要创建 pr」**
 >
@@ -520,6 +556,9 @@ explains why a mixed change is never direct-pushed.
 14. **Routing by repo instead of by change type** — the current rule (§3.3a) is: docs / config / frontend-style / comment-only → direct push; code → PR. Three failure modes to avoid in both directions. (a) Assuming a `.rs` / `.sh` / `.toml` edit always needs a PR — a comment-only or dependency-bump change does not. (b) Assuming "it's just docs" because most of a diff is prose — one changed code line anywhere sends the whole change through a PR (§3.3a.3, 从严). (c) Reading "frontend style" as "any file in a frontend repo" — only the stylesheet direct-pushes; a `.tsx` with a changed handler is still a PR (§3.3a.1a). Run `scripts/classify_change.py` rather than eyeballing it.
 15. **Per-commit author identity override** — the commit author must come from `~/.gitconfig`'s `[user]` block (`git config --global user.name "eastspire"` + `user.email "root@ltpp.vip"`); never use `git -c user.email=… commit`, `GIT_AUTHOR_EMAIL=… git commit`, or `git commit --amend --author=…` (see §7). Verified 2026-09-27: a `chore: bump version` commit on `euv-dev/euv` was authored as `eastspire@users.noreply.github.com` because of a forgotten `-c` override, which leaks the GitHub-anonymized address into history and doesn't match the canonical identity the user wants on every commit.
 16. **The classifier exited 2 on a brand-new file** — a path that exists on disk but not in the base ref has no `base:path` blob, and `read_blob` raised, aborting the WHOLE run so even the other paths went unclassified. It presented as "the script is broken" when it was one missing guard. Fixed by testing `git cat-file -e <base>:<path>` (does the BASE REF have this path) instead of `git ls-files` (does the INDEX have it) — a *staged* new file is already in `ls-files`, so the ls-files test never fired and the crash survived the first attempt at the fix. Layer A / A′ now reach a verdict before any base read, and a new code file gets an empty pre-image (→ NEEDS_PR) instead of a traceback. Verified 2026-09-27: new `.md` / `.css` / `.yml` / `.rs` all classify correctly and `permissions: write-all` still warns on a brand-new workflow.
+17. **Commit or PR text contained Chinese** — §1/§2/§7 stated the English-only rule in prose, and two PRs were still opened with Chinese titles and Chinese bodies on 2026-09-28. The failure is not ignorance of the rule — the rule was already in the file when it was violated. Prose has no enforcement point. Run `python3 scripts/verify_english_only.py commit <msgfile> --repo .` before committing and `… pr "<title>" --body <file>` before `gh pr create`; exit 1 is the gate. Quoting the user's Chinese instruction verbatim in the commit body is still a violation — translate it.
+18. **`bash` reported `exit=126` on a fresh script** — "Permission denied", which reads like a path or filesystem problem but is a missing execute bit. `chmod +x scripts/verify_english_only.py` before first use.
+19. **A fixture loop reported every case as passing** — the loop body ended in `echo "… exit=$?"`, so `$?` was the status of `basename` (or whatever ran last), not the verifier under test. Capture it immediately: `v …; rc=$?`. This one nearly shipped a verifier believed to be broken (it wasn't) and, in the other direction, would have shipped one believed to be working when it wasn't.
 
 ## 5. Quick reference card
 
@@ -548,6 +587,7 @@ check:    python3 ~/.agents/skills/git-standards/scripts/classify_change.py
 |---|---|
 | [§1](#1-commit-message-format-conventional-commits-v100) | Commit message format (Conventional Commits v1.0.0), `type` / `scope` / subject / body / footer |
 | [§2](#2-pr-title--body-english-only) | PR title + 4-section body template, English-only |
+| [§3.3a](#33a-route-by-change-type-not-by-repo--文档配置直推代码走-pr) | **Routing rule** — 文档/配置/样式直推, 代码走 PR; classifier script; **the 2026-09-28 English-only + personal-account rule** and `scripts/verify_english_only.py` |
 | [§3.1](#31-pre-commit-cleanup) | Pre-commit cleanup (`__pycache__`, `.pyc`) |
 | [§3.2](#32-commit) | Commit invocation |
 | [§3.3](#33-push--open-pr) | Full PR flow (code changes) |
