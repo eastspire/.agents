@@ -84,7 +84,44 @@ def _list_rs_files(root: Path) -> list[Path]:
          "-not", "-path", "*/.cargo/registry/*"],
         capture_output=True, text=True,
     )
-    return [Path(line) for line in r.stdout.strip().splitlines() if line]
+    files = [Path(line) for line in r.stdout.strip().splitlines() if line]
+    files = [f for f in files
+             if not any(part in SKIP_DIR_NAMES for part in f.parts)]
+    return _drop_git_ignored(files, root)
+
+SKIP_DIR_NAMES = {
+    ".git", "target", ".cargo", "node_modules", ".venv", "venv", "dist",
+    "build", ".idea", ".vscode", "out",
+}
+
+
+def _drop_git_ignored(files, root):
+    """Return only the files git does not ignore (2026-09-28).
+
+    A path listed in a .gitignore is not part of the project: `crate-cli/tmp/`
+    holds scratch crates from local runs, and scanning them reported
+    violations in files no commit can ever contain.  One batched call.
+    """
+    if not files:
+        return files
+    try:
+        rels = [str(f.relative_to(root)) for f in files]
+    except ValueError:
+        return files
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "--stdin"],
+            input="\n".join(rels) + "\n",
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return files
+    if r.returncode not in (0, 1):
+        return files
+    ignored = {line.strip() for line in r.stdout.splitlines() if line.strip()}
+    return [f for f, rel in zip(files, rels) if rel not in ignored]
+
+
 
 
 def _scan_test_regions(lines: list[str]) -> set[int]:

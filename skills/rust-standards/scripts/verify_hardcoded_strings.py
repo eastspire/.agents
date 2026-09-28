@@ -138,6 +138,21 @@ EXTERN_ABI_LINE = re.compile(
 )
 
 
+CFG_PREDICATE = re.compile(
+    r"""cfg(?:_attr)?!\s*\(\s*
+        [A-Za-z_][A-Za-z0-9_]*\s*=\s*        # the predicate key
+        (?P<val>"[^"]*")                      # the literal, captured
+    """,
+    re.VERBOSE,
+)
+
+
+SKIP_DIR_NAMES = {
+    ".git", "target", ".cargo", "node_modules", ".venv", "venv", "dist",
+    "build", ".idea", ".vscode", "out",
+}
+
+
 def _list_rs_files(root: Path) -> list[Path]:
     r = subprocess.run(
         ["find", str(root), "-name", "*.rs",
@@ -145,7 +160,37 @@ def _list_rs_files(root: Path) -> list[Path]:
          "-not", "-path", "*/.cargo/registry/*"],
         capture_output=True, text=True,
     )
-    return [Path(line) for line in r.stdout.strip().splitlines() if line]
+    files = [Path(line) for line in r.stdout.strip().splitlines() if line]
+    files = [f for f in files
+             if not any(part in SKIP_DIR_NAMES for part in f.parts)]
+    # Drop anything git already ignores (2026-09-28).  A path listed in a
+    # .gitignore is by definition not part of the project: `crate-cli/tmp/`
+    # holds 25 scratch crates from `crate fmt` runs, and scanning them
+    # reported violations in files no commit can ever contain.
+    return _drop_git_ignored(files, root)
+
+
+def _drop_git_ignored(files: list[Path], root: Path) -> list[Path]:
+    """Return the files git does not ignore.  One batched check-ignore call."""
+    if not files:
+        return files
+    try:
+        rels = [str(f.relative_to(root)) for f in files]
+    except ValueError:
+        return files
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "--stdin"],
+            input="\n".join(rels) + "\n",
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return files  # not a git work tree, or git is unavailable
+    if r.returncode not in (0, 1):
+        return files
+    ignored = {line.strip() for line in r.stdout.splitlines() if line.strip()}
+    return [f for f, rel in zip(files, rels) if rel not in ignored]
+
 
 
 def _is_format_macro(line: str) -> bool:
@@ -311,6 +356,14 @@ def audit_one(path: Path) -> list[str]:
         # Skip format-macro format strings
         if _is_format_macro(line):
             continue
+        # `cfg!(target_os = "...")` is a grammar slot, not program data
+        # (2026-09-28).  The predicate value must be a literal: `cfg!(.. =
+        # SOME_CONST)` is `error: expected a literal ... found expression`,
+        # so it can never be hoisted into const.rs.  Scoped to the captured
+        # literal span, exactly like the ABI slot above, so that any OTHER
+        # string on the same line is still reported.
+        cfg_m = CFG_PREDICATE.search(scan_line)
+        cfg_span = cfg_m.span("val") if cfg_m is not None else None
         if i in exempt_lines:
             continue
         # Find string literals on this line.  On an extern line the scan
@@ -320,6 +373,9 @@ def audit_one(path: Path) -> list[str]:
         # literals and report a garbage span (and could miss a real
         # literal sitting inside that swallowed run).
         for m in STRING_LITERAL.finditer(scan_line, abi_end):
+            if cfg_span is not None and m.span() == cfg_span:
+                # The cfg! predicate literal itself: a grammar slot.
+                continue
             literal = m.group(0)
             # Skip if literal looks like a path (contains /)
             # — paths often encode import paths in `use` and
