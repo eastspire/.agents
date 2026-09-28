@@ -2830,3 +2830,37 @@ hook 不跑 `audit_rust_standards.py` 38 项 audit,只跑 5 个 verifier,选择�
 **audit 接入**:已挂在 `verify_dep_order.py` 末段,自动被 `audit_rust_standards.py` check 21 + `rust_pre_commit.py` Phase 2 + `~/.git-hooks/pre-commit` 全部覆盖 —— **不需要单独改 audit script**,因为 check 21 本来就调 `verify_dep_order.py` 整个脚本。
 
 **Skill §13.7.2a 文档**:`references/13-dependency.md` 新增 §13.7.2 一节(注:不是 §13.7.3,因为它是"跨段规则",与"块内规则 §13.7.3"并列;原 §13.7.2 块内顺序往后挪到 §13.7.3),原 §13.7.3-§13.7.9 全部 +1 编号到 §13.7.4-§13.7.10。inline cross-reference 也同步更新。
+
+## §87 verify_no_sibling_dirs.py(§1.3d,check 44)— 代码文件与子目录同级的规则,以及"豁免名单"必须精确到 4 个文件(2026-09-28)
+
+新规则(2026-09-28 user 原话:"如果 rust 代码文件同级有目录,需要报错提示代码文件不能和目录在同一级,注意 lib.rs main.rs build.rs mod.rs 这些除外")接入为 `scripts/verify_no_sibling_dirs.py` + audit check 44。
+
+### 为什么不是把 `mod.rs` 也禁掉
+
+`mod.rs` 的**存在意义**就是 `mod r#xxx;` 声明同级子模块 —— 它是唯一被设计上与目录同级的关键字文件。同理 `lib.rs` / `main.rs` / `build.rs` 分别是 crate 根入口 / bin 入口 / cargo build script(cargo 约定固定与 `src/` 同级)。豁免名单必须**恰好**是这 4 个;多豁免(比如把 `tests.rs` 之类也算进去)会开出一个可藏违规的洞。
+
+### 坑 1:按文件报会撑爆数字 —— 必须按**目录**报
+
+初版思路是"每个违规文件一条"。实跑 euv/ctares 时发现同一目录下常有多个关键字文件(`core/src/vdom/` 同时有 `impl.rs` + `struct.rs`),按文件报会让人误以为要改 5 个文件,实际上修复动作是**一次结构性搬迁**:把该目录下所有代码文件整体搬进各自的子模块目录(`impl/impl.rs` + `impl/mod.rs`),改 `mod.rs` 的 `mod r#impl;` 路径,一条 finding 对应一次搬迁。改为**每个目录报 1 条**,并在 message 里同时列出该目录下的全部违规文件与全部同级子目录。
+
+### 坑 2:fixture 的"compliant"很容易被自己写错(实测踩到 2 次)
+
+第一次写 fixture 时,我在 `pkg/src/` 放 `lib.rs` + `const.rs` + `api/` —— 想当然认为"`lib.rs` 豁免了,这个目录就合规"。verifier 报 1 hit 是**对的**:`const.rs` 既没在豁免名单里,又与 `api/` 同级。第二次把 `api/const.rs` + `api/deep/` 同级 —— 同样违规。
+
+**教训**:写 §1.3d 的 compliant fixture 时,每一层都必须是**纯目录层或纯代码文件层**(四个入口文件除外)。递归两层以上最容易混进去。正确形态见 `references/01-directory-structure.md` §1.3d 的 ✅ 示例。另一个易错点:**期望值不是拍脑袋写的** —— edge-cases fixture 的期望值最初写"4 violations in 4 dirs",实际是 2 in 2,原因是 `e2/`(只有 `SKIP_DIR_NAMES` + 点目录)与 `e3/`(无子目录)都豁免。跑一遍再把期望值改成实测,而不是反过来改 verifier 去迎合期望值。
+
+### 坑 3:git-ignored 目录必须排除,否则数字是幻觉
+
+`ctares/crate-cli/tmp/` 有 25 个 scratch crate(被 `/tmp/` 规则 ignore),它们的 `src/` 布局违规无论修不修都不可能进任何 commit。verifier 用**一次批量** `git check-ignore --stdin` 过滤目录(与 `verify_hardcoded_strings.py` / `verify_doc_comment_format.py` 的 `_drop_git_ignored()` 同策略),并且同时剔除被忽略目录的**子目录**(父目录被 ignore 时子目录的相对路径也可能不在输出里)。
+
+### 与 pre-commit hook 的关系
+
+**不**注册进 `staged_file_gate.py`:该 gate 的判定是"单个 staged `.rs` 文件自身违规数 vs HEAD",而 §1.3d 是**目录级**规则 —— 违规信号在目录布局上,不在某个文件的内容里,把 `audit_one()` 塞进去只会拿到空结果(永远 0 new violations,给人虚假安全感)。按 `audit-pipeline.md` §"When to add a verifier to the hook":按目录扫描的规则只归 `rust_pre_commit.py` Phase 2。
+
+### 设计与实测
+
+- 摘要行 `=== no-sibling-dirs (§1.3d): N violation(s) in M dir(s) ===`(audit wrapper 用 `grep -v -E '^=== no-sibling-dirs \(§1\.3d\):'` 过滤,`§` 在 `-E` 下需转义)。
+- 跳过:`SKIP_DIR_NAMES`(target/.git/node_modules/...)+ 所有点目录 + git-ignored。
+- Fixture:`~/.hermes/cache/scratch/verifier-fixtures/sibling-dirs-{compliant,violating,edge-cases}`,由 `make_sibling_dir_fixtures.py` 生成、`test_sibling_dirs_verifier.py` 双向断言:compliant **0/exit 0**(7 种豁免布局)、violating **4 in 4 dirs/exit 1**、edge-cases **2 in 2 dirs/exit 1**。
+- audit 端到端:check 44 在 violating 侧 `FAIL ... 4 hits`、edge-cases 侧 `FAIL ... 2 hits`、compliant 侧 `PASS`。
+- 三仓实测:**euv 5 处 / ctares 4 处 / hyperlane 0 处** —— 全部是 `const.rs` / `impl.rs` / `struct.rs` / `fn.rs` 与子目录同级,数字小到可以在一个 sweep commit 里修完,不需要 §45 说的两 PR 分离。

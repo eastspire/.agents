@@ -196,7 +196,7 @@ Captured from §45–§67 — read before adding any new check:
 skills/rust-standards/scripts/
   verify_<rule>.py           # pure checker
   fix_<rule>.py              # auto-fixer (when applicable)
-  audit_rust_standards.py    # 38 wrappers, each invokes one verifier
+  audit_rust_standards.py    # 44 wrappers, each invokes one verifier
 
 ~/.hermes/cache/scratch/
   rust-std-fixtures/<rule>-{compliant,violating}/
@@ -242,7 +242,7 @@ neither AI nor human can accidentally bypass it.
 Single command runs the full 5-phase loop:
 1. Phase 1 — auto-fixers (`fix_dep_order --write` → `strictify_tests_layout`
    → `doc_comment_audit`)
-2. Phase 2 — `audit_rust_standards.py` (38 checks)
+2. Phase 2 — `audit_rust_standards.py` (44 checks)
 3. Phase 3 — `crate fmt` double-run + `--check` idempotence
 4. Phase 4 — `cargo clippy --all-targets --offline` (0 warning)
 5. Phase 5 — `cargo test --no-run --all-targets --offline`
@@ -292,3 +292,21 @@ Do NOT add a verifier to the hook when:
 
 These stay covered by `rust_pre_commit.py` Phase 2 — the hook's job is
 the commit-time first line of defense, the full audit is the safety net.
+
+### The trap: directory-level rules produce a silent zero in this gate
+
+`staged_file_gate.py` compares one staged **file** against itself at HEAD,
+so any rule whose signal lives in the *directory layout* rather than in a
+file's bytes reads as "0 violations before, 0 violations after" and the
+commit sails through — worse than not checking, because the gate prints
+`0 new violations — commit allowed` and looks like it verified something.
+Two live examples:
+
+- `verify_no_sibling_dirs.py` (§1.3d, check 44) — the violation is
+  `foo.rs` sitting next to `foo/`, which no single file contains.
+- keyword-file topology (§1.3 / §6.3, check 26) — `mod.rs` needs the whole
+  tree to decide.
+
+**Test for any candidate hook verifier**: does its `audit_one(path)`
+return [] for every file in a repo that violates the rule? If yes, it
+does not belong in the hook.

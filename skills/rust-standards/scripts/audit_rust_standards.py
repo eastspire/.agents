@@ -1273,6 +1273,37 @@ exit "$exit_code"
 '''
 ),
 
+
+    # check 44 (2026-09-28 user directive): "如果 rust 代码文件同级有目录,
+    # 需要报错提示代码文件不能和目录在同一级,注意 lib.rs main.rs build.rs
+    # mod.rs 这些除外".
+    #
+    # A keyword file is a LEAF of the module tree: `mod r#fn;` in mod.rs
+    # resolves to `<dir>/fn.rs` and nothing else.  Once the same directory
+    # also owns sub-modules, the reader must decide whether `foo.rs`
+    # belongs to the parent scope or is a namespace peer of `foo/` — two
+    # conventions for one level of the tree.  The four entry files are
+    # exempt precisely because their whole job is to be the parent of
+    # sub-modules.
+    #
+    # ONE violation per offending DIRECTORY (not per file): the fix is
+    # structural (move the files into their own sub-module dirs), so N
+    # files in one directory = 1 finding to fix, not N.
+    #
+    # Companion script: verify_no_sibling_dirs.py.
+    ('code file cannot share a directory level with sub-directories (§1.3d)', '''
+# Per rust-standards §1.3d (2026-09-28 user directive): a directory that
+# owns sub-modules must not also own `.rs` code files, except lib.rs /
+# main.rs / build.rs / mod.rs.  Companion script: verify_no_sibling_dirs.py.
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_sibling_dirs.py" "{{target}}" \\
+    | grep -v -E '^=== no-sibling-dirs \(§1\.3d\):'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_sibling_dirs.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
 ]
 
 

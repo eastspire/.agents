@@ -192,6 +192,37 @@ pub fn minify_html_template(html: &str) -> String {
 
 **与 §1.3a 的关系**:§1.3a 管 top-level declaration(struct/enum/impl...),§1.3c 管 fn/impl body 内的 literal。两者互补,audit script 的 check 16 检 §1.3a,新增 check 18 检 §1.3c。
 
+### 1.3d 代码文件不能与目录同级(2026-09-28 user 钦定)
+
+**user 原话**:"如果 rust 代码文件同级有目录,需要报错提示代码文件不能和目录在同一级,注意 lib.rs main.rs build.rs mod.rs 这些除外"。
+
+**规则**:一个目录只要拥有**子目录**,就**不允许**再持有 `.rs` 代码文件 —— 唯一豁免是四个入口文件:
+
+| 豁免文件 | 为什么豁免 |
+|---------|-----------|
+| `lib.rs` | crate 根入口,职责就是统领 `src/` |
+| `main.rs` | bin 入口(含 `src/bin/<tool>/main.rs` 拆分形态) |
+| `build.rs` | cargo build script,cargo 约定固定放在 crate 根、与 `src/` 同级 |
+| `mod.rs` | 模块入口,职责就是 `mod r#xxx;` 声明同级子模块 —— 这是**唯一**被设计成与目录同级的关键字文件 |
+
+**为什么**:关键字文件是模块树的**叶子** —— `mod r#fn;` 只解析到 `<dir>/fn.rs`,别无所指。一旦同级还有子目录,同一层级就出现了两套约定:`foo.rs` 到底是父作用域的成员,还是 `foo/` 的命名空间对等物?读者必须停下来猜。`mod.rs` 豁免正是因为它的存在意义就是"父节点的目录清单"。
+
+**正确形态**(每层要么只放目录,要么只放代码文件):
+```
+✅ crate-cli/src/          # 只有目录
+   ├── const/  ├── fmt/  ├── help/
+   ├── lib.rs  └── main.rs        # 仅入口文件例外
+
+✅ crate-cli/src/const/    # 只有代码文件,叶子
+   ├── const.rs  └── mod.rs
+
+❌ crate-cli/src/          # const.rs 与 9 个子目录同级
+   ├── const.rs  ├── bump/  ├── fmt/  ├── help/ ...
+```
+把 `const.rs` 搬成 `const/const.rs` + `const/mod.rs`(`mod r#const;` + `pub use r#const::*;`)后,`src/` 恢复"纯目录层",`const/` 成为叶子层,两层各自只有一种约定。
+
+**验证脚本**:`scripts/verify_no_sibling_dirs.py`,被 `audit_rust_standards.py` check 44 调用。**每个违规目录报 1 条**(不是每个文件 1 条)—— 因为修复动作是结构性的(把该目录下所有代码文件整体搬进各自的子模块目录),N 个文件 = 1 个待修项。Fixture `~/.hermes/cache/scratch/verifier-fixtures/sibling-dirs-{compliant,violating,edge-cases}` 双向自测:compliant 0/exit 0(7 种豁免布局),violating 4/exit 1,edge-cases 2 in 2 dirs/exit 1。**实测**:euv 5 处 / ctares 4 处 / hyperlane 0 处。**不进 pre-commit hook**(audit-pipeline.md §"When to add a verifier to the hook":按目录扫描的规则只归 `rust_pre_commit.py` Phase 2)。
+
 ## 1.4 raw identifier 命名(关键!)
 
 由于 `enum` / `impl` / `const` / `static` / `struct` / `trait` / `type` / `fn` 是 Rust 关键字,直接写 `mod enum;` 会编译失败。所有关键字文件必须在 `mod.rs` 中以 **raw identifier**(`r#xxx`)形式声明:
