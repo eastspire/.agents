@@ -116,15 +116,23 @@ ATTR_LINE = re.compile(r"^\s*#\[")
 #
 # Verified with rustc 1.9x: replacing the literal with a const path is
 # a hard syntax error, so flagging it is a false positive by
-# construction.  Anchored on the `extern` KEYWORD (with optional
-# visibility / `unsafe` in front) so a string that merely CONTAINS
-# the word "extern" is still reported.
+# construction.
+#
+# The match CAPTURES the ABI literal as group `abi` so the caller can
+# exclude exactly that span and nothing else.  Skipping the whole line
+# (the first implementation of this exemption) is a false-negative
+# hole: a one-line `extern "C" fn f() -> &'static str { "/secrets" }`
+# under `#[rustfmt::skip]` hid every other literal on the line, which
+# is reachable in one line of code and survives `cargo fmt --check`.
+# This script's contract is "prefer a false positive over a false
+# negative" (see the module docstring), so the exemption is scoped as
+# tightly as the grammar allows.
 EXTERN_ABI_LINE = re.compile(
     r"""^\s*
-        (?:pub(?:\s*\([^)]*\))?\s+)?     # optional `pub` / `pub(crate)`
+        (?:pub(?:\s*\((?:[^()]|\([^()]*\))*\))?\s+)?   # pub / pub(crate) / pub(in path)
         (?:unsafe\s+)?                    # optional `unsafe`
         extern\s+                        # the keyword itself
-        "                                 # the ABI literal opens here
+        (?P<abi>"[^"]*")                 # the ABI literal, captured
     """,
     re.VERBOSE,
 )
@@ -223,21 +231,25 @@ def audit_one(path: Path) -> list[str]:
         # Skip attribute lines (#[doc = "..."], #[serde(...)])
         if ATTR_LINE.match(line):
             continue
-        # Skip the foreign-ABI slot of `extern "C" { }` / `extern "C" fn f()`
-        # (2026-09-28).  The ABI string is a grammar-level keyword slot,
-        # not program data — `extern ABI {}` is a hard rustc syntax
-        # error, so it can never be hoisted into const.rs.  Anchored on
-        # the `extern` keyword so a string merely CONTAINING the word
-        # "extern" is still reported.
-        if EXTERN_ABI_LINE.match(line):
-            continue
+        # Locate the foreign-ABI slot of `extern "C" { }` / `extern "C" fn f()`
+        # (2026-09-28).  The ABI string is a grammar-level keyword slot, not
+        # program data — `extern ABI {}` is a hard rustc syntax error, so it
+        # can never be hoisted into const.rs.  Only the captured ABI span is
+        # excluded below; every OTHER literal on the line is still reported.
+        abi_match = EXTERN_ABI_LINE.match(line)
+        abi_end = abi_match.end("abi") if abi_match else 0
         # Skip format-macro format strings
         if _is_format_macro(line):
             continue
         if i in exempt_lines:
             continue
-        # Find string literals on this line
-        for m in STRING_LITERAL.finditer(line):
+        # Find string literals on this line.  On an extern line the scan
+        # RESUMES after the ABI literal rather than skipping the line:
+        # STRING_LITERAL is quote-pairing, so a scan that started at the
+        # ABI's closing quote would swallow the code between the two
+        # literals and report a garbage span (and could miss a real
+        # literal sitting inside that swallowed run).
+        for m in STRING_LITERAL.finditer(line, abi_end):
             literal = m.group(0)
             # Skip if literal looks like a path (contains /)
             # — paths often encode import paths in `use` and
