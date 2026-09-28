@@ -129,6 +129,41 @@ def _has_explicit_type(param: str) -> bool:
     return False
 
 
+def _is_macro_pattern(params: str) -> bool:
+    """True when the captured `|...|` text is a macro_rules! fragment.
+
+    Such text contains `$( ... )` repetitions or a bare repetition suffix
+    (`*`, `+`, `?`) with no comma binding, which is a macro pattern rather
+    than a closure parameter list.  A real closure always has plain
+    comma-separated bindings and never contains `$(`.
+    """
+    if "$(" in params:
+        return True
+    # A bare repetition such as `*` or `?` captured as the whole "params".
+    if params.strip() in {"*", "+", "?"}:
+        return True
+    return False
+
+
+def _is_bitwise_or_chain(
+    params: str, line: str, span: tuple[int, int]
+) -> bool:
+    """True when the `|...|` match is a bitwise-or chain, not closure params.
+
+    A closure parameter list is a comma-separated binding list; it never
+    contains a shift or a cast.  The `|` delimiters sit outside the captured
+    group, so the shape is judged from the source text surrounding the span.
+    """
+    if not re.search(r"<<|>>|\bas\b", params):
+        return False
+    start, end = span
+    before = line[max(0, start - 3):start]
+    after = line[end:end + 3]
+    # A bit-or chain has an operand on both sides of each delimiter, and the
+    # line carries further `|` operators beyond the two delimiters.
+    return bool(before.strip()) and bool(after.strip()) and "|" in line[end:]
+
+
 def audit_one(path: Path) -> list[str]:
     try:
         text = path.read_text()
@@ -140,8 +175,23 @@ def audit_one(path: Path) -> list[str]:
         # content inside `// ...` lines.
         if line.lstrip().startswith(("/", "*")):
             continue
+        # Skip macro_rules! lines whose `|` sits inside a `$( ... )`
+        # repetition (2026-09-28).  A macro matcher and a macro body are
+        # both patterns, not closures: `move |$( $arg:ident $(: $ty:ty)? ),*|`
+        # must not be asked for a type annotation, because adding one means
+        # editing the macro and breaking it.  A real closure with real
+        # parameters is still checked, so this is not a blanket exemption.
         for m in CLOSURE.finditer(line):
             params_str = m.group("params")
+            if _is_macro_pattern(params_str):
+                continue
+            if _is_bitwise_or_chain(params_str, line, m.span("params")):
+                # `|`-separated bit operations, e.g.
+                # `((a as usize) << 16) | ((b as usize) << 8)`, were being read
+                # as closure parameters.  A `|` chain is not a closure: the
+                # delimiter sits OUTSIDE the captured group, so the marker is read
+                # from the source around the span.
+                continue
             # Split by `,` at depth 0
             params = _split_top_commas(params_str)
             for param in params:

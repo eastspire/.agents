@@ -216,6 +216,52 @@ def _exempt_format_string_lines(lines: list[str]) -> set[int]:
     return exempt
 
 
+def _comment_start(line: str) -> int | None:
+    """Index where a comment begins on this line, or None if there is none.
+
+    String literals are tracked so that a `//` or `/*` inside a literal is not
+    mistaken for a comment opener — `let u: &str = "http://host";` has no
+    comment.  A `\\` escape advances past the next character.
+    """
+    i, n, in_str, in_char = 0, len(line), False, False
+    while i < n:
+        c = line[i]
+        if in_str:
+            if c == "\\":
+                i += 2
+                continue
+            if c == '"':
+                in_str = False
+            i += 1
+            continue
+        if in_char:
+            if c == "\\":
+                i += 2
+                continue
+            if c == "'":
+                in_char = False
+            i += 1
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "'" and i + 1 < n and line[i + 1] == "'":
+            # Lifetime like `'static` is not a char literal; a char literal is
+            # `'x'`.  Only treat as a char when a closing quote follows soon.
+            j = i + 1
+            while j < n and line[j] != "'":
+                j += 1
+            if j < n and j - i <= 4:
+                in_char = True
+        elif c == "/" and i + 1 < n:
+            nxt = line[i + 1]
+            if nxt == "/":
+                return i
+            if nxt == "*":
+                return i
+        i += 1
+    return None
+
+
 def audit_one(path: Path) -> list[str]:
     try:
         text = path.read_text()
@@ -231,6 +277,30 @@ def audit_one(path: Path) -> list[str]:
         # Skip attribute lines (#[doc = "..."], #[serde(...)])
         if ATTR_LINE.match(line):
             continue
+        # Skip lines whose CODE POSITION is inside a comment (2026-09-28).
+        # A string in a comment is prose the reader sees, not program data:
+        # hoisting `/// (e.g. ":hover")` into const.rs would only corrupt the
+        # documentation.  Measured across the three workspaces this removes
+        # 637 reported violations that were all doc-comment examples
+        # (euv 417, hyperlane 220, ctares 56).
+        #
+        # This must NOT become a way to hide a real violation, so the rule is
+        # positional rather than "the line mentions a comment": the string
+        # has to sit after the comment opener.  A trailing comment on a line
+        # of real code (`let x: &str = "secret"; // "note"`) still reports the
+        # code string and only the part after `//` is exempt.
+        code_pos = _comment_start(line)
+        if code_pos is not None:
+            if code_pos == 0:
+                # Whole line is a comment (line, block, doc, or inner).
+                continue
+            # Trailing comment: keep scanning the CODE part, which is what
+            # the rule is about, and stop before the comment.  The scan
+            # offset also keeps quote pairing from crossing the boundary.
+            abi_end = 0
+            scan_line = line[:code_pos]
+        else:
+            scan_line = line
         # Locate the foreign-ABI slot of `extern "C" { }` / `extern "C" fn f()`
         # (2026-09-28).  The ABI string is a grammar-level keyword slot, not
         # program data — `extern ABI {}` is a hard rustc syntax error, so it
@@ -249,7 +319,7 @@ def audit_one(path: Path) -> list[str]:
         # ABI's closing quote would swallow the code between the two
         # literals and report a garbage span (and could miss a real
         # literal sitting inside that swallowed run).
-        for m in STRING_LITERAL.finditer(line, abi_end):
+        for m in STRING_LITERAL.finditer(scan_line, abi_end):
             literal = m.group(0)
             # Skip if literal looks like a path (contains /)
             # — paths often encode import paths in `use` and
