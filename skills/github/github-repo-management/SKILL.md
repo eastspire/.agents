@@ -131,34 +131,38 @@ This also works for **release tarballs** (e.g. `gh` CLI binary) — same wrapper
 
 ## 2. Creating Repositories
 
+**New repos are PRIVATE by default.** Never pass `--public` / `"private": false` unless the user
+explicitly asks for a public repo in that turn. `gh repo create` without a visibility flag also
+defaults to private, so the rule is "omit the flag or say `--private`, never `--public`".
+
 **With gh:**
 
 ```bash
-# Create a public repo and clone it
-gh repo create my-new-project --public --clone
+# Create a private repo and clone it (default)
+gh repo create my-new-project --private --clone
 
-# Private, with description and license
+# With description and license
 gh repo create my-new-project --private --description "A useful tool" --license MIT --clone
 
 # Under an organization
-gh repo create my-org/my-new-project --public --clone
+gh repo create my-org/my-new-project --private --clone
 
 # From existing local directory
 cd /path/to/existing/project
-gh repo create my-project --source . --public --push
+gh repo create my-project --source . --private --push
 ```
 
 **With git + curl:**
 
 ```bash
-# Create the remote repo via API
+# Create the remote repo via API — "private": true is the default, not an option
 curl -s -X POST \
   -H "Authorization: token $GITHUB_TOKEN" \
   https://api.github.com/user/repos \
   -d '{
     "name": "my-new-project",
     "description": "A useful tool",
-    "private": false,
+    "private": true,
     "auto_init": true,
     "license_template": "mit"
   }'
@@ -182,8 +186,53 @@ To create under an organization:
 curl -s -X POST \
   -H "Authorization: token $GITHUB_TOKEN" \
   https://api.github.com/orgs/my-org/repos \
-  -d '{"name": "my-new-project", "private": false}'
+  -d '{"name": "my-new-project", "private": true}'
 ```
+
+### Every new repo gets the mirror workflow (mandatory)
+
+A newly created repo ships with `.github/workflows/mirror.yml` — the push-triggered
+GitHub → gitee + gitcode mirror, byte-identical to the canonical copy in
+`github-cross-platform-mirror/templates/mirror.yml`. Same file name, same path, every repo.
+
+Copy it in and commit it on the repo's first push:
+
+```bash
+gh api -X PUT "repos/$OWNER/$REPO/contents/.github/workflows/mirror.yml" \
+  --input <(python -c 'import base64,json,sys; print(json.dumps({
+      "message": "ci: add mirror sync workflow for gitee/gitcode",
+      "content": base64.b64encode(open(sys.argv[1],"rb").read()).decode(),
+      "branch": sys.argv[2]}))' \
+      ~/.hermes/skills/github-cross-platform-mirror/templates/mirror.yml master)
+
+git add .github/workflows/mirror.yml
+git commit -m "ci: add mirror sync workflow for gitee/gitcode"
+git push
+```
+
+Two secrets must exist on every repo or the workflow hard-fails on the first push:
+`GITEE_TOKEN` and `GITCODE_TOKEN`. `gh secret set GITEE_TOKEN --body "$GITEE"` /
+`gh secret set GITCODE_TOKEN --body "$GITCODE"`. Without them the run stops at
+`::error::GITEE_TOKEN secret is missing` — that is intentional, not a bug to swallow.
+
+**Visibility propagates to the mirrors.** A private GitHub repo must get private gitee/gitcode
+repos — never create a public mirror of a private source. When creating the mirrors, pass the
+source repo's `private` flag through instead of hardcoding `false`:
+
+```bash
+# gitee — token in the body
+curl -X POST -H "Content-Type: application/json" \
+  -d "{\"name\":\"$REPO\",\"access_token\":\"$GITEE\",\"private\":$IS_PRIVATE,\"auto_init\":false}" \
+  https://gitee.com/api/v5/user/repos
+
+# gitcode — token in the `private-token` header, NOT the body
+curl -X POST -H "Content-Type: application/json" -H "private-token: $GITCODE" \
+  -d "{\"name\":\"$REPO\",\"private\":$IS_PRIVATE,\"auto_init\":false}" \
+  https://gitcode.com/api/v5/user/repos
+```
+
+See `github-cross-platform-mirror` for the full batch procedure, secret encryption, and the
+three-way SHA parity audit.
 
 ### From a Template
 
