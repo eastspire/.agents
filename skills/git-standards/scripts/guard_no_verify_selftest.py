@@ -1,9 +1,9 @@
-"""Self-test for guard_no_verify.py: owned vs fork, plus failure modes.
+"""Self-test for guard_no_verify.py: owned vs external, plus failure modes.
 
-Fixtures are throwaway git repos with a synthetic `origin` remote. The
-GitHub query is the only network-dependent step, so a repo whose fork
-state cannot be read must land on ENFORCED — that is the property this
-test exists to pin.
+The rule is ownership, not forking. Fixtures are throwaway git repos with
+a synthetic `origin` remote. No network call is involved, so the expected
+verdict is decided purely by the owner in the remote URL — a repo whose
+origin cannot be read must land on ERROR, which callers treat as ENFORCED.
 """
 
 import json
@@ -15,15 +15,24 @@ from typing import Optional
 
 SCRIPT = Path(__file__).resolve().parent / "guard_no_verify.py"
 
-# (label, remote URL, expected verdict, needs GitHub)
+# (label, remote URL, expected verdict)
 FIXTURES = [
-    ("owned org, non-fork", "git@github.com:euv-dev/euv.git", "ENFORCED", True),
-    ("owned org 2", "https://github.com/crates-dev/ctares.git", "ENFORCED", True),
-    ("personal, non-fork", "git@github.com:eastspire/stripe-pay-sdk.git", "ENFORCED", True),
-    ("external fork", "https://github.com/eastspire/FrameworkBenchmarks.git", "EXEMPT", True),
-    ("external fork 2", "git@github.com:eastspire/web-frameworks.git", "EXEMPT", True),
-    ("non-github remote", "git@example.com:someone/repo.git", "ERROR", False),
-    ("no remote", None, "ERROR", False),
+    # Owned owners — always enforced, fork status irrelevant.
+    ("owned org euv-dev", "git@github.com:euv-dev/euv.git", "ENFORCED"),
+    ("owned org hyperlane-dev", "https://github.com/hyperlane-dev/hyperlane.git", "ENFORCED"),
+    ("owned org crates-dev", "git@github.com:crates-dev/ctares.git", "ENFORCED"),
+    ("owned org docs-pages", "git@github.com:docs-pages/docs.git", "ENFORCED"),
+    ("owned personal", "git@github.com:eastspire/stripe-pay-sdk.git", "ENFORCED"),
+    ("owned personal fork", "git@github.com:eastspire/serde.git", "ENFORCED"),
+    ("owned token url", "https://x-access-token:tok@github.com/euv-dev/euv.git", "ENFORCED"),
+    # Anything else is external and may be skipped — no fork check. Note
+    # eastspire/* stays ENFORCED even when it is a fork: the owner decides.
+    ("external fork", "https://github.com/torvalds/linux.git", "EXEMPT"),
+    ("external non-fork", "git@github.com:rust-lang/rust.git", "EXEMPT"),
+    ("external third party", "https://github.com/serde-rs/serde.git", "EXEMPT"),
+    # Unidentifiable — never exempt.
+    ("non-github remote", "git@example.com:someone/repo.git", "ERROR"),
+    ("no remote", None, "ERROR"),
 ]
 
 
@@ -42,12 +51,12 @@ def make_repo(tmp: Path, label: str, remote: Optional[str]) -> Path:
     return repo
 
 
-def run(repo: Path) -> tuple[str, int]:
+def run(repo: Path) -> tuple:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--repo", str(repo), "--json"],
         capture_output=True,
         text=True,
-        timeout=90,
+        timeout=60,
     )
     try:
         payload = json.loads(result.stdout)
@@ -57,16 +66,14 @@ def run(repo: Path) -> tuple[str, int]:
 
 
 def main() -> int:
-    failures: list[str] = []
+    failures = []
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
-        for label, remote, expected, needs_github in FIXTURES:
+        for label, remote, expected in FIXTURES:
             repo = make_repo(tmp, label, remote)
             verdict, rc = run(repo)
             ok = verdict == expected
-            if not needs_github and verdict != expected:
-                ok = False
-            print(f"{'PASS' if ok else 'FAIL'}  {label:24} -> {verdict:9} rc={rc}")
+            print(f"{'PASS' if ok else 'FAIL'}  {label:26} -> {verdict:9} rc={rc}")
             if not ok:
                 failures.append(f"{label}: expected {expected}, got {verdict}")
 
