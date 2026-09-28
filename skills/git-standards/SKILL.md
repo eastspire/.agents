@@ -1,6 +1,6 @@
 ---
 name: git-standards
-description: 'Git commit + PR routing + text conventions for eastspire-owned repos. **Route by change type, not by repo: docs / config / frontend-style / comment-only changes commit straight to the default branch with no PR; only changes to executable code need a PR (branch → push → PR → merge → delete branch). `.css`/`.scss`/`.less` count as presentation, but a `.tsx` with a changed handler is still a PR. A comment-only edit to a `.rs` file is a docs change; a statement change is a code change. Mechanical classifier: `scripts/classify_change.py` (DIRECT_PUSH | NEEDS_PR).** **All commits and PR descriptions must be written in English** (no Chinese in commit message subject/body, no Chinese in PR title/body, per user preference) — enforced by `scripts/verify_english_only.py`, not just documented. **All commits must use the canonical author identity from `~/.gitconfig` (`eastspire <root@ltpp.vip>`, the personal account of the user) — never a bot identity, never per-commit `-c user.email=…` or `GIT_AUTHOR_EMAIL` overrides (see §7).** Commit subject MUST follow Conventional Commits v1.0.0: `<type>(<scope>): <subject>` where type ∈ {feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert} and scope is the skill name (singular or short area). Subject ≤ 72 chars, imperative mood, no trailing period, no all-caps. Body wrapped at 72 cols, explain *what* and *why* not *how*, use bullet lists for multi-point changes. PR body uses 4-section template: Summary / Changes / Verification / Notes. Footer MUST include `🤖 Generated with [Hermes](https://...)` line (drop if not applicable). **`git commit --no-verify` is FORBIDDEN in every owned project** — the personal account `eastspire/*` and the four owned orgs `hyperlane-dev/*`, `euv-dev/*`, `crates-dev/*`, `docs-pages/*`. The only exemption is an **external repository**, i.e. any origin whose owner is outside those five — forks under the user's own account included, because they live in the user's namespace. Owned repos are enforced by a `prepare-commit-msg` hook that git does NOT let `--no-verify` suppress, so a bypassing commit is still blocked — when a gate fires, fix the code, never bypass (see §3.6, `scripts/guard_no_verify.py`). Triggers: git commit, commit message, PR body, PR description, Conventional Commits, git push, gh pr create, commit prefix, commit type, chore:, feat:, fix:, refactor:, docs:, ci:, 文档直推, 代码 PR, 注释改动, 前端样式, css 提交, 需要 PR 还是直接提交, doc vs code, direct push, delete branch after merge, git author, user.email, user.name, eastspire, no-verify, 绕过 hook, 跳过校验, 跳过提交校验, skip hook, bypass pre-commit, 绕过提交前校验.'
+description: 'Git commit + PR routing + text conventions for eastspire-owned repos. **Route by change type, not by repo: docs / config / frontend-style / comment-only changes commit straight to the default branch with no PR; only changes to executable code need a PR (branch → push → PR → merge → delete branch). `.css`/`.scss`/`.less` count as presentation, but a `.tsx` with a changed handler is still a PR. A comment-only edit to a `.rs` file is a docs change; a statement change is a code change. Mechanical classifier: `scripts/classify_change.py` (DIRECT_PUSH | NEEDS_PR).** **All commits and PR descriptions must be written in English** (no Chinese in commit message subject/body, no Chinese in PR title/body, per user preference) — enforced by `scripts/verify_english_only.py`, not just documented. **All commits must use the canonical author identity from `~/.gitconfig` (`eastspire <root@ltpp.vip>`, the personal account of the user) — never a bot identity, never per-commit `-c user.email=…` or `GIT_AUTHOR_EMAIL` overrides (see §7).** Commit subject MUST follow Conventional Commits v1.0.0: `<type>(<scope>): <subject>` where type ∈ {feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert} and scope is the skill name (singular or short area). Subject ≤ 72 chars, imperative mood, no trailing period, no all-caps. Body wrapped at 72 cols, explain *what* and *why* not *how*, use bullet lists for multi-point changes. PR body uses 4-section template: Summary / Changes / Verification / Notes. Footer MUST include `🤖 Generated with [Hermes](https://...)` line (drop if not applicable). **`git commit --no-verify` is FORBIDDEN in every repo you own** — every repository under your personal account, and every repository under every organization you belong to. The list is enumerated live from the GitHub API on each commit, never hardcoded, so a new org or repo is covered automatically. The only exemption is a repo GitHub confirms is **not** yours (upstream clones), and forks under your own account stay enforced. Owned repos are guarded by a `prepare-commit-msg` hook that git does NOT let `--no-verify` suppress, so a bypassing commit is still blocked; every API failure mode resolves to ENFORCED, never to a free pass — when a gate fires, fix the code, never bypass (see §3.6, `scripts/guard_no_verify.py`). Triggers: git commit, commit message, PR body, PR description, Conventional Commits, git push, gh pr create, commit prefix, commit type, chore:, feat:, fix:, refactor:, docs:, ci:, 文档直推, 代码 PR, 注释改动, 前端样式, css 提交, 需要 PR 还是直接提交, doc vs code, direct push, delete branch after merge, git author, user.email, user.name, eastspire, no-verify, 绕过 hook, 跳过校验, 跳过提交校验, skip hook, bypass pre-commit, 绕过提交前校验.'
 license: MIT
 ---
 # git-standards — English-only commit + PR conventions
@@ -553,54 +553,64 @@ User rule (recorded 2026-09-28, verbatim intent):
 
 ### 3.6.1 What counts as an owned project
 
-An **owned** project is any repo the user authors, under either the personal
-account or one of the four owned orgs:
+An **owned** project is any repo the user authors. The list is **not
+hardcoded** — it is resolved live from the GitHub API on every commit, so a
+repo or an org created later is covered without touching any config:
 
-| Scope | Owner | Enumerate |
-|---|---|---|
-| Personal account | `eastspire/*` | `gh api "users/eastspire/repos?per_page=100&affiliation=owner"` |
-| Owned orgs | `hyperlane-dev/*`, `euv-dev/*`, `crates-dev/*`, `docs-pages/*` | `gh api "orgs/<org>/repos?per_page=100"` |
+| Scope | Enumerated by |
+|---|---|
+| Personal account | `gh api "users/<account>/repos?per_page=100&affiliation=owner"` |
+| Every org the account belongs to | `gh api "/user/orgs"` then `gh api "orgs/<org>/repos?per_page=100"` |
 
-Verified 2026-09-28 — the orgs hold exactly:
+Use `/user/orgs`, **not** `/users/<account>/orgs`: the latter returns only
+orgs with *public* membership and silently omits private ones. On this
+machine that difference is real — the latter returned 2 orgs
+(`hyperlane-dev`, `crates-dev`) while the correct endpoint returns 4,
+including the private `euv-dev` and `docs-pages`. Reading ownership from
+the wrong endpoint would have left two orgs unenforced.
+
+Verified 2026-09-28 — the account is `eastspire` and the enumeration returns:
 
 ```
-hyperlane-dev/hyperlane          euv-dev/euv           crates-dev/ctares
-hyperlane-dev/hyperlane-ai       euv-dev/euv-app       docs-pages/docs
-hyperlane-dev/hyperlane-mcp-upload                      docs-pages/pages
-hyperlane-dev/hyperlane-quick-start
+personal: 94 repos (including .agents, stripe-pay-sdk, FrameworkBenchmarks)
+orgs:     hyperlane-dev   euv-dev   crates-dev   docs-pages
+          hyperlane, hyperlane-ai, hyperlane-mcp-upload, hyperlane-quick-start
+          euv, euv-app
+          ctares
+          docs, pages
 ```
 
-**Every repo under these five owners is subject to the no-bypass rule with
-no exceptions** — a fork under your own account included.
+**Every repo in that enumeration is subject to the no-bypass rule with no
+exceptions** — a fork under your own account included.
+
+Because the check is a live API call rather than a static list, an org
+created tomorrow is enforced tomorrow. The corollary is that the check can
+*fail*, so the failure direction matters more than usual — see §3.6.5.
 
 ### 3.6.2 The one exemption — an external repository
 
-A repo is exempt when its **owner is not one of the five owned owners**.
-Ownership is the only test; there is no fork check.
-
-```
-origin owner ∈ {eastspire, hyperlane-dev, euv-dev, crates-dev, docs-pages} → ENFORCED
-origin owner ∉  that set                                                    → EXEMPT
-```
+A repo is exempt when **GitHub confirms it is not yours**: the origin owner
+is neither your account nor one of your orgs. The check asks the API; it
+does not consult a list.
 
 Verified 2026-09-28 on this machine:
 
-| Repo | owner | Verdict |
+| Repo | Verdict | Why |
 |---|---|---|
-| `euv-dev/euv` | `euv-dev` | enforced |
-| `crates-dev/ctares` | `crates-dev` | enforced |
-| `hyperlane-dev/hyperlane` | `hyperlane-dev` | enforced |
-| `docs-pages/docs`, `docs-pages/pages` | `docs-pages` | enforced |
-| `eastspire/.agents`, `eastspire/stripe-pay-sdk` | `eastspire` | enforced |
-| `eastspire/FrameworkBenchmarks` (fork of TechEmpower) | `eastspire` | **enforced** |
-| `eastspire/web-frameworks` (fork of the-benchmarker) | `eastspire` | **enforced** |
-| `torvalds/linux`, `rust-lang/rust`, `serde-rs/serde` | external | **exempt** |
+| `euv-dev/euv`, `euv-dev/euv-app` | enforced | under your org `euv-dev` |
+| `crates-dev/ctares` | enforced | under your org `crates-dev` |
+| `hyperlane-dev/hyperlane` (+3 siblings) | enforced | under your org `hyperlane-dev` |
+| `docs-pages/docs`, `docs-pages/pages` | enforced | under your org `docs-pages` |
+| `eastspire/.agents`, `eastspire/stripe-pay-sdk` | enforced | your own repos |
+| `eastspire/FrameworkBenchmarks` (fork of TechEmpower) | **enforced** | it is your repo |
+| `eastspire/web-frameworks` (fork of the-benchmarker) | **enforced** | it is your repo |
+| `rust-lang/rust`, `serde-rs/serde`, `torvalds/linux` | **exempt** | not yours |
+| `eastspire/<a name you never had>` | **exempt** | GitHub reports no such repo |
 
 **A fork under your own account is still yours, so it is still enforced.**
 `eastspire/FrameworkBenchmarks` and `eastspire/web-frameworks` are forks of
-someone else's project, but they live in the user's namespace and the user
-curates what is in there — so the gate applies. The test is *whose repo is
-it*, not *whose code did it start from*.
+someone else's project, but they live in your namespace — so the gate
+applies. The test is *whose repo is it*, not *whose code did it start from*.
 
 Contributing **upstream** is the exempt case: working in a clone of
 `rust-lang/rust` or `serde-rs/serde` follows that project's conventions.
@@ -659,32 +669,44 @@ The guard therefore lives in `~/.git-hooks/prepare-commit-msg` (the global
 path, which nothing shadows) and asks one question per commit:
 
 ```
-is the origin owner one of the five owned owners → --no-verify is a violation
+is this repo mine according to GitHub → --no-verify is a violation
 ```
 
 ```bash
 # what the guard decides for the current repo
 python3 ~/.agents/skills/git-standards/scripts/guard_no_verify.py --repo .
-# VERDICT: ENFORCED   (owned — the hook must run, forks included)
-# VERDICT: EXEMPT     (external repo — hook may be skipped)
-# VERDICT: ERROR      (cannot classify — treat as ENFORCED, never as EXEMPT)
+# VERDICT: ENFORCED   (GitHub says it is yours — the hook must run)
+# VERDICT: EXEMPT     (GitHub says it is not yours — hook may be skipped)
+# VERDICT: ERROR      (could not reach GitHub — treat as ENFORCED, never EXEMPT)
 ```
 
-**Default to `ENFORCED` on any uncertainty.** A repo whose origin cannot be
-resolved, whose owner cannot be read, or that lives outside the five owners
-but is not positively identified as external, is treated as owned. Only an
-origin whose owner is demonstrably outside the owned set downgrades to
-`EXEMPT` — the same asymmetry as §3.3a.3 (从严). In practice the only
-failure mode is an unparseable remote, because ownership needs no API call:
-no token, no network and no rate limit can change the verdict.
+**Failure is ENFORCED, never EXEMPT.** Because ownership now comes from a
+live API call, the check has failure modes a local list did not: no `gh`
+on PATH, an expired token, a GitHub outage, a rate limit, an unparseable
+remote. Every one of them returns `ERROR`, and `ERROR` is treated as
+`ENFORCED` — the same asymmetry as §3.3a.3 (从严). An unanswerable
+question must never become a free pass.
+
+Verified 2026-09-28 — all three failure modes on a repo that *is* yours
+(`euv-dev/euv`) still return `ERROR` / exit 2, never `EXEMPT`:
+
+| Injected failure | Verdict |
+|---|---|
+| `gh` removed from `PATH` | ERROR (rc 2) |
+| `GH_TOKEN=invalid_token_xyz` | ERROR (rc 2) |
+| `GH_HOST=127.0.0.1:1` (unreachable API) | ERROR (rc 2) |
+
+The `gh` CLI reads its token from the macOS keyring, so this works inside a
+hook with no `GH_TOKEN` in the environment — verified with a bare
+`env -i HOME=… PATH=…` shell.
 
 `--no-verify` is not observable from inside the hook: git exposes no env var
 for it, and by the time `prepare-commit-msg` runs the commit already
 succeeded. So the guard does **not** try to detect the bypass at runtime.
 It instead does the thing that actually stops one: `prepare-commit-msg` runs
-the gate itself, and the *behaviour* rule — never type `--no-verify` in an
-owned repo — is on the agent. The script's job is to answer "is this repo
-owned", so the answer is one command instead of a judgement call.
+the gate itself, and the *behaviour* rule — never type `--no-verify` in a
+repo you own — is on the agent. The script's job is to answer "is this repo
+mine", so the answer is one command instead of a judgement call.
 
 ### 3.6.6 When the hook blocks you
 
@@ -724,9 +746,10 @@ wrong — the audit script is the source of truth, not your reading of it.
 17. **Commit or PR text contained Chinese** — §1/§2/§7 stated the English-only rule in prose, and two PRs were still opened with Chinese titles and Chinese bodies on 2026-09-28. The failure is not ignorance of the rule — the rule was already in the file when it was violated. Prose has no enforcement point. Run `python3 scripts/verify_english_only.py commit <msgfile> --repo .` before committing and `… pr "<title>" --body <file>` before `gh pr create`; exit 1 is the gate. Quoting the user's Chinese instruction verbatim in the commit body is still a violation — translate it.
 18. **`bash` reported `exit=126` on a fresh script** — "Permission denied", which reads like a path or filesystem problem but is a missing execute bit. `chmod +x scripts/verify_english_only.py` before first use.
 19. **A fixture loop reported every case as passing** — the loop body ended in `echo "… exit=$?"`, so `$?` was the status of `basename` (or whatever ran last), not the verifier under test. Capture it immediately: `v …; rc=$?`. This one nearly shipped a verifier believed to be broken (it wasn't) and, in the other direction, would have shipped one believed to be working when it wasn't.
-20. **`--no-verify` used in an owned project** — §3.6 forbids it outright; the only exemption is a repo whose **owner** is outside `eastspire` / `hyperlane-dev` / `euv-dev` / `crates-dev` / `docs-pages`. When a gate blocks a commit, the fix is to fix the code — not to bypass. `git commit --no-verify` is *not* a way out: a `prepare-commit-msg` hook runs the gate again and aborts the commit, because git does not let `--no-verify` suppress that hook. Verified 2026-09-28 in a copy of `ctares`: a `--no-verify` commit carrying a doc-comment violation was blocked (exit 1, commit unrecorded), and the same commit passed once the violation was fixed. Cosmetic variants (`-c core.hooksPath=/dev/null`, `SKIP_HOOKS=1`) are the same bypass and are equally forbidden.
+20. **`--no-verify` used in one of your own repos** — §3.6 forbids it outright; the only exemption is a repo GitHub confirms is not yours. When a gate blocks a commit, the fix is to fix the code — not to bypass. `git commit --no-verify` is *not* a way out: a `prepare-commit-msg` hook runs the gate again and aborts the commit, because git does not let `--no-verify` suppress that hook. Verified 2026-09-28 in a copy of `ctares`: a `--no-verify` commit carrying a doc-comment violation was blocked (exit 1, commit unrecorded), and repointing `origin` at an external repo made the same commit pass — so the exemption is the API's answer, not a flag. Cosmetic variants (`-c core.hooksPath=/dev/null`, `SKIP_HOOKS=1`) are the same bypass and are equally forbidden.
 21. **Adding a guard to `.git/hooks/` in a repo on this machine** — `core.hooksPath` is set **globally** to `~/.git-hooks`, so every repo-local hook file is silently ignored and the guard protects nothing. It looks installed and runs never. Verified 2026-09-28: a throwaway repo's own `pre-commit` produced no output across several commits until `core.hooksPath` was overridden explicitly. Any new hook must go in `~/.git-hooks/` (or the repo must first set its own `core.hooksPath`). Confirm with `git config --get core.hooksPath` before debugging why a hook "does not run".
-22. **Judging ownership from fork status instead of the owner** — `eastspire/FrameworkBenchmarks` and `eastspire/web-frameworks` are forks of TechEmpower and the-benchmarker, but they sit in the user's own namespace, so §3.6 enforces them; a clone of `serde-rs/serde` is a fork-free upstream repo, so it is exempt. The test is *whose repo is it*, not *whose code did it start from*. Run `scripts/guard_no_verify.py --repo .` rather than reasoning about it — it needs no network call and defaults to ENFORCED whenever the owner cannot be read.
+22. **Enumerating orgs with `/users/<account>/orgs`** — that endpoint returns only orgs with *public* membership. On this machine it returned 2 (`hyperlane-dev`, `crates-dev`) and silently omitted the private `euv-dev` and `docs-pages`, i.e. four repos that the gate is supposed to protect. Use `/user/orgs`, which needs the `read:org` scope. This is the failure mode of any silently-truncated enumeration: it looks complete, and it leaves exactly the private repos unprotected. Cross-check the count before trusting it.
+23. **Hardcoding the owned-owner list in the hook** — an org created after the script was written is not in the list and is silently exempt. Ownership is resolved live per commit (§3.6.1), so a new org is covered without editing anything. Corollary: a live API call can fail, so every failure mode must return `ERROR` → treated as `ENFORCED`. Verified: `gh` off PATH, `GH_TOKEN=invalid_token_xyz`, and `GH_HOST=127.0.0.1:1` all return ERROR/exit 2 on a repo that *is* yours — never EXEMPT. Never let an unanswerable question become a free pass.
 
 ## 5. Quick reference card
 
@@ -747,10 +770,11 @@ author:   git config --global user.name  "eastspire"
           (never -c user.email=… or GIT_AUTHOR_EMAIL, see §7)
 check:    python3 ~/.agents/skills/git-standards/scripts/classify_change.py
           → VERDICT: DIRECT_PUSH | NEEDS_PR   (exit 0 / 1 / 2=error)
-bypass:   git commit --no-verify   FORBIDDEN in owned projects (§3.6)
-          owned = origin owner ∈ eastspire | hyperlane-dev | euv-dev
-                  | crates-dev | docs-pages
-          exempt = any other owner (external repo), forks included as owned
+bypass:   git commit --no-verify   FORBIDDEN in your own repos (§3.6)
+          owned = every repo GitHub reports under your account
+                   or under any org you belong to (enumerated live,
+                   not a hardcoded list; forks included as owned)
+          exempt = GitHub confirms the repo is not yours
           check: python3 ~/.agents/skills/git-standards/scripts/guard_no_verify.py --repo .
 ```
 

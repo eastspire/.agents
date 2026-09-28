@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
-"""Classify whether a repository may bypass its pre-commit hook.
+"""Classify whether a repository may bypass the pre-commit hook.
 
-The rule is ownership, not forking. A repo under one of the owned owners
-(the personal account plus the four owned orgs) must never skip the
-pre-commit gate. Anything else is external — upstream code the user does
-not own — and follows upstream conventions, so the hook may be skipped.
+Ownership is resolved by asking GitHub, not by a hardcoded owner list, so
+every repo the user owns is covered — including any org created after this
+script was written. Two sets are enumerated:
 
-Only the origin remote is consulted; no network call is involved, so a
-missing token, an unreachable API or a rate limit can never change the
-verdict. A repo whose origin cannot be parsed is reported ERROR, which
-callers must treat as ENFORCED.
+  * every repository under the authenticated account (`/user/repos`)
+  * every repository under every org the account belongs to (`/user/orgs`
+    then `orgs/<org>/repos`)
+
+A repo is ENFORCED when it appears in either set, and EXEMPT only when
+GitHub positively reports it as belonging to nobody the user owns. Anything
+unresolvable — no auth, API down, rate limited, remote that is not GitHub —
+is ERROR, which the caller must treat as ENFORCED. The failure direction is
+deliberate: an unanswerable question must never become a free pass.
 
 Exit codes:
-    0  ENFORCED  owned project, the hook must run
-    1  EXEMPT    external repo, the hook may be skipped
-    2  ERROR     could not classify; callers must treat this as ENFORCED
+    0  ENFORCED  the repo is the user's, the hook must run
+    1  EXEMPT    GitHub confirms the repo is not the user's
+    2  ERROR     could not resolve ownership; callers treat this as ENFORCED
 """
 
 from __future__ import annotations
@@ -24,22 +28,8 @@ import json
 import re
 import subprocess
 import sys
-from typing import Optional
+from typing import List, Optional, Tuple
 
-OWNED_OWNERS = frozenset(
-    {
-        "eastspire",
-        "hyperlane-dev",
-        "euv-dev",
-        "crates-dev",
-        "docs-pages",
-    }
-)
-
-# Remote URL shapes that identify a GitHub repo, e.g.
-#   git@github.com:euv-dev/euv.git
-#   https://github.com/euv-dev/euv.git
-#   https://x-access-token:<tok>@github.com/euv-dev/euv.git
 GITHUB_REMOTE = re.compile(
     r"github\.com[:/]+(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
 )
@@ -47,6 +37,9 @@ GITHUB_REMOTE = re.compile(
 ENFORCED = "ENFORCED"
 EXEMPT = "EXEMPT"
 ERROR = "ERROR"
+
+# A hook must not hang a commit; each gh call is bounded.
+GH_TIMEOUT = 25
 
 
 def run_git(repo: str, *args: str) -> Optional[str]:
@@ -66,12 +59,11 @@ def run_git(repo: str, *args: str) -> Optional[str]:
     return result.stdout.strip()
 
 
-def parse_origin(repo: str) -> Optional[tuple]:
+def parse_origin(repo: str) -> Optional[Tuple[str, str]]:
     """Return (owner, repo) parsed from the first GitHub remote."""
     remotes = run_git(repo, "remote", "-v")
     if not remotes:
         return None
-    # Prefer origin, then any remote in declaration order.
     lines = [line for line in remotes.splitlines() if "fetch" in line]
     lines.sort(key=lambda line: 0 if line.startswith("origin") else 1)
     for line in lines:
@@ -83,14 +75,60 @@ def parse_origin(repo: str) -> Optional[tuple]:
     return None
 
 
-def classify(repo: str) -> tuple:
-    """Return (verdict, reason) for `repo`.
+def gh_api(endpoint: str, jq: str) -> Optional[str]:
+    """Call the gh CLI, returning stdout, or None if the call failed."""
+    try:
+        result = subprocess.run(
+            ["gh", "api", endpoint, "--jq", jq],
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
 
-    The rule is ownership, not forking: a repo under one of the owned
-    owners is always enforced; anything else is external and may be
-    skipped. No network call is needed, so a missing token or an
-    unreachable API can never change the verdict.
+
+def gh_account() -> Optional[str]:
+    """The account gh is authenticated as, or None."""
+    out = gh_api("user", ".login")
+    return out.strip() if out and out.strip() else None
+
+
+def gh_owned_repos(account: str) -> Optional[List[str]]:
+    """Every repo name the account owns directly, or None on failure."""
+    out = gh_api(f"users/{account}/repos?per_page=100&affiliation=owner", ".[] | .name")
+    if out is None:
+        return None
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def gh_owned_orgs(account: str) -> Optional[List[str]]:
+    """Every org the account belongs to, or None on failure.
+
+    `/user/orgs` is used rather than `/users/<account>/orgs` because the
+    latter lists only orgs with public membership, which silently omits
+    private ones.
     """
+    out = gh_api("/user/orgs", ".[].login")
+    if out is None:
+        return None
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def gh_org_repos(org: str) -> Optional[List[str]]:
+    """Every repo name under `org`, or None on failure."""
+    out = gh_api(f"orgs/{org}/repos?per_page=100", ".[].name")
+    if out is None:
+        return None
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def classify(repo: str) -> Tuple[str, str]:
+    """Return (verdict, reason) for `repo`."""
     origin = parse_origin(repo)
     if origin is None:
         return (
@@ -101,16 +139,58 @@ def classify(repo: str) -> tuple:
     owner, name = origin
     full_name = f"{owner}/{name}"
 
-    if owner.lower() in OWNED_OWNERS:
+    account = gh_account()
+    if account is None:
         return (
-            ENFORCED,
-            f"{full_name} is under owned owner '{owner}'; "
-            "the pre-commit hook must run and --no-verify is forbidden",
+            ERROR,
+            "gh is not authenticated, so ownership cannot be resolved; "
+            "treating as owned",
         )
+
+    # The account's own repositories.
+    if owner.lower() == account.lower():
+        personal = gh_owned_repos(account)
+        if personal is None:
+            return (ERROR, "could not list personal repositories; treating as owned")
+        if name in personal:
+            return (
+                ENFORCED,
+                f"{full_name} is a repository owned by {account}; "
+                "the pre-commit hook must run",
+            )
+        return (
+            EXEMPT,
+            f"GitHub reports {account} owns no repository named {name} "
+            "(deleted, renamed, or transferred); hook may be skipped",
+        )
+
+    # Repositories under any organization the account belongs to.
+    orgs = gh_owned_orgs(account)
+    if orgs is None:
+        return (
+            ERROR,
+            "could not list the account's organizations; treating as owned",
+        )
+    if owner.lower() in {org.lower() for org in orgs}:
+        repos = gh_org_repos(owner)
+        if repos is None:
+            return (ERROR, f"could not list repositories under {owner}; treating as owned")
+        if name in repos:
+            return (
+                ENFORCED,
+                f"{full_name} is a repository under your organization {owner}; "
+                "the pre-commit hook must run",
+            )
+        return (
+            EXEMPT,
+            f"GitHub reports organization {owner} has no repository named "
+            f"{name}; hook may be skipped",
+        )
+
     return (
         EXEMPT,
-        f"{full_name} is external (owner '{owner}' is not one of the owned "
-        "owners); upstream conventions apply and the hook may be skipped",
+        f"{full_name} is not yours: {account} neither belongs to {owner} "
+        "nor owns it; hook may be skipped",
     )
 
 
