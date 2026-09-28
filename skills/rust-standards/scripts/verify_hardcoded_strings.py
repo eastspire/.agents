@@ -96,9 +96,38 @@ FORMAT_MACROS = {
 STRING_LITERAL = re.compile(r'"([^"\\]|\\.){4,}"')
 
 # Match attribute lines like `#[doc = "..."]` /
-# `#[serde(rename = "...")]` etc. — the whole line starts
+# `#[serde(rename = "..."]` etc. — the whole line starts
 # with `#[` and ends with `]`.
 ATTR_LINE = re.compile(r"^\s*#\[")
+
+
+# Match a Rust foreign-ABI declaration slot (2026-09-28).
+#
+#   extern "system" { ... }        (block)
+#   extern "C" fn f() { ... }      (single fn)
+#   pub unsafe extern "system" fn g() { ... }
+#
+# The string here is the LINKING ABI, not program data.  It lives in
+# a grammar position that accepts ONLY a string literal — there is no
+# expression slot, so it can never be hoisted into a `const`:
+#
+#   const ABI: &str = "system";
+#   extern ABI { }        →  error: expected `fn`, found `ABI`
+#
+# Verified with rustc 1.9x: replacing the literal with a const path is
+# a hard syntax error, so flagging it is a false positive by
+# construction.  Anchored on the `extern` KEYWORD (with optional
+# visibility / `unsafe` in front) so a string that merely CONTAINS
+# the word "extern" is still reported.
+EXTERN_ABI_LINE = re.compile(
+    r"""^\s*
+        (?:pub(?:\s*\([^)]*\))?\s+)?     # optional `pub` / `pub(crate)`
+        (?:unsafe\s+)?                    # optional `unsafe`
+        extern\s+                        # the keyword itself
+        "                                 # the ABI literal opens here
+    """,
+    re.VERBOSE,
+)
 
 
 def _list_rs_files(root: Path) -> list[Path]:
@@ -193,6 +222,14 @@ def audit_one(path: Path) -> list[str]:
             continue
         # Skip attribute lines (#[doc = "..."], #[serde(...)])
         if ATTR_LINE.match(line):
+            continue
+        # Skip the foreign-ABI slot of `extern "C" { }` / `extern "C" fn f()`
+        # (2026-09-28).  The ABI string is a grammar-level keyword slot,
+        # not program data — `extern ABI {}` is a hard rustc syntax
+        # error, so it can never be hoisted into const.rs.  Anchored on
+        # the `extern` keyword so a string merely CONTAINING the word
+        # "extern" is still reported.
+        if EXTERN_ABI_LINE.match(line):
             continue
         # Skip format-macro format strings
         if _is_format_macro(line):
