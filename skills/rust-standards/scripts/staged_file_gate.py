@@ -54,6 +54,7 @@ Design notes
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
@@ -70,6 +71,7 @@ VERIFIERS = {
     "verify_no_self_field_access": "self.field access §17.3/§17.12",
     "verify_lib_rs_doc_comment": "lib.rs //! block §2.4",
     "verify_no_redundant_accessor_attr": "bare accessor attr §L",
+    "verify_no_sibling_dirs": "orphan code file beside sub-dirs §1.3d",
 }
 
 # Verifiers that only make sense for a specific file name.
@@ -211,7 +213,17 @@ def main() -> int:
         return 0
 
     modules: dict[str, object] = {}
+    # Fixture support: run a subset of the gate's verifiers so one rule's
+    # fixture is not masked by another rule's findings.  Unset in normal
+    # use, so the gate always runs the full set.
+    only = {
+        part.strip()
+        for part in os.environ.get("STAGED_FILE_GATE_ONLY_VERIFIERS", "").split(",")
+        if part.strip()
+    }
     for name in VERIFIERS:
+        if only and name not in only:
+            continue
         module = load_verifier(scripts_dir, name)
         if module is not None:
             modules[name] = module

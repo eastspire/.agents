@@ -149,6 +149,47 @@ def _label(names: list[str]) -> str:
     return f"[{shown}]"
 
 
+def audit_one(path: Path) -> list[str]:
+    """Per-file entry point, so a staged-file gate can call this verifier.
+
+    §1.3d is a statement about a directory, not a file, so the natural
+    entry point is `audit_one_dir`.  A gate that diffs per-file findings
+    against HEAD would call `audit_one` on every staged path; without
+    this adapter `getattr(module, "audit_one", None)` returns None, the
+    gate collects `[]`, and the rule reads as a permanent silent zero
+    (see audit-pitfalls §89).
+
+    The mapping is deliberately narrow: report a finding only when the
+    file's own basename is one of the orphans named in the directory's
+    violation.  A file that sits in a compliant directory contributes
+    nothing, and a staged directory-only change (adding a sub-directory
+    beside an existing orphan) is caught because the orphan is then
+    named and its file path is usually staged too.
+
+    This cannot catch the case where the orphan is NOT staged and the
+    new sub-directory is — the gate has no path for it.  That case is
+    why the whole-repo audit (check 44) remains the authority.
+    """
+    path = Path(path)
+    if path.suffix != ".rs" or not path.is_file():
+        return []
+    directory = path.parent
+    findings = audit_one_dir(directory)
+    if not findings:
+        return []
+    entries = sorted(os.listdir(directory))
+    code_files = {
+        entry
+        for entry in entries
+        if entry.endswith(".rs")
+        and entry not in EXEMPT_FILE_NAMES
+        and (directory / entry).is_file()
+    }
+    if path.name not in code_files:
+        return []
+    return findings
+
+
 def _dirs_to_check(root: Path) -> list[Path]:
     """Every candidate directory under root, git-ignored ones dropped."""
     candidates: list[Path] = []

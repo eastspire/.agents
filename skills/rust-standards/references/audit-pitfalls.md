@@ -2831,6 +2831,74 @@ hook 不跑 `audit_rust_standards.py` 38 项 audit,只跑 5 个 verifier,选择�
 
 **Skill §13.7.2a 文档**:`references/13-dependency.md` 新增 §13.7.2 一节(注:不是 §13.7.3,因为它是"跨段规则",与"块内规则 §13.7.3"并列;原 §13.7.2 块内顺序往后挪到 §13.7.3),原 §13.7.3-§13.7.9 全部 +1 编号到 §13.7.4-§13.7.10。inline cross-reference 也同步更新。
 
+## §86 verify_use_aggregation.py(§6.6,check 41)— 无 root 的 `use { ... }` re-export 块会造成大规模假阳性(2026-09-27)
+
+新规则"同 root 的 `use` 必须聚合"(check 41 / `verify_use_aggregation.py`)接入时踩到的坑,全部是**真实假阳性**,如果不修会把 audit 数字撑到完全不可信。
+
+**坑 1(最严重):无 root 的 brace re-export 块被误判为同一 root。**
+
+euv / hyperlane / ctares 的 `lib.rs` 大量使用无 root 的 re-export 块:
+
+```rust
+pub use { app::*, event::*, noderef::*, reactive::*, vdom::* };
+use { js_sys::*, lombok_macros::*, wasm_bindgen::prelude::*, web_sys::* };
+```
+
+初版 `_root_of()` 对 `{ app::*, event::* }` 取"第一个 `::` 之前"的部分,得到的是 `app` / `js_sys` —— 但这两条语句的路径**根本不以 root 开头**,`{...}` 后面直接是 `::`。真正的 bug 在于:解析失败时返回了哨兵值 `*`,于是**所有**无 root 的 brace 块共享 `root='*'`,被当成"同 root 的多条独立 use"而全部报错。
+
+初版在 euv 报 3 hits、hyperlane 报 5 hits、ctares 报 1 hit —— **10 个 hit 里 0 个是真违规**,全是这个 bug 产生的幽灵。
+
+正确做法:检测 `{` 开头即标记 `rootless=True`,**直接排除出分组**。这些块本来就是 §6.1 三段式的 re-export 阶段,归 check 27 管,§6.6 不应该插手。修完之后 euv 1 / hyperlane 0 / ctares 0。
+
+**坑 2:`grep` 粗扫数字远高于 verifier 数字,属正常,不要据此调规则。**
+
+预估"euv ~8 文件、ctares ~3"是**错的**。`grep -nE '^use std::'` 会把**已经是 brace 形式**的 `use std::{` 也数进去。euv `core/src/lib.rs:15` 是 `pub use std::{`、`:28` 是 `use std::{` —— 两条都是**已聚合**形态,不是违规。verifier 解析每条语句的真实 root 后,euv 真实命中只有 `macros/tests/mod.rs:12` 一个文件 1 hit。
+
+**教训:任何"同 root 聚合"类规则上线前,必须用 AST 语义验证真实命中数,不能拿 grep 数字当基线。** 本次靠 `importlib` 复用 verifier 的解析函数、对三仓逐文件打印 `(root, vis, lines)` 分组结果才确认 1/0/0 是真值。
+
+**坑 3:`#[cfg(...)]` gate 的 import 绝不能合并。**
+
+ctares `server-manager/src/lib.rs` 形态:
+
+```rust
+use std::{ fs, path::{Path, PathBuf}, pin::Pin, ... };
+
+#[cfg(windows)]
+use std::ffi::c_void;          // ← 同 root,但必须豁免
+```
+
+初版按 root 分组会报"合并成 `use std::{..., ffi::c_void}`"。这是**改语义**:把 `#[cfg(windows)]` 提升到整个 brace 组后,非 Windows 平台也会带上条件编译,Windows-only 的 `c_void` 会在 Linux 上被引用 → 编译炸。
+
+verifier 必须跟踪 `use` 前面挂的属性行(`ATTRIBUTE = ^#!?\[`),给该语句打 `gated=True` 并排除出分组。
+
+**坑 4:花括号计数必须跳过字符串/字符字面量。**
+
+naive `line.count('{') - line.count('}')` 会被 `let s = "{";`、`r#"raw { string"#` 污染,把顶层作用域跟踪推进"幽灵块",导致其后的真实顶层 `use` 被漏掉。`_brace_delta()` 手写了扫描器,处理 `//`、`/* */`、普通字符串、raw string(`r"..."` / `r#"..."#`)、char 字面量,并**区分 char 字面量 `'a'` 与 lifetime `'a`**(后者不消耗 3 个字符)。
+
+**坑 5:注释不是 stage 边界。**
+
+需求明确"注释夹在两个 use 之间不能误判"。实现上:两条 `use` 之间间隔 ≤ 2 行(中间只有注释/空行)视为**同一个 stage 的连续段**,仍然合并并报出;间隔 > 2 行才视为跨 §6.1 stage 而豁免。这样 `use std::path::Path;` + 注释 + `use std::ffi::c_void;` 会被报(compliant fixture 里这个形态归到 violating 侧验证)。
+
+**Fixture**:`~/.hermes/cache/scratch/verifier-fixtures/use-agg-{compliant,violating}`:compliant **0 hits / exit 0**(8 个文件,每个覆盖一条豁免:已聚合 / 不同 root / glob 并存 / fn 内 use / cfg(test) mod / 跨 visibility / cfg gate / 无 root brace / 字符串花括号),violating **4 hits / exit 1**(纯拆分 / 注释夹中间 / 三条混合含已有 brace 块 / `pub use` 拆分)。audit 端到端:check 41 在 violating 侧 `FAIL ... 4 hits`,compliant 侧 `PASS`。
+
+**注意 audit 里的 check 号 ≠ 列表位置**:源码注释写 `# check 41`,但它是 `CHECKS` 列表的第 40 项(main 用 `enumerate(CHECKS, start=1)` 按位置编号)。grep `FAIL: 41.` 找不到,要看 `FAIL: 40.`。总条数 39 → 40。
+
+**hook 接入**:`staged_file_gate.py` 的 `VERIFIERS` 字典加 `"verify_use_aggregation": "use aggregation §6.6"`,靠 importlib 走 `audit_one()`,绕过 argv 契约。实测:HEAD 已有违规的旧文件 staged → `0 new violations — commit allowed`(历史债不拦);在干净 HEAD 上新引入拆分 → `+1 new (verify_use_aggregation)` + `commit BLOCKED` exit 1。双向都通。
+
+## §N — proc-macro crate: §1.3c / chk38 CANNOT be satisfied for `///` doctest examples (2026-09-28)
+
+`verify_hardcoded_strings.py` flags every string literal >= 4 chars inside a `///` doc comment, including lines inside ```rust code fences. For a `proc-macro = true` crate those hits are **structurally unfixable**:
+
+- The doctest body compiles as a *separate crate that links the proc-macro crate*.
+- rustc forbids a `proc-macro` crate from exporting anything except `#[proc_macro]` / `#[proc_macro_derive]` / `#[proc_macro_attribute]` functions: `error: `proc-macro` crate types currently cannot export any items other than functions tagged with #[proc_macro], #[proc_macro_derive], or #[proc_macro_attribute]`.
+- Therefore a `const.rs` constant can never be referenced from the doctest, and the literal must stay inline for the example to compile.
+
+**Do not** "fix" these by deleting real examples, by `#[allow]`, or by rewriting examples into non-compiled fences just to silence the count. Report them as known-unfixable instead. Measured: `ctares/lombok-macros/src/lib.rs` = 56 hits, all inside doctest fences, 0 in real code.
+
+`format_ident!(CONST, ..)` / `format!(CONST, ..)` are likewise impossible — macros requiring a literal format string reject a const path with `error: format argument must be a string literal`. Call sites must use a helper that concatenates the const prefix with the rendered suffix (preserving the first `Ident` argument's span for hygiene).
+
+**同一规则的 macro 参数面**:`format_args!` 不在 `verify_hardcoded_strings.py` 的 `FORMAT_MACROS` 白名单里,所以 `f.write_fmt(format_args!("{:?}", self))` 会被误报,改写成 `write!(f, "{:?}", self)` 即可通过(语义等价,两者都在 FORMAT_MACROS 内)。
+
 ## §87 verify_no_sibling_dirs.py(§1.3d,check 44)— 代码文件与子目录同级的规则,以及"豁免名单"必须精确到 4 个文件(2026-09-28)
 
 新规则(2026-09-28 user 原话:"如果 rust 代码文件同级有目录,需要报错提示代码文件不能和目录在同一级,注意 lib.rs main.rs build.rs mod.rs 这些除外")接入为 `scripts/verify_no_sibling_dirs.py` + audit check 44。
@@ -2906,3 +2974,78 @@ euv 那 2 处是唯一剩下的真违规,而且修它们**不涉及关键字文�
 ### 连带教训:给 subagent 的指令里不要写它做不到的验收条件
 
 两个 subagent 的任务书都写了"跑 `rust_pre_commit.py` 直到 exit 0 = 唯一完工标准"。它们都做到了 exit 0 —— 因为 Phase 4 是坏的。**一个坏的 gate 比没有 gate 更危险**:它给出的 "PASS (0 warnings)" 是主动的误导,而且让两个独立执行者同时"通过"了一个不存在的检查。派发含验收标准的任务时,gate 本身的正确性要先确认,否则你派发的是"通过一个假检查"。
+
+## §89 规则写进 audit 不等于 hook 会拦 —— 目录级规则在 per-file gate 里读作恒定 0(2026-09-29)
+
+§1.3d 上线的第二天,user 问:「skill hook 不是加了校验脚本吗?为什么 git 提交没有拦截这种文件?」实测确认:**hook 报的是 `0 new violations — commit allowed`,而工作区里正躺着 `stripe-pay-client/src/enum.rs` 这个肉眼可见的违规。**
+
+三层原因,每层单独看都像"应该能工作":
+
+**1. gate 的 verifier 列表里没有它。**
+```python
+VERIFIERS = {
+    "verify_doc_comment_format", "verify_hardcoded_strings",
+    "verify_no_import_rename", "verify_use_aggregation",
+    "verify_no_self_field_access", "verify_lib_rs_doc_comment",
+    "verify_no_redundant_accessor_attr",
+}   # ← 没有 verify_no_sibling_dirs
+```
+7 个全是文件**内容**级。规则当天写进 `audit_rust_standards.py` check 44 就自认为落地了 —— 但 audit 和 hook 是两个不同的调用方。
+
+**2. 就算注册,`audit()` 会静默返回 `[]`。**
+```python
+def audit(module, path):
+    audit_one = getattr(module, "audit_one", None)
+    if audit_one is None:
+        return []            # ← 静默零,无任何提示
+```
+§1.3d 的入口叫 `audit_one_dir`(吃目录),gate 喂的是文件路径。`getattr` 返回 None,收集到空列表。**这个分支不打日志、不报错、不计数** —— gate 打印的是 `0 new violations`,读起来像"检查过了,没问题"。
+
+**3. 就算有 `audit_one`,差分基线仍然是错的。**
+gate 的语义是「本文件的 findings 数 vs HEAD 同一路径的 findings 数」。orphan 违规住在**目录**的属性上:`src/` 有子目录 + 有 `enum.rs`。单看 `src/enum.rs` 这一个文件,无论它多"违规",HEAD 版本和当前版本的 per-file 计数都是同一个数 —— delta 恒为 0。
+
+### 修法:per-file 适配层,但保持窄口径
+
+给 `verify_no_sibling_dirs.py` 加 `audit_one(path)`:向上取 `path.parent`,调 `audit_one_dir`,**仅当该文件的 basename 确实出现在目录违规报告的 orphan 名单里**才返回 finding。
+
+```python
+def audit_one(path: Path) -> list[str]:
+    if path.suffix != ".rs" or not path.is_file():
+        return []
+    directory = path.parent
+    findings = audit_one_dir(directory)
+    if not findings:
+        return []
+    code_files = {e for e in os.listdir(directory)
+                  if e.endswith(".rs") and e not in EXEMPT_FILE_NAMES
+                  and (directory / e).is_file()}
+    return findings if path.name in code_files else []
+```
+
+窄口径是必须的:否则一个躺在合规目录里的文件会因为**邻居**的违规被拦 —— 报错信息指向一个没有问题的文件,那种误报一次就足以让人永久关掉 hook。
+
+**残留缺口(必须写进规范,不能装作没有)**:orphan 未被 staged、而新增的子目录被 staged 的组合,gate 没有 orphan 的路径可查,抓不到。**所以 check 44 仍是权威,gate 只是补一层早期反馈。** 规范里要写明"哪一层负责什么",否则下个 session 会以为 gate 已经全覆盖。
+
+### 双向验证,以及 fixture 自己先违规了
+
+3-case fixture(orphan 必须拦 / 修好后必须放行 / 关键字文件必须豁免)。前两次跑**都挂在 case 2/3**,而且第一次挂在"attribution"上:
+
+- 第一次的 case 1 用了 `enum.rs` 当"违规文件" —— **但 `enum.rs` 正是 §1.3 关键字文件,本来就豁免**。gate 拦住了它,但拦它的是 `verify_lib_rs_doc_comment`,不是 §1.3d。fixture 编码了一个错误的规则模型。
+- 换成真正的孤儿 `inline.rs` 后 case 1 通过且归因正确,但 case 2/3 仍 BLOCK —— 触发的是 `verify_doc_comment_format`(`lib.rs` / `inline.rs` 缺 doc-comment),与 §1.3d 无关。
+
+**教训:多 verifier 的 gate,单规则 fixture 会被别的规则污染。** 修法是给 gate 加一个 env 开关只跑指定 verifier(生产路径不设,行为不变):
+```python
+only = {p.strip() for p in os.environ.get("STAGED_FILE_GATE_ONLY_VERIFIERS","").split(",") if p.strip()}
+```
+这同时是给未来每条规则写 fixture 的基础设施。
+
+**最后必须做真实仓库反向验证**(skill §5.1:只在副本上做):在 euv 的 worktree 副本里造一个 `macros/tests/probe_orphan.rs`,gate 报:
+```
+- macros/tests/probe_orphan.rs: +1 new (verify_no_sibling_dirs — orphan code file beside sub-dirs §1.3d)
+staged_file_gate: FAIL — commit BLOCKED
+```
+worktree 已 `remove --force` + `prune`,euv 工作区确认干净。
+
+### 元教训
+
+**"规则已写进规范"和"规则会拦人"是两个命题,中间隔着调用方注册。** 写新规则时的检查清单要加一条:grep 出所有会调用 verifier 的地方(`VERIFIERS` 字典、audit 的 CHECKS 列表、CI workflow 里的命令行),逐个确认它在里面。§7「verifier 和它的调用方一起发布」讲的是同一件事,但那次的读者是我自己,这次依然是。
