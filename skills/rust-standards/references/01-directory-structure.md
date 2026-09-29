@@ -192,36 +192,50 @@ pub fn minify_html_template(html: &str) -> String {
 
 **与 §1.3a 的关系**:§1.3a 管 top-level declaration(struct/enum/impl...),§1.3c 管 fn/impl body 内的 literal。两者互补,audit script 的 check 16 检 §1.3a,新增 check 18 检 §1.3c。
 
-### 1.3d 代码文件不能与目录同级(2026-09-28 user 钦定)
+### 1.3d 孤儿代码文件不能与目录同级(2026-09-28 user 钦定,同日收窄)
 
 **user 原话**:"如果 rust 代码文件同级有目录,需要报错提示代码文件不能和目录在同一级,注意 lib.rs main.rs build.rs mod.rs 这些除外"。
 
-**规则**:一个目录只要拥有**子目录**,就**不允许**再持有 `.rs` 代码文件 —— 唯一豁免是四个入口文件:
+**收窄后的规则**:一个目录只要拥有**子目录**,就不能再放**既没有模块归属、也没有关键字槽位**的 `.rs` 文件。豁免两类:
 
-| 豁免文件 | 为什么豁免 |
-|---------|-----------|
-| `lib.rs` | crate 根入口,职责就是统领 `src/` |
-| `main.rs` | bin 入口(含 `src/bin/<tool>/main.rs` 拆分形态) |
-| `build.rs` | cargo build script,cargo 约定固定放在 crate 根、与 `src/` 同级 |
-| `mod.rs` | 模块入口,职责就是 `mod r#xxx;` 声明同级子模块 —— 这是**唯一**被设计成与目录同级的关键字文件 |
+| 豁免类别 | 文件 | 为什么豁免 |
+|---------|------|-----------|
+| 入口文件(4) | `lib.rs` / `main.rs` / `build.rs` / `mod.rs` | 职责就是统领子模块 |
+| 关键字文件(9+1) | `const.rs` / `static.rs` / `fn.rs` / `enum.rs` / `struct.rs` / `trait.rs` / `impl.rs` / `type.rs` + `macro.rs` | 各自目录的 `mod.rs` **按名字**声明它们,§1.3a 已管住内容,父层不必再表态 |
 
-**为什么**:关键字文件是模块树的**叶子** —— `mod r#fn;` 只解析到 `<dir>/fn.rs`,别无所指。一旦同级还有子目录,同一层级就出现了两套约定:`foo.rs` 到底是父作用域的成员,还是 `foo/` 的命名空间对等物?读者必须停下来猜。`mod.rs` 豁免正是因为它的存在意义就是"父节点的目录清单"。
+**只有真正的孤儿文件才违规** —— `inline.rs` / `html_static_style.rs` 这类:没有任何 `mod.rs` 声明它,也不在 §1.3 的关键字表里。
 
-**正确形态**(每层要么只放目录,要么只放代码文件):
+#### 为什么收窄(同日实测,推翻首版)
+
+首版规则是"任何 `.rs` 都不得与目录同级,只豁免 4 个入口文件"。它有两个实测问题:
+
+**1. 标准修法引入 clippy `module_inception` 警告。** 修法是 `const.rs` → `const/{const.rs, mod.rs}`,而新 `mod.rs` 里必须写 `mod r#const;` —— 模块名与所在目录同名,clippy 默认 `warn`。实测(euv master 与 ctares master 均为 **0 warning** 基线):
+
+| 仓库 | 首版修完 | warning |
+|------|---------|---------|
+| euv | `core/src/vdom/{impl,struct}/mod.rs` 等 | **+2** |
+| ctares | `*/src/const/mod.rs`、`enum/mod.rs` | **+5** |
+
+且 `X/X.rs` 这种形态在两个仓的 master 里**一个都不存在** —— 是规则凭空引入的新模式,不是"跟随既有约定"。
+
+**2. 误报合法文件。** ctares 有 **24 个 `macro.rs`** 与子目录同级(`clonelicious/src/`、`future-fn/src/`、`std-macro-extensions/src/*/`),全是合法叶子,首版全报违规。
+
+**教训:新规则的"标准修法"必须先跑一遍 clippy 验证,再写进规范。** 规则在 audit 里能报出违规 ≠ 修法本身是干净的 —— 后者是 git 状态,前者是 verifier 的输出,两者之间没有自动校验。
+
+**正确形态**(每一层要么只放目录,要么只放关键字文件):
 ```
-✅ crate-cli/src/          # 只有目录
-   ├── const/  ├── fmt/  ├── help/
-   ├── lib.rs  └── main.rs        # 仅入口文件例外
+✅ crate-cli/src/          # 目录层 + 入口文件 + 关键字文件
+   ├── const.rs  ├── lib.rs  ├── main.rs
+   └── bump/  ├── fmt/  ├── help/  ...
 
-✅ crate-cli/src/const/    # 只有代码文件,叶子
-   ├── const.rs  └── mod.rs
+✅ crate-cli/src/version/  # 叶子
+   ├── fn.rs  └── mod.rs
 
-❌ crate-cli/src/          # const.rs 与 9 个子目录同级
-   ├── const.rs  ├── bump/  ├── fmt/  ├── help/ ...
+❌ euv/cli/tests/          # inline.rs 是孤儿,没有任何 mod.rs 声明它
+   ├── inline.rs  ├── fmt/  └── hmr/
 ```
-把 `const.rs` 搬成 `const/const.rs` + `const/mod.rs`(`mod r#const;` + `pub use r#const::*;`)后,`src/` 恢复"纯目录层",`const/` 成为叶子层,两层各自只有一种约定。
 
-**验证脚本**:`scripts/verify_no_sibling_dirs.py`,被 `audit_rust_standards.py` check 44 调用。**每个违规目录报 1 条**(不是每个文件 1 条)—— 因为修复动作是结构性的(把该目录下所有代码文件整体搬进各自的子模块目录),N 个文件 = 1 个待修项。Fixture `~/.hermes/cache/scratch/verifier-fixtures/sibling-dirs-{compliant,violating,edge-cases}` 双向自测:compliant 0/exit 0(7 种豁免布局),violating 4/exit 1,edge-cases 2 in 2 dirs/exit 1。**实测**:euv 5 处 / ctares 4 处 / hyperlane 0 处。**不进 pre-commit hook**(audit-pipeline.md §"When to add a verifier to the hook":按目录扫描的规则只归 `rust_pre_commit.py` Phase 2)。
+**验证脚本**:`scripts/verify_no_sibling_dirs.py`,被 `audit_rust_standards.py` check 44 调用。**按违规目录报 1 条**(修复是一次结构性搬迁)。Fixture `~/.hermes/cache/scratch/verifier-fixtures/sibling-dirs-{compliant,violating,edge-cases}` 双向自测:compliant 0/exit 0(含"全部关键字文件 + macro.rs 与目录同级"的豁免用例),violating 4 in 4 dirs/exit 1,edge-cases 2 in 2 dirs/exit 1(报告里只列孤儿文件,豁免文件不进 message)。**三仓实测全部 0 violation**;euv master 剩 **2 处真违规**(`cli/tests/inline.rs`、`macros/tests/html_static_style.rs`)。**不进 pre-commit hook**(目录级规则只归 `rust_pre_commit.py` Phase 2,原因见 audit-pipeline.md)。
 
 ## 1.4 raw identifier 命名(关键!)
 

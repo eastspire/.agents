@@ -367,24 +367,38 @@ def phase_fmt(root: Path) -> bool:
 
 
 def phase_clippy(root: Path) -> bool:
-    """Run cargo clippy --all-targets.  Any warning = FAIL."""
+    """Run cargo clippy --all-targets.  Any warning = FAIL.
+
+    The exit code is NOT a warning signal: `cargo clippy` exits 0 with
+    any number of `warning:` diagnostics (warnings are not errors unless
+    `-D warnings` is passed, which no project in this workspace does).
+    A previous version gated on `rc == 0` alone and printed a hardcoded
+    "0 warnings" — it reported PASS for any repo with clippy warnings,
+    which is how euv (2) and ctares (5) shipped `module_inception`
+    warnings while every gate stayed green.  Count the diagnostics.
+    """
     argv = ["cargo", "clippy", "--all-targets", "--offline", "--quiet"]
     t0 = time.monotonic()
     rc, stdout, stderr = _run("clippy", argv, root, timeout=600)
     dt = time.monotonic() - t0
-    if rc == 0:
-        print(f"  Phase 4 [clippy               ] PASS  ({dt:.1f}s)  0 warnings")
-        return True
-    print(f"  Phase 4 [clippy               ] FAIL  rc={rc}  ({dt:.1f}s)")
     out = (stdout or "") + (stderr or "")
+    # `warning: <text>` at column 0 starts a diagnostic; the indented
+    # `= note:` / `= help:` continuation lines and the `--> file:line`
+    # pointer must not be counted, or one warning inflates to several.
     warning_lines = [
         line for line in out.splitlines()
-        if "warning:" in line or "error:" in line
+        if line.startswith("warning:") or line.startswith("error:")
     ]
+    count = len(warning_lines)
+    if rc == 0 and count == 0:
+        print(f"  Phase 4 [clippy               ] PASS  ({dt:.1f}s)  0 warnings")
+        return True
+    reason = f"rc={rc}" if rc != 0 else f"{count} warning(s)"
+    print(f"  Phase 4 [clippy               ] FAIL  ({dt:.1f}s)  {reason}")
     for line in warning_lines[:10]:
         print(f"    {line.strip()[:200]}")
-    if len(warning_lines) > 10:
-        print(f"    ... ({len(warning_lines) - 10} more)")
+    if count > 10:
+        print(f"    ... ({count - 10} more)")
     print(f"    (Hint: rust-standards rule 14 forbids `#[allow]` — fix at source.)")
     return False
 

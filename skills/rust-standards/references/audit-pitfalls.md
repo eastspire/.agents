@@ -2864,3 +2864,45 @@ hook 不跑 `audit_rust_standards.py` 38 项 audit,只跑 5 个 verifier,选择�
 - Fixture:`~/.hermes/cache/scratch/verifier-fixtures/sibling-dirs-{compliant,violating,edge-cases}`,由 `make_sibling_dir_fixtures.py` 生成、`test_sibling_dirs_verifier.py` 双向断言:compliant **0/exit 0**(7 种豁免布局)、violating **4 in 4 dirs/exit 1**、edge-cases **2 in 2 dirs/exit 1**。
 - audit 端到端:check 44 在 violating 侧 `FAIL ... 4 hits`、edge-cases 侧 `FAIL ... 2 hits`、compliant 侧 `PASS`。
 - 三仓实测:**euv 5 处 / ctares 4 处 / hyperlane 0 处** —— 全部是 `const.rs` / `impl.rs` / `struct.rs` / `fn.rs` 与子目录同级,数字小到可以在一个 sweep commit 里修完,不需要 §45 说的两 PR 分离。
+
+## §88 新规则的"标准修法"必须先跑 clippy 验证 —— verifier 报得出违规 ≠ 修法干净(2026-09-28)
+
+§1.3d 当天上线、当天收窄,根因是这个断层:**verifier 能报出违规,和修法本身不引入新 lint,是两件独立的事,而规范里没有任何机制校验后者。**
+
+首版规则("任何 `.rs` 不得与目录同级,只豁免 4 个入口文件")经双向 fixture + 三仓实测后看起来很扎实:compliant 0 / violating 4 / edge-cases 2。三仓跑出 euv 5 处 / ctares 4 处 / hyperlane 0 处。**然后两个 subagent 按规范去修,才暴露:**
+
+- **标准修法本身引入 clippy 警告。** 修法是 `const.rs` → `const/{const.rs, mod.rs}`,新 `mod.rs` 里必须 `mod r#const;` —— 模块名与目录同名 = `module_inception`(默认 `warn`)。实测 euv **+2**、ctares **+5**,而两仓 master 都是 **0 warning** 基线。
+- **规范凭空发明了代码库没有的模式。** `X/X.rs` 在 euv 和 ctares 的 master 里**一个都不存在**。首版把它当"标准形态"写进文档,实际上是无中生有。
+- **豁免名单漏了一整类合法文件。** ctares 有 **24 个 `macro.rs`** 与子目录同级(`clonelicious/src/`、`future-fn/src/`、`std-macro-extensions/src/*/`),全是 §1.3a 意义上的合法叶子,首版全报违规。
+
+### 更糟的一层:`rust_pre_commit.py` Phase 4 是坏的,所以没人会发现
+
+```python
+if rc == 0:
+    print("PASS  (0 warnings)")   # ← 无条件字符串
+```
+
+`cargo clippy` 有 warning 时 **exit code 仍是 0**(warning 不是 error,除非 `-D warnings`,而三个仓的 CI 都不带)。所以 Phase 4 对**任何**有 warning 的仓库都报 PASS。ctares subagent 的总结里那句 "clippy 0 warnings" 是照抄脚本的假输出 —— 它诚实,但被 gate 骗了。
+
+**已修**:Phase 4 改为数 `^warning:` / `^error:` 行数(`line.startswith(...)`,避免把缩进的 `= note:` / `-->` 指针算进去)。双向实测:ctares 分支 → `FAIL (5 warning(s))`,hyperlane → `PASS (0 warnings)`。
+
+**注意 `run_check` 的同款陷阱**:`audit_rust_standards.py` 的 `run_check` 也是按 stdout 行数计数,所以 verifier 的成功摘要行必须 `grep -v` 过滤、FAIL trailer 必须走 `>&2`(见本文件 §45)。
+
+### 两条可执行的规则
+
+1. **任何新规则的"标准修法",在写进 SKILL.md 之前必须先在一个真实仓库跑一次 `cargo clippy --all-targets`,和 master 基线对比。** 判据是**净变化**,不是绝对值 —— 一个 40-warning 的仓库里新增 2 个不算退化,但 0-warning 基线里新增 2 个就是。
+2. **豁免名单从"规则语义推出来",不是从首版实现继承。** 首版豁免 4 个是因为 user 举例了 4 个;真正该豁免的是"所有由某个 `mod.rs` 按名字声明的文件" —— 推到底就是 4 个入口 + 9 种关键字 + `macro.rs`。首版没问"这个文件有没有模块归属",只问了"它是不是入口",于是漏掉 `macro.rs` 和 9 种关键字文件。
+
+### 收窄后的三仓数据
+
+```
+ctares   0 violation  (24 个 macro.rs 豁免, const/enum 关键字豁免)
+hyperlane 0 violation
+euv      2 violation  (cli/tests/inline.rs, macros/tests/html_static_style.rs —— 真孤儿)
+```
+
+euv 那 2 处是唯一剩下的真违规,而且修它们**不涉及关键字文件搬迁,零 clippy 退化** —— 这正是收窄换来的直接好处。
+
+### 连带教训:给 subagent 的指令里不要写它做不到的验收条件
+
+两个 subagent 的任务书都写了"跑 `rust_pre_commit.py` 直到 exit 0 = 唯一完工标准"。它们都做到了 exit 0 —— 因为 Phase 4 是坏的。**一个坏的 gate 比没有 gate 更危险**:它给出的 "PASS (0 warnings)" 是主动的误导,而且让两个独立执行者同时"通过"了一个不存在的检查。派发含验收标准的任务时,gate 本身的正确性要先确认,否则你派发的是"通过一个假检查"。

@@ -4,34 +4,54 @@
 
 Rule (2026-09-28 user directive, verbatim: "如果 rust 代码文件同级有目录,
 需要报错提示代码文件不能和目录在同一级,注意 lib.rs main.rs build.rs
-mod.rs 这些除外"):
+mod.rs 这些除外"), as narrowed the same day after the standard fix
+turned out to cost clippy warnings:
 
     A directory that holds at least one sub-directory MUST NOT also hold
-    `.rs` code files, except for the four module-entry files:
+    a `.rs` file that has NO module-scope home of its own.
 
-        lib.rs   — crate root entry
-        main.rs  — bin entry
-        build.rs — cargo build script (lives at crate root by convention)
-        mod.rs   — module entry, its job IS to declare sub-modules
+    Exempt — a file is exempt when it is either:
 
-    Everything else (`const.rs` / `fn.rs` / `impl.rs` / `struct.rs` /
-    `enum.rs` / `trait.rs` / `type.rs` / `static.rs`, plus any non-keyword
-    file such as `inline.rs`) is a violation when a sub-directory sits
-    beside it.
+    (a) a module-entry file:  lib.rs / main.rs / build.rs / mod.rs
+        (their whole job is to be the parent of sub-modules), or
 
-Why:
-  A keyword file is a *leaf* of the module tree: `mod r#fn;` in `mod.rs`
-  resolves to `<dir>/fn.rs` and nothing else.  Once `<dir>/` also owns
-  sub-modules, the directory stops being a leaf and the reader has to
-  decide whether `foo.rs` belongs to the parent scope or is a namespace
-  peer of `foo/` — two conventions for one level of the tree.  The four
-  entry files are exempt because their entire purpose is to be the
-  parent of sub-modules.
+    (b) a keyword file — the nine §1.3 names (const.rs, static.rs,
+        fn.rs, enum.rs, struct.rs, trait.rs, impl.rs, type.rs) plus
+        `macro.rs`.  Each is a leaf of the module tree that its OWN
+        directory's mod.rs declares by name; §1.3a already governs what
+        may live inside them, so the parent level needs no opinion.
+
+    Everything else — `inline.rs`, `html_static_style.rs`, and any other
+    ad-hoc `.rs` file — is a violation when a sub-directory sits beside
+    it, because such a file has no name any mod.rs declares and no
+    place in the keyword taxonomy.
+
+Why keyword files are exempt (this is the narrowing, 2026-09-28):
+    The strict reading — "no .rs file beside a directory, period" —
+    looks tidier and was the first implementation.  It is unsound in
+    two measured ways:
+
+      1. It forces the fix `const.rs -> const/{const.rs,mod.rs}`, and
+         `mod r#const;` inside `const/mod.rs` names a module identical
+         to its containing directory.  That is clippy's
+         `module_inception`, which fires by default.  euv (2 warnings)
+         and ctares (5) both measured the regression against a
+         0-warning master baseline; `X/X.rs` did not exist anywhere in
+         either repo before this rule forced it.
+
+      2. It mislabels legitimate files.  ctares carries 24 `macro.rs`
+         files sitting beside sub-directories (`clonelicious/src/`,
+         `future-fn/src/`, `std-macro-extensions/src/*/`) — all valid
+         leaves, all reported as violations by the strict reading.
+
+    So the rule now targets what it was actually for: an orphan `.rs`
+    file with no module name and no keyword slot, next to real
+    sub-modules.
 
 Detection:
   Walk the tree.  For every directory:
-    code_files = [*.rs] minus {lib.rs, main.rs, build.rs, mod.rs}
-    sub_dirs   = visible sub-directories, excluding SKIP_DIR_NAMES
+    orphan_files = [*.rs] minus {lib, main, build, mod} minus KEYWORD_FILES
+    sub_dirs     = visible sub-directories, excluding SKIP_DIR_NAMES
   If both are non-empty -> ONE violation for that directory, naming every
   offending file and every sibling sub-directory.
 
@@ -56,8 +76,19 @@ import sys
 from pathlib import Path
 
 
-# Module-entry files: the ONLY `.rs` files allowed beside sub-directories.
-EXEMPT_FILE_NAMES = frozenset({"lib.rs", "main.rs", "build.rs", "mod.rs"})
+# Module-entry files: their purpose IS to be the parent of sub-modules.
+ENTRY_FILE_NAMES = frozenset({"lib.rs", "main.rs", "build.rs", "mod.rs"})
+
+# §1.3 keyword files + macro.rs.  Each is a named leaf declared by its own
+# directory's mod.rs, so its presence beside sub-directories is not a
+# layout problem.  `macro.rs` is included because ctares ships 24 of them
+# in exactly this position as valid leaves.
+KEYWORD_FILE_NAMES = frozenset({
+    "const.rs", "static.rs", "fn.rs", "enum.rs", "struct.rs",
+    "trait.rs", "impl.rs", "type.rs", "macro.rs",
+})
+
+EXEMPT_FILE_NAMES = ENTRY_FILE_NAMES | KEYWORD_FILE_NAMES
 
 SKIP_DIR_NAMES = {
     ".git", "target", ".cargo", "node_modules", ".venv", "venv", "dist",
@@ -101,11 +132,13 @@ def audit_one_dir(directory: Path) -> list[str]:
     files_label = _label(code_files)
     dirs_label = _label(sub_dirs)
     return [
-        f"{directory}: code file(s) {files_label} cannot share a level with "
-        f"sub-directory(ies) {dirs_label} (§1.3d); move each file into its "
-        f"own sub-module directory (e.g. `{code_files[0][: -len('.rs')]}/"
-        f"{code_files[0]}`) — only lib.rs / main.rs / build.rs / mod.rs "
-        f"are allowed beside directories"
+        f"{directory}: orphan code file(s) {files_label} cannot share a level "
+        f"with sub-directory(ies) {dirs_label} (§1.3d); move each into its own "
+        f"sub-module directory (e.g. `{code_files[0][: -len('.rs')]}/"
+        f"{code_files[0]}`) — module-entry files (lib.rs / main.rs / build.rs / "
+        f"mod.rs) and §1.3 keyword files (const/fn/impl/struct/enum/trait/type/"
+        f"static/macro .rs) are exempt because their names are declared by their "
+        f"own directory's mod.rs"
     ]
 
 
