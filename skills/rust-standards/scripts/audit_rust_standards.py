@@ -1311,6 +1311,20 @@ def run_check(name, shell_template, target):
     cmd = shell_template.replace('{target}', target)
     r = subprocess.run(['bash', '-c', cmd], capture_output=True, text=True, cwd=target)
     out = [l for l in r.stdout.strip().split('\n') if l]
+    # A check that produces NO stdout can mean two very different things:
+    # "scanned everything and found nothing" (a real pass) or "the
+    # verifier script does not exist / crashed before printing" (a
+    # vacuous pass).  python3 reports a missing file on stderr and
+    # exits 2, so r.returncode catches that case — but the FAIL trailer
+    # must go to stderr too, or it would be counted as a hit (see
+    # pitfalls 45).  Guard on the script name appearing in stderr.
+    if not out:
+        missing = [
+            l for l in r.stderr.split('\n')
+            if 'No such file or directory' in l and '.py' in l
+        ]
+        if missing:
+            return name, ['FAIL: companion verifier is missing — ' + missing[0].strip()]
     return name, out
 
 
