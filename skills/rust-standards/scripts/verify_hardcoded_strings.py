@@ -307,6 +307,37 @@ def _comment_start(line: str) -> int | None:
     return None
 
 
+def _vars_block_lines(lines: list[str]) -> set[int]:
+    """1-based line numbers inside a `vars! { ... }` design-token block.
+
+    `vars!` is the CSS-token counterpart of `const.rs`: the string literals
+    in it ARE the token values, hoisting them to a `const.rs` would defeat
+    the purpose of a single design-token table. Without this exemption every
+    token added to `ui/src/style/var/fn.rs` is reported, which is why that
+    file carries a large pre-existing count — the token table is exactly
+    where those literals are supposed to live.
+
+    A file may declare several `vars!` blocks (one per theme), so the scan
+    re-arms on every `vars!` line instead of stopping after the first one.
+    """
+    inside = False
+    depth = 0
+    marked: set[int] = set()
+    for i, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not inside:
+            if re.match(r"^vars!\s*\{", stripped):
+                inside = True
+                depth = stripped.count("{") - stripped.count("}")
+                marked.add(i)
+            continue
+        marked.add(i)
+        depth += stripped.count("{") - stripped.count("}")
+        if depth <= 0:
+            inside = False
+    return marked
+
+
 def audit_one(path: Path) -> list[str]:
     try:
         text = path.read_text()
@@ -314,10 +345,14 @@ def audit_one(path: Path) -> list[str]:
         return []
     lines = text.splitlines()
     exempt_lines = _exempt_format_string_lines(lines)
+    vars_lines = _vars_block_lines(lines)
     violations: list[str] = []
     for i, line in enumerate(lines, start=1):
         # Skip const.rs (the canonical home)
         if path.name == "const.rs":
+            continue
+        # Skip design-token literals declared inside `vars! { .. }`
+        if i in vars_lines:
             continue
         # Skip attribute lines (#[doc = "..."], #[serde(...)])
         if ATTR_LINE.match(line):

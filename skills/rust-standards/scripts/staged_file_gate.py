@@ -120,11 +120,44 @@ def git(repo_root: Path, *args: str) -> tuple[int, str]:
 
 
 def head_content(repo_root: Path, rel: str) -> str | None:
-    """File content at HEAD, or None when the file is new / untracked."""
+    """File content at HEAD, or None when the file is new / untracked.
+
+    A staged rename makes `HEAD:<newpath>` fail even though the file is not
+    new: the content lives at the OLD path in HEAD. Without this lookup the
+    baseline is `None`, `before` becomes `[]`, and every pre-existing
+    violation in the renamed file is counted as "introduced by this commit"
+    — which is exactly the legacy-debt blindness the gate exists to avoid.
+    """
     code, out = git(repo_root, "show", f"HEAD:{rel}")
+    if code == 0:
+        return out
+    return head_content_of_rename_source(repo_root, rel)
+
+
+def head_content_of_rename_source(repo_root: Path, rel: str) -> str | None:
+    """Content at HEAD of the path a staged rename moved away from."""
+    code, out = git(
+        repo_root,
+        "diff",
+        "--cached",
+        "--name-status",
+        "--find-renames",
+        "-M",
+    )
     if code != 0:
         return None
-    return out
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3 or parts[0][:1] != "R":
+            continue
+        old_path, new_path = parts[1], parts[2]
+        if new_path != rel:
+            continue
+        found, content = git(repo_root, "show", f"HEAD:{old_path}")
+        if found == 0:
+            return content
+        return None
+    return None
 
 
 def materialise(target: Path, text: str) -> Path:
