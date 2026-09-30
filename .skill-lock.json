@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "skills": {
     "agent-skills-source-sync": {
       "source": "local",
@@ -1179,6 +1179,14 @@
       "installedAt": "2026-09-30T14:23:40.504Z",
       "updatedAt": "2026-09-30T14:23:40.504Z",
       "skillFolderHash": "051fbaa0d701bed5c9ef8867d2978510d734fac1"
+    },
+    "x-post-via-browser": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/social-media/x-post-via-browser/SKILL.md",
+      "installedAt": "2026-09-30T15:23:19.476Z",
+      "updatedAt": "2026-09-30T15:23:19.476Z",
+      "skillFolderHash": "084293adbc6b50d317f8b29a2adaba355289d974"
     },
     "xurl": {
       "source": "local",
