@@ -1,227 +1,150 @@
 ---
 name: chrome-real-profile-launch
-description: "Use when browser automation must run with the user's REAL Chrome logins — copy the profile to a scratch dir first, then launch Chrome on the copy over CDP. The system browser is never driven directly."
-version: 1.0.0
+description: "Use when browser automation must run with the user's REAL Chrome logins. Always go through scripts/run.sh — it stops previous CDP browsers, force-overwrites the scratch copy, and launches Chrome. Never drive the system profile directly."
+version: 2.0.0
 author: local
 license: MIT
 platforms: [macos, linux, windows]
 metadata:
   hermes:
-    tags: [chrome, cdp, browser-automation, real-profile, logins, headless, remote-debugging, cookies, authenticated]
+    tags: [chrome, cdp, browser-automation, real-profile, logins, headless, remote-debugging, cookies, authenticated, script-driven]
     related_skills: [chrome-devtools-protocol, hermes-real-profile-browser, blocked-page-recovery, inspecting-hermes-desktop-dom]
 ---
 
-# Launch Chrome on a COPY of the real profile, over CDP
+# Chrome on a COPY of the real profile
 
 ## THE RULE
 
-**Every** browser operation that needs the user's real logins goes through this
-procedure. There is no shortcut, no "just point at the real dir" variant, and
-no "it's only a GET so I can skip the copy" exception.
+**Every** browser operation that needs the user's real logins goes through
+`scripts/run.sh`. There is no other supported path.
 
-Two hard requirements, both of them the user's:
+Three requirements, all mandatory, all enforced by that script:
 
-1. **Never drive the real profile directory.** Copy it to a scratch dir first.
-   Chrome holds `SingletonLock` on the live profile, and more importantly a
-   second instance writing into the user's live `Default/` corrupts the session
-   they are actually using.
-2. **Never let the copy collide with the system browser.** A copied
-   `SingletonLock` makes the new instance abort on startup with
-   `ProcessSingleton ... Aborting now to avoid profile corruption.` — the copy
-   is useless until those files are removed.
+1. **Never drive the real profile directory.** It is only ever read.
+2. **Never start without stopping the previous CDP browser.** A stale instance
+   holds both the port and the profile's singleton lock, so the new launch dies
+   or silently attaches to the old process.
+3. **Never merge into an existing scratch copy.** The directory is deleted and
+   rebuilt, because an in-place sync leaves the singleton files and a
+   `Local State` carrying the previous run's decisions.
 
-## Step 1 — copy the profile (macOS)
+## Use it
 
 ```bash
-WORK="$HOME/.hermes/cache/scratch/chrome-real-$(date +%s)"
-mkdir -p "$WORK"
+S="$HOME/.agents/skills/software-development/chrome-real-profile-launch/scripts"
 
-rsync -a --delete \
-  --exclude='Cache' \
-  --exclude='Code Cache' \
-  --exclude='GPUCache' \
-  --exclude='ShaderCache' \
-  --exclude='GraphiteDawnCache' \
-  --exclude='component_crx_cache' \
-  --exclude='Crashpad' \
-  --exclude='Service Worker/CacheStorage' \
-  --exclude='Service Worker/ScriptCache' \
-  --exclude='Singleton*' \
-  --exclude='DevToolsActivePort' \
-  "$HOME/Library/Application Support/Google/Chrome/" "$WORK/profile/"
+bash "$S/run.sh"                  # auto-pick a free port
+bash "$S/run.sh" --port 9223      # explicit port
+bash "$S/run.sh" --work /path/dir # custom scratch dir
+bash "$S/run.sh" --headed         # visible window instead of headless
+bash "$S/run.sh" --stop           # just stop CDP browsers, copy nothing
+bash "$S/run.sh" --keep           # reuse the existing copy, skip step 2
 ```
 
-`--exclude='Singleton*'` and `--exclude='DevToolsActivePort'` are **not
-optional**. Measured on this machine: a 4.8 GB profile copies in ~23 s; leaving
-the singleton files in place makes every subsequent launch die immediately.
+`run.sh` exits 0 only after CDP answers, and prints the browser version. It
+refuses to launch if the copy is missing `Default/Cookies`, and it detects the
+singleton failure explicitly rather than timing out.
 
-## Step 2 — launch on the copy (macOS)
+Port selection is automatic and free to override: `run.sh` scans 9223-9228 for
+a free port because 9222 is agent-browser's default and collides often. The
+port is only yours to choose — there is no fixed constant.
+
+## What run.sh does, in order
+
+| Step | Action | Why it is not optional |
+|---|---|---|
+| 1 | `stop-cdp.sh` — TERM every process whose command line carries `--remote-debugging-port`, then KILL whatever ignores TERM | A previous instance holds the port and the singleton lock |
+| 2 | `rm -rf "$WORK"` then rebuild by copy | An in-place sync keeps `Singleton*` and a stale `Local State` |
+| 3 | Launch Chrome on the copy, wait for `DevTools listening` in the log **and** a working `curl` | A fixed sleep is wrong: a busy machine after killing a 4 GB instance outlives any guess |
+| 4 | Refuse to start if `Default/Cookies` is absent | Copy failures otherwise show up much later as "logged out" |
+
+`stop-cdp.sh` matches on the debug flag in the process arguments, so the user's
+own Chrome is never a candidate. It is safe to run at any time.
+
+## Stopping and cleaning up
 
 ```bash
-# Pick any free port. It is a free choice, not a fixed constant — 9222/9223
-# collide with an already-running debug Chrome often enough to matter, and
-# 9222 is also agent-browser's default. Check first, then use.
-PORT=9223   # <-- choose freely
-lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1 && { echo "port $PORT busy, pick another"; exit 1; }
-
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-port="$PORT" \
-  --headless=new \
-  --user-data-dir="$WORK/profile" \
-  --profile-directory="Default" \
-  --safebrowsing-disable-download-protection \
-  --disable-features=InsecureDownloadWarnings
+bash "$S/stop-cdp.sh"                 # stop every CDP browser
+bash "$S/stop-cdp.sh" --port 9223     # only that port
+rm -rf ~/.hermes/cache/scratch/chrome-real-profile   # ~4 GB
 ```
 
-Run it as a **tracked background process** (Hermes `terminal(background=true)`),
-not with `nohup`/`&` — a detached Chrome escapes cleanup and holds the port.
+Confirm the user's browser survived: `pgrep -f "Google Chrome.app/Contents"` must
+still list their windows.
 
-## Step 3 — verify before trusting it
+## Drive it
+
+Use the `chrome-devtools-protocol` skill for CDP domains and a dependency-free
+WebSocket client. One gotcha: Chrome 111+ requires **PUT** for `/json/new`;
+a GET returns `405 Method Not Allowed`.
 
 ```bash
-curl -s --max-time 3 "http://127.0.0.1:$PORT/json/version"
+curl -s http://127.0.0.1:9241/json/version     # health
+curl -s -X PUT "http://127.0.0.1:9241/json/new?about:blank"
 ```
 
-Then confirm the copy actually carries the logins — the whole point of the
-exercise. Counts must match the source profile:
+## Verify the skill itself
 
 ```bash
-sqlite3 "$WORK/profile/Default/Cookies" "select count(*) from cookies;"
-sqlite3 "$HOME/Library/Application Support/Google/Chrome/Default/Cookies" "select count(*) from cookies;"
+bash "$S/verify.sh"              # full flow, 16 checks
+bash "$S/negative-control.sh"    # proves the Singleton pitfall is real
 ```
 
-## Verify it yourself before trusting it
+`negative-control.sh` is the part that makes the pitfall section falsifiable: it
+copies **without** the `Singleton*` exclusion and asserts Chrome dies. If it ever
+prints `SURVIVED`, this skill is wrong and must be corrected.
 
-```bash
-bash scripts/verify.sh              # full flow: copy -> launch -> CDP -> cleanup
-bash scripts/negative-control.sh    # proves the Singleton pitfall is real
-```
+Measured 2026-09-30 on macOS / Chrome 154.0.8037.58: 4.8 GB profile -> 4.2 GB
+copy in ~23 s, 1031 cookies copied and matching the source, CDP ready ~2 s after
+launch, and a second `run.sh` on the same port correctly killed 4 processes,
+removed a planted `STALE_MARKER` (force-overwrite), and came back ready.
 
-`verify.sh` copies the real profile, checks the auth DBs are present and the
-cookie count matches the source, launches, checks `/json/version`, checks
-`PUT /json/new` returns 200, and confirms the system browser is still running.
-It never touches the real profile and scopes its own `pkill` to its own
-scratch dir.
+## The pitfalls, and what they cost
 
-`negative-control.sh` is the part that matters for trust: it copies **without**
-the `Singleton*` exclusion and asserts Chrome dies. Measured 2026-09-30: 3
-singleton files copied -> `Failed to create .../SingletonLock` ->
-`Aborting now to avoid profile corruption`. If that script ever prints
-`SURVIVED`, the pitfall section of this skill is wrong and must be corrected.
+- **Copying `Singleton*` kills the launch.** Three files, then
+  `Failed to create .../SingletonLock` -> `Aborting now to avoid profile
+  corruption`. Hit on the first attempt of this skill's own creation.
+- **"It's only a read, I can skip the copy."** No — headless Chrome still
+  rewrites `Preferences`, `History` and `Local State` on exit, which is exactly
+  what the user's live session must not see.
+- **Merging into yesterday's copy.** `rsync --delete` into an existing dir keeps
+  the singleton files. `run.sh` deletes the directory first for this reason.
+- **Omitting `--profile-directory=Default`.** Chrome lands on `Profile 1` and
+  looks logged out for a reason that has nothing to do with cookies.
+- **A fixed readiness sleep.** After `stop-cdp` frees 4 GB of memory the machine
+  is busy; poll the log's `DevTools listening` line instead.
+- **A boolean guard read backwards.** `if [ "$READY" -ne 0 ]` reports failure
+  when `READY=1` means success — it failed the whole flow twice before a `bash -x`
+  trace showed `[ 1 -ne 0 ]` returning true. When a readiness flag is involved,
+  trace the guard once.
+- **macOS TCC.** Reading `~/Library/Application Support/Google/*` can fail with
+  `EPERM` rather than a file lock — that is Full Disk Access. See
+  `hermes-real-profile-browser` for the probe that tells the two apart.
 
-Reference numbers from that run: 4.8 GB profile -> 4.2 GB copy in ~23 s,
-1030 cookies copied and matching, CDP listening ~1 s after launch.
-
-## Step 4 — drive it
-
-See the `chrome-devtools-protocol` skill for CDP domains and a dependency-free
-WebSocket client. One gotcha when opening a target from a script: Chrome 111+
-requires **PUT** for `/json/new`, a GET returns `405 Method Not Allowed`.
-
-## Cleanup
-
-```bash
-pkill -f "$WORK/profile"     # stop the copy, never the system browser
-rm -rf "$WORK"               # 4+ GB per session
-```
-
-Verify the system browser survived: `pgrep -x "Google Chrome"` should still list
-your own windows. If it does not, you launched the wrong binary or the wrong
-profile dir — that is the failure this whole procedure exists to prevent.
-
-## Windows
-
-Same three steps, different paths and quoting. `%LOCALAPPDATA%` instead of
-`~/Library/Application Support`, `Copy-Item` / `robocopy` instead of `rsync`,
-and the binary lives at `%ProgramFiles%\Google\Chrome\Application\chrome.exe`.
-
-```powershell
-$WORK = "$env:LOCALAPPDATA\Temp\hermes-chrome-real-$(Get-Random)"
-New-Item -ItemType Directory -Force -Path "$WORK" | Out-Null
-
-# robocopy: /E recurse, /XD exclude dirs, /XF exclude files
-# NOTE: robocopy exit codes 0-7 are SUCCESS, >=8 are failures.
-robocopy "$env:LOCALAPPDATA\Google\Chrome\User Data" "$WORK\profile" `
-  /E /R:1 /W:1 `
-  /XD Cache "Code Cache" GPUCache ShaderCache component_crx_cache Crashpad `
-      "Service Worker\CacheStorage" "Service Worker\ScriptCache" `
-  /XF SingletonLock SingletonCookie SingletonSocket DevToolsActivePort
-if ($LASTEXITCODE -ge 8) { throw "robocopy failed with $LASTEXITCODE" }
-
-# the singleton files may already exist if a previous copy was reused
-Remove-Item "$WORK\profile\Singleton*","$WORK\profile\DevToolsActivePort" -Force -ErrorAction SilentlyContinue
-
-$port = 9223   # <-- choose freely
-$busy = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-if ($busy) { throw "port $port already in use" }
-
-Start-Process -FilePath "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" `
-  -ArgumentList @(
-    "--remote-debugging-port=$port",
-    "--headless=new",
-    "--user-data-dir=$WORK\profile",
-    "--profile-directory=Default",
-    "--safebrowsing-disable-download-protection",
-    "--disable-features=InsecureDownloadWarnings"
-  )
-```
-
-Differences that actually bite on Windows:
-
-- **`$env:TMP` is session-scoped and tiny.** A 4 GB profile will not fit in the
-  default temp; put `$WORK` on a real volume or the copy silently truncates.
-- **`Get-NetTCPConnection` needs no admin**, but `netstat -ano | findstr :$port`
-  works everywhere if the cmdlet is missing (older Server Core images).
-- **Cookies are DPAPI-encrypted and bound to the user account AND the machine.**
-  A copy is readable by the same user on the same machine, which is the intended
-  case. A copy moved to another machine decrypts to nothing — do not report
-  "logged out" as a bug there.
-- **Path quoting**: `--user-data-dir=$WORK\profile` must be a single argument.
-  If `$WORK` contains spaces, wrap the whole `--user-data-dir=` value in
-  escaped quotes or Chrome silently starts with the default profile.
-
-## Linux
-
-```bash
-WORK="$HOME/.cache/hermes/chrome-real-$(date +%s)"
-mkdir -p "$WORK"
-rsync -a --delete \
-  --exclude='Cache' --exclude='Code Cache' --exclude='GPUCache' \
-  --exclude='Singleton*' --exclude='DevToolsActivePort' \
-  "$HOME/.config/google-chrome/" "$WORK/profile/"
-
-google-chrome --remote-debugging-port=9223 --headless=new \
-  --user-data-dir="$WORK/profile" --profile-directory=Default \
-  --safebrowsing-disable-download-protection \
-  --disable-features=InsecureDownloadWarnings
-```
-
-On Linux, `snap`-installed Chrome is confined and cannot read
-`~/.config/google-chrome` cleanly; use the `.deb`/`.rpm` build or a flatpak
-profile path instead.
-
-## What the flags do and do not buy you
+## What the flags buy you
 
 `--safebrowsing-disable-download-protection` and
 `--disable-features=InsecureDownloadWarnings` suppress the two interstitials
 that otherwise block a scripted download from an unfamiliar host. They are
-**download-policy bypasses on a throwaway copy** — never launch the user's
-system browser with them, and never reuse this profile for anything the user
-did not ask for.
+**download-policy bypasses on a throwaway copy**. Never launch the user's system
+browser with them, and never reuse this profile for anything they did not ask
+for.
 
-## Pitfalls that cost real time
+## Windows and Linux
 
-- **Do not skip the copy "because it's only a read".** A read still opens the
-  DBs, and headless Chrome still rewrites `Preferences`, `History` and
-  `Local State` on exit. The user's browser must not see that.
-- **Do not reuse a scratch dir across sessions.** `--delete` plus the singleton
-  cleanup makes that safe, but a stale `Local State` can carry a dead
-  `--remote-debugging-port` decision forward. Fresh dir per session.
-- **`--profile-directory=Default`** is what makes the copy behave like the real
-  profile. Omitting it lands on `Profile 1` and looks "logged out" for a reason
-  that has nothing to do with cookies.
-- **macOS TCC**: reading `~/Library/Application Support/Google/*` can fail with
-  `EPERM` rather than a file lock. That is Full Disk Access, not a lock — see
-  the `hermes-real-profile-browser` skill for the probe that tells them apart.
-- **`--headless=new` is required**, not optional. Old headless has no
-  `Page.navigate` fidelity and breaks login redirects.
+`run.sh` detects the platform and takes the matching branch — the same three
+steps, different paths and tools. It has **only been executed on macOS**; the
+Windows and Linux branches are written from the equivalent semantics and are
+marked unverified in this skill rather than presented as tested.
+
+- **Windows**: `%LOCALAPPDATA%\Google\Chrome\User Data` -> `robocopy /E /XD /XF`
+  (exit codes 0-7 are success, >=8 are failures), process matching through
+  `Get-CimInstance Win32_Process` filtered on the command line, and
+  `Start-Process` for launch. `$WORK` must be on a real volume — a 4 GB profile
+  does not fit in the default `%TEMP%` and truncates silently. Cookies are
+  DPAPI-encrypted and bound to **user AND machine**: a copy moved to another
+  machine decrypts to nothing, so do not report "logged out" as a bug there.
+  A `--user-data-dir=` path containing spaces must arrive as one argument.
+- **Linux**: `~/.config/google-chrome`, plain `rsync`, `google-chrome`.
+  A `snap`-installed Chrome is confined and cannot read that directory cleanly —
+  use the deb/rpm build or a flatpak profile path.
