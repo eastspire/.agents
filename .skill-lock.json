@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "skills": {
     "agent-skills-source-sync": {
       "source": "local",
@@ -18,6 +18,102 @@
       "skillFolderHash": "bf56d3bbce81307ef4040e38efc5ba9bc28dd31c",
       "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
       "ref": "main"
+    },
+    "apple-notes": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/apple/apple-notes/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "4c652e2b0dbfaa19ed1cea94445dc8600f9183cf"
+    },
+    "apple-reminders": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/apple/apple-reminders/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "aa556d14d896f9717fc139a29f5ab5bdc7315f65"
+    },
+    "findmy": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/apple/findmy/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "f5ee2ea5ae5da0d0f3b0f98455b50331ba30a0fb"
+    },
+    "imessage": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/apple/imessage/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "5f924aef86b9afdb10ddac0f411e9ef1550c9225"
+    },
+    "claude-code": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/autonomous-ai-agents/claude-code/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "5e8e780e941f7b28ca4a8f27f4d70bcf74af9b37"
+    },
+    "codex": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/autonomous-ai-agents/codex/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "e091c5cbfb9c00797c1a760f84e2aaa310949d0b"
+    },
+    "computer-use": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/autonomous-ai-agents/computer-use/SKILL.md",
+      "installedAt": "2026-07-10T13:50:00.000Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "d964498a711af202a648e28525e186c2a5cd34ff"
+    },
+    "hermes-agent": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/autonomous-ai-agents/hermes-agent/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "a8cafc57b24c6ff1b1b4ff92c6cfb5879f97698c"
+    },
+    "hermes-messaging-platform-setup": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/autonomous-ai-agents/hermes-messaging-platform-setup/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "d5180da5410919d2b53bdf558e2689806051dbc1"
+    },
+    "main-agent-delegation-rule": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/autonomous-ai-agents/main-agent-delegation-rule/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "b5447b20807d4ed50031bf9385914cb21b207669"
+    },
+    "merge-reconciler": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/autonomous-ai-agents/merge-reconciler/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "ca3bcf6fdffbd2031b0503d88098db86915fb9fd"
+    },
+    "opencode": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/autonomous-ai-agents/opencode/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "27b78f954aa0d1c3ad1ab16fa463d24008ae0e0d"
     },
     "blender-3d-modeling": {
       "source": "local",
@@ -53,14 +149,6 @@
       "updatedAt": "2026-09-30T06:14:23.478Z",
       "skillFolderHash": "e79f1a025470eca679271eb20052afff07ac7e94"
     },
-    "computer-use": {
-      "source": "local",
-      "sourceType": "local",
-      "skillPath": "skills/computer-use/SKILL.md",
-      "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-08-15T01:09:15.607Z",
-      "skillFolderHash": "9faa836a404e63b94bddf803eae153f57f2c9b78"
-    },
     "crates-cli-usage": {
       "source": "local",
       "sourceType": "local",
@@ -69,6 +157,150 @@
       "updatedAt": "2026-09-30T06:14:23.478Z",
       "skillFolderHash": "c59ad4367b24076aed47896b829fdfcda4ee88af"
     },
+    "architecture-diagram": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/architecture-diagram/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "32803a86165a1e33268db8650de1c4a595985e26"
+    },
+    "ascii-art": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/ascii-art/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "4a663fb88e633a4c59aed065e07b4f2fb76cb838"
+    },
+    "ascii-video": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/ascii-video/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "f6e3e230008dc142bed317c78a4758620a55f94c"
+    },
+    "baoyu-infographic": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/baoyu-infographic/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "03bdef7e63920c2a6c03d3f77b0c540da77522b4"
+    },
+    "blender-mcp": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/blender-mcp/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "b3daeebf6b9a016e502f49c105db2c646ef3566b"
+    },
+    "claude-design": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/claude-design/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "bed63d6f10ef3095def85a7f675842f9fb8e28ea"
+    },
+    "comfyui": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/comfyui/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "08f35c333983a161f640a2028d42a22983e5a3c4"
+    },
+    "design-md": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/design-md/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "2ac2c21deb5bbef9bf9eea03f5649d9af71d7454"
+    },
+    "excalidraw": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/excalidraw/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "13f69d829865a68093b5d574ce643e45b4888ac8"
+    },
+    "humanizer": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/humanizer/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "166c0b9228d1161a126e4646836b560b473fcbea"
+    },
+    "manim-video": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/manim-video/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "ab5c9a08042d068984f46fff046a746f5d3499e6"
+    },
+    "p5js": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/p5js/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "38034f6e628117fb90162e491f582eabc0928754"
+    },
+    "popular-web-designs": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/popular-web-designs/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "66ea7ae7a31a0d6ce030a1d13ec1ff435a60d473"
+    },
+    "pretext": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/pretext/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "3eebc056b5ec12d83db1f36d130e49745b277e75"
+    },
+    "sketch": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/sketch/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "b1b740999c3190f861a78aa7e654e2facd192c85"
+    },
+    "songwriting-and-ai-music": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/songwriting-and-ai-music/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "78d230963cfcf5db9fbd738523715ffadf74c601"
+    },
+    "touchdesigner-mcp": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/touchdesigner-mcp/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "782e9863c6bafd31dbf3323edf26cb8ddf995de6"
+    },
+    "voice-style-replication": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/creative/voice-style-replication/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "51d275a7513bd5e882119a0799931ec5c8d7a693"
+    },
     "cross-platform-git-mirror": {
       "source": "local",
       "sourceType": "local",
@@ -76,6 +308,86 @@
       "installedAt": "2026-09-30T06:14:23.478Z",
       "updatedAt": "2026-09-30T06:14:23.478Z",
       "skillFolderHash": "8a8a92bc062d899acc987f0738f920b1d7396531"
+    },
+    "agent-runtime-disk-hygiene": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/devops/agent-runtime-disk-hygiene/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "9ccf6d8d1fc073cc8138f77db96b2859de991058"
+    },
+    "github-actions-deploy-pipelines": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/devops/github-actions-deploy-pipelines/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "2d5daab7ecc531e81e9ae647f84ac6a4bbc8dee3"
+    },
+    "github-tree-api-multi-file-commit": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/devops/github-tree-api-multi-file-commit/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "2c91671547f8e9f9a2d5e439dbf092d13a1c8070"
+    },
+    "hermes-cronjob-daily-news-html": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/devops/hermes-cronjob-daily-news-html/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "a804743843df4de27f723a8185a333456b314e6b"
+    },
+    "responding-to-issue-comments": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/devops/responding-to-issue-comments/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "b614fd17351eb4c746e4aeceaa11dc7c668b3db6"
+    },
+    "rust-crate-docs-html-sync": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/devops/rust-crate-docs-html-sync/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "0f74f4202c92b322c7fc22171efb821445b83cf1"
+    },
+    "rust-pr-contribution-workflow": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/devops/rust-pr-contribution-workflow/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "a1bea42a1e1c104246b8dda4245e7e0d9913ad0c"
+    },
+    "rust-pr-validation-checklist": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/devops/rust-pr-validation-checklist/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "b52a5856bc328cc1cb24a63727261019cc8d486f"
+    },
+    "sdlc-review": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/devops/sdlc-review/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "9417c265fdba61e819a8823aa97242b219078061"
+    },
+    "static-site-deploy-verification": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/devops/static-site-deploy-verification/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "21067d83e340a0563b48cd40239a2e64281d25e1"
     },
     "docs-github-url-audit": {
       "source": "local",
@@ -100,6 +412,22 @@
       "installedAt": "2026-07-10T13:50:00.000Z",
       "updatedAt": "2026-08-15T01:09:15.607Z",
       "skillFolderHash": "a7fdbfc118f8beab0bfa38de1fea5b80f5f29b46"
+    },
+    "email-inbox-triage": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/email/email-inbox-triage/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "2946bd34fcec549f5d38723acf8951ca09768c98"
+    },
+    "himalaya": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/email/himalaya/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "34e5e857c91db5403b5b0cc5476199fbfe5a8d66"
     },
     "euv": {
       "source": "local",
@@ -176,6 +504,14 @@
       "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
       "ref": "main"
     },
+    "css-edge-cases": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/frontend/css-edge-cases/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "90b6c3f12d8ba0ed6dd43762a74b74f504a1d533"
+    },
     "frontend-dev": {
       "source": "MiniMax-AI/skills",
       "sourceType": "github",
@@ -229,6 +565,62 @@
       "installedAt": "2026-09-30T06:14:23.478Z",
       "updatedAt": "2026-09-30T06:14:23.478Z",
       "skillFolderHash": "5adea5e35cdff8b432234b2f12758aa580799de0"
+    },
+    "codebase-inspection": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/github/codebase-inspection/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "a81ec7ca1eb2310f67ba634437cccbcf5ea7bdf5"
+    },
+    "github-auth": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/github/github-auth/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "9ca7499841b4dc76ec1e1e7d3844f18fa6f691c1"
+    },
+    "github-code-review": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/github/github-code-review/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "2ccf101a6b0b38b0955188561a2692b3f71838c5"
+    },
+    "github-issue-to-pr": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/github/github-issue-to-pr/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "f288e7e526c582a929756b2d2fd575bf98a8806d"
+    },
+    "github-issues": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/github/github-issues/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "c5a467c7b1625fdf7e5f296528561a0cb4fda867"
+    },
+    "github-pr-workflow": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/github/github-pr-workflow/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "0e10d7679efdd41f13fd127fbc6c344f38d2e462"
+    },
+    "github-repo-management": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/github/github-repo-management/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "4bc0dc7c48907c6983750ecfb1221f9172f2f336"
     },
     "github-cross-platform-mirror": {
       "source": "local",
@@ -328,6 +720,38 @@
       "updatedAt": "2026-09-30T06:14:23.478Z",
       "skillFolderHash": "3dfc97cc962efb26df0a29d91058298e4aeb5a16"
     },
+    "gif-search": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/media/gif-search/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "d960848decb87e4671d8d220f27de8d0353f46ce"
+    },
+    "songsee": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/media/songsee/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "deb2e677c9db967a5650f3e40e7b17f326494b9e"
+    },
+    "youtube-content": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/media/youtube-content/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "000c0aa36a202791b4825d32540af40e7d17a862"
+    },
+    "openclaw-migration": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/migration/openclaw-migration/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "b60c4131d8cd705aee07b24bcace08fe25feed0f"
+    },
     "minimax-docx": {
       "source": "MiniMax-AI/skills",
       "sourceType": "github",
@@ -378,6 +802,14 @@
       "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
       "ref": "main"
     },
+    "huggingface-hub": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/mlops/huggingface-hub/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "06c069d92de21b38a1010e4d363c3fa4d4831454"
+    },
     "mmx-cli": {
       "source": "MiniMax-AI/skills",
       "sourceType": "github",
@@ -405,6 +837,14 @@
       "skillFolderHash": "46d75334f8c510a02c036f0bca4e8206f20c9574",
       "sourceUrl": "https://github.com/vercel-labs/next-skills.git"
     },
+    "obsidian": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/note-taking/obsidian/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "d4856784fa45f413847ea33dd8a20026b571924c"
+    },
     "pptx-generator": {
       "source": "MiniMax-AI/skills",
       "sourceType": "github",
@@ -414,6 +854,150 @@
       "skillFolderHash": "57921b6d56f8e14cd49fb9790b6eae6627a97d5b",
       "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
       "ref": "main"
+    },
+    "airtable": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/airtable/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "90b58cc320e4ae70b03629341121e81103f050d1"
+    },
+    "box": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/box/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "ffe3d462bde7f85345eb975f4310e0acde555ded"
+    },
+    "document-to-action-items": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/document-to-action-items/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "e7e788e3c4f39a9802c85ba2dc5d1fa76098fe1d"
+    },
+    "docx": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/docx/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "0c6973e07fbbc83edbc12c44c5f2ecf36c6239cb"
+    },
+    "google-workspace": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/google-workspace/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "434096f3053f44fcd1fcde7849a3688ba43f0caa"
+    },
+    "maps": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/maps/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "2f506c205f12279cafe8275acd26840fbb974292"
+    },
+    "meeting-action-items": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/meeting-action-items/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "a76a3781da14afacd12daceb9e5b000af9516ad4"
+    },
+    "nano-pdf": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/nano-pdf/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "44aaf2598d603614e09086eda7f9de3612bb68df"
+    },
+    "notion": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/notion/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "d056ba5c1604b9144933b7feb87fbae2b5946b14"
+    },
+    "ocr-and-documents": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/ocr-and-documents/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "ab13e2e8ad322f625ffeb4804ba48d76cb5bdd1e"
+    },
+    "pdf": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/pdf/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "d8f689b347082b4b05e3e88531849da8500f517c"
+    },
+    "powerpoint": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/powerpoint/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "56f127bcf0ff99e405b705ebf59058d356e18280"
+    },
+    "product-price-monitor": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/product-price-monitor/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "1fd49bc696395ca9302bf1f81507229fe551a9f0"
+    },
+    "session-librarian": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/session-librarian/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "a4ae9ff273a20f44e308f78cd137636dd5675846"
+    },
+    "teams-meeting-pipeline": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/teams-meeting-pipeline/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "0751e32bf07b1afd4913241adb4083630637029f"
+    },
+    "weekly-review-planning": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/weekly-review-planning/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "92e362d232da1c880924c316ea4d26dd544ffec3"
+    },
+    "xlsx": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/productivity/xlsx/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "be58b3f63b14fefb33afc9df551cdf6047042888"
+    },
+    "project-memory": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/project/project-memory/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "c05547525010849ad95544226421c02f5ce920dd"
     },
     "react-native-dev": {
       "source": "MiniMax-AI/skills",
@@ -433,6 +1017,62 @@
       "updatedAt": "2026-08-15T01:09:15.607Z",
       "skillFolderHash": "0ea37127f196df595ec56dd474da9b70337cf773",
       "sourceUrl": "https://github.com/remotion-dev/skills.git"
+    },
+    "arxiv": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/research/arxiv/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "ad04487ed4bb4803c93a9ffb8a225a4ffd3184f5"
+    },
+    "blocked-page-recovery": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/research/blocked-page-recovery/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "3f451fc9c2c96dee28bc66ac5de2a1ebdaa7367c"
+    },
+    "blogwatcher": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/research/blogwatcher/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "ba8488056c60c7ccf6af9f17495bbf0054f07eca"
+    },
+    "competitor-news-monitor": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/research/competitor-news-monitor/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "4fc3e28f989d885e9efe5306497a9724bf13e26c"
+    },
+    "grounded-citations": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/research/grounded-citations/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "db01df766acef97837d3ded812d45f8271d42682"
+    },
+    "llm-wiki": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/research/llm-wiki/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "9e0e4414e4fda6b3597c4923b86d027528e4a7ac"
+    },
+    "research-paper-writing": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/research/research-paper-writing/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "2722523202c9a1b258aea016e87b9e8166b31b4c"
     },
     "rust-build-perf-vm": {
       "source": "local",
@@ -463,8 +1103,8 @@
       "sourceType": "local",
       "skillPath": "skills/rust-standards/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-09-30T06:14:23.478Z",
-      "skillFolderHash": "2d34a54fa833ef5541eb6f3a66ac826f56a20b2e"
+      "updatedAt": "2026-09-30T14:22:35.368Z",
+      "skillFolderHash": "b36dae4a51e0421fa8d75122debdfa79e246ce06"
     },
     "rust-toolchain-macos": {
       "source": "local",
@@ -524,6 +1164,142 @@
       "updatedAt": "2026-08-15T01:09:15.607Z",
       "skillFolderHash": "a2ba1363b1b0cd75ca01f3760231f42beb53be40"
     },
+    "openhue": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/smart-home/openhue/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "d28ad17bfccb4cf3f920d3acd214b44e8421a58a"
+    },
+    "twitter-promo-drafting": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/social-media/twitter-promo-drafting/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "051fbaa0d701bed5c9ef8867d2978510d734fac1"
+    },
+    "xurl": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/social-media/xurl/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "29ac252f7b74b72207f97cf9daeaed530bf693ea"
+    },
+    "chrome-real-profile-launch": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/chrome-real-profile-launch/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "88e72a30f50fe1276c951926626359dca4a32179"
+    },
+    "hermes-agent-skill-authoring": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/hermes-agent-skill-authoring/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "bda87ef86eca8f736b4f883e7cbe51c18084653b"
+    },
+    "inspecting-hermes-desktop-dom": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/inspecting-hermes-desktop-dom/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "4fffc83a9b93bae618af0c8b5fdd507060b17590"
+    },
+    "install-vendor-skills": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/install-vendor-skills/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "58eaeaa029a5242d5b2ea96981611954043b705e"
+    },
+    "mobile-web-debugging": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/mobile-web-debugging/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "392dbd8601d7de94b61a373981cc9893ae76f898"
+    },
+    "node-inspect-debugger": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/node-inspect-debugger/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "89fc9fd3815b6bf88769a9e26d2715d23e88da1c"
+    },
+    "plan": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/plan/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "f5705ef6e07e81ec9eebbdbdef99ab56835094a8"
+    },
+    "python-debugpy": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/python-debugpy/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "514a59f7437f22661f9c5674a5dc14739cd5918f"
+    },
+    "requesting-code-review": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/requesting-code-review/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "8f57025b3296c3ff7c40b8190c361ed3a82054d7"
+    },
+    "rust-wasm-perf-audit": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/rust-wasm-perf-audit/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "32c3cb0607884fb0d14b441b085ed5ceae200f76"
+    },
+    "simplify-code": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/simplify-code/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "e5d214b2f1f566ff1b4a0495b4f40365017d0355"
+    },
+    "spike": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/spike/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "0f923369ca4540b5299ea41e6656f688eec43ea8"
+    },
+    "systematic-debugging": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/systematic-debugging/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "1416d332d2507168e21c3c293adb60991fbfb02b"
+    },
+    "test-driven-development": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/software-development/test-driven-development/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "677dd27c4e4229618e48d8e9e6839ad2def6a5bd"
+    },
     "ssh-keys-and-config": {
       "source": "local",
       "sourceType": "local",
@@ -531,6 +1307,86 @@
       "installedAt": "2026-09-30T06:14:23.478Z",
       "updatedAt": "2026-09-30T06:14:23.478Z",
       "skillFolderHash": "4e8a05bc85955ccf838cc4293eb0bc4c268aa237"
+    },
+    "connect-recommend": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/stripe/connect-recommend/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "5e0e029b571e26ae25948c9361f99774df0c5f13"
+    },
+    "connect-required-verification-information": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/stripe/connect-required-verification-information/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "efa700d7ac7eaf65135b5c50954822e30360b979"
+    },
+    "metronome": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/stripe/metronome/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "d981c498feebdbb73de8cdfbb77337cd85c63067"
+    },
+    "stripe-apps": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/stripe/stripe-apps/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "cdcd1c5c05c18485cb597eab5fdf9eb5af7b9b04"
+    },
+    "stripe-best-practices": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/stripe/stripe-best-practices/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "2070f8947bc7d9d8d23cf7cc8b13e5b3ef2f8f90"
+    },
+    "stripe-directory": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/stripe/stripe-directory/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "fcd8aba6d8ae4017e05d178edcd59bc0dde9a903"
+    },
+    "stripe-docs": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/stripe/stripe-docs/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "5cd602725272dd64e5655ca70adb4b74da045094"
+    },
+    "stripe-pay": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/stripe/stripe-pay/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "74a1290c1395f56ace85257fa4a418aada082225"
+    },
+    "stripe-projects": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/stripe/stripe-projects/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "5b2926de3cc4cae7ec3de6f429f1b37e4a89b6c2"
+    },
+    "upgrade-stripe": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": "skills/stripe/upgrade-stripe/SKILL.md",
+      "installedAt": "2026-09-30T14:23:40.504Z",
+      "updatedAt": "2026-09-30T14:23:40.504Z",
+      "skillFolderHash": "8386671a9a369961df55fc7f65dc5fd3da76e4d5"
     },
     "twitter-no-login": {
       "source": "local",

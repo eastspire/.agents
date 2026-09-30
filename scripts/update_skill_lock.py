@@ -100,15 +100,28 @@ def _build_skills_map(lock: dict) -> dict[str, dict]:
     new_map: dict[str, dict] = {}
     now = now_iso()
 
-    for skill_dir in sorted(SKILLS_DIR.iterdir()):
-        if not skill_dir.is_dir():
-            continue
-        skill_md = skill_dir / "SKILL.md"
-        if not skill_md.exists():
-            # A folder without SKILL.md is not a skill — skip silently.
-            continue
-
+    # Skills live at skills/<name>/ and skills/<category>/<name>/. A
+    # top-level folder WITHOUT SKILL.md is a category, so recurse into it
+    # instead of skipping it — otherwise every creative/, web/,
+    # software-development/ skill is invisible to the lock.
+    for skill_dir in sorted(_iter_skill_dirs()):
+        rel = skill_dir.relative_to(SKILLS_DIR)
+        # the key is the bare skill name; two categories may not both ship a
+        # skill of the same name, so a collision is a real error, not a merge
         name = skill_dir.name
+        if name in new_map:
+            # A skill shipped both at the top level and inside a category.
+            # The top-level copy is the one older locks reference, so it wins;
+            # the categorised one is reported so the duplication gets a human
+            # decision instead of being silently resolved either way.
+            if len(rel.parts) == 1:
+                continue  # the shallow copy already claimed the name
+            print(
+                f"warning: duplicate skill name {name!r} — keeping "
+                f"{new_map[name]['skillPath']}, ignoring skills/{rel}/SKILL.md",
+                file=sys.stderr,
+            )
+            continue
         fingerprint = _fingerprint(skill_dir)
         old = existing.get(name)
 
@@ -123,7 +136,7 @@ def _build_skills_map(lock: dict) -> dict[str, dict]:
         entry: dict = {
             "source": (old or {}).get("source", "local"),
             "sourceType": (old or {}).get("sourceType", "local"),
-            "skillPath": f"skills/{name}/SKILL.md",
+            "skillPath": f"skills/{rel}/SKILL.md",
             "installedAt": (old or {}).get("installedAt", now),
             "updatedAt": now,
         }
@@ -136,6 +149,30 @@ def _build_skills_map(lock: dict) -> dict[str, dict]:
         new_map[name] = entry
 
     return new_map
+
+
+def _iter_skill_dirs() -> list[Path]:
+    """Every directory under skills/ that holds a SKILL.md, at any depth.
+
+    `skills/creative/` has no SKILL.md of its own — it is a category. A
+    one-level walk therefore reported every categorised skill as absent from
+    the lock, which is how touchdesigner-mcp, comfyui and blender-mcp came to
+    have no lock entry at all.
+    """
+    found: list[Path] = []
+    for entry in sorted(SKILLS_DIR.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        if entry.name == "_pending":       # cronjob staging, not a skill
+            continue
+        if (entry / "SKILL.md").exists():
+            found.append(entry)
+            continue
+        for child in sorted(entry.iterdir()):
+            if child.is_dir() and not child.name.startswith(".") \
+                    and (child / "SKILL.md").exists():
+                found.append(child)
+    return found
 
 
 def main() -> int:
