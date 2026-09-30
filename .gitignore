@@ -51,3 +51,6 @@ skills/.curator_ledger.jsonl
 skills/.curator_state
 skills/.usage.json
 skills/.hub/
+
+# Daily skill-sync worker output (transient staging)
+skills/_pending/
