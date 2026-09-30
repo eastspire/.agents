@@ -129,7 +129,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | 我在做什么 | 跳到 |
 |-----------|------|
 | 新建 / 改项目目录结构、9 种关键字文件怎么放 | [01-directory-structure.md](references/01-directory-structure.md) |
-| 代码文件与子目录同级(该搬到 `<name>/<name>.rs`)、check 44 §1.3d | [01-directory-structure.md](references/01-directory-structure.md) §1.3d |
+| 代码文件与子目录同级(**只豁免 lib/main/build/mod,关键字文件也要搬**)、check 44 §1.3d | [01-directory-structure.md](references/01-directory-structure.md) §1.3d |
 | 加新 rust-standards audit check / 加强现有 rule(Layer N → Layer N+1) | [audit-pipeline.md](references/audit-pipeline.md) — verifier → fixtures → wrapper → rollout 五步走 + 三 fixture 模式 |
 | 写 / 改 doc comment、`lib.rs` 顶部 `//!`、`mod.rs` 为何不能加注释 | [02-documentation.md](references/02-documentation.md) |
 | 设计模块、抽象、trait 边界、blanket impl 放哪 | [03-architecture.md](references/03-architecture.md) |
@@ -176,7 +176,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | [scripts/verify_explicit_type_annotations.py](scripts/verify_explicit_type_annotations.py) | **§5.1 `let x = Vec::new();` 等 collection 类型显式标注**(2026-09-26 user 加强,check 31):正则捕 `let <name> = (Vec\|VecDeque\|HashMap\|HashSet\|BTreeMap\|BTreeSet\|LinkedList\|BinaryHeap\|String\|Box\|Rc\|Arc)::new();` + `let <name>: Vec<_> = ...collect();` 两种占位标注。`python3 <path>/verify_explicit_type_annotations.py <repo>` 单独跑;fixture compliant 0/exit 0,violating 4/exit 1。 |
 | [scripts/verify_no_wasm_inline.py](scripts/verify_no_wasm_inline.py) | **§12 WASM cdylib crate 禁 `#[inline]` 三变体**(2026-09-26 user 新加,check 32):扫描所有 `Cargo.toml` 找 `crate-type = ["cdylib", ...]`,审计其 src/ 树捕 `^\s*#\[\s*inline(?:\s*\([^\)]*\))?\s*\]`。`python3 <path>/verify_no_wasm_inline.py <repo>` 单独跑;fixture compliant 0/exit 0,violating 3/exit 1。无 cdylib crate 时脚本 exit 0 报"rule not applicable"。 |
 | [scripts/verify_let_type_annotations.py](scripts/verify_let_type_annotations.py) | **§5.1 全部 `let` 绑定显式类型标注(含 `let _`)**(2026-09-26 第三轮 user 钦定,check 32):正则 `^\s*let\s+(?:mut\s+)?(?P<pat>...)\s*=\s*` 捕全部无 `: T` 的 let 绑定,**含 `let _ = expr;`**。`python3 <path>/verify_let_type_annotations.py <repo>` 单独跑;fixture compliant 0/exit 0,violating 5/exit 1(含 `let _ = fs::remove()`)。 |
-| [scripts/verify_closure_type_annotations.py](scripts/verify_closure_type_annotations.py) | **§5.2 闭包参数显式类型标注**(2026-09-26 第三轮 user 钦定,check 33):Python split-comma 解析 `\|<params>\|` 闭包参数,逐个检查有无 `: T`。例外:`\|\|` 空参、`\|..\|` rest、`\|(a,b): &(T,U)\|` 元组带类型。`python3 <path>/verify_closure_type_annotations.py <repo>` 单独跑;fixture compliant 0/exit 0,violating 5/exit 1(含元组解构)。 |
+| [scripts/verify_closure_type_annotations.py](scripts/verify_closure_type_annotations.py) | **§5.2 闭包参数显式类型标注**(2026-09-26 第三轮 user 钦定,check 33):Python split-comma 解析 `\|<params>\|` 闭包参数,逐个检查有无 `: T`。例外:`\|\|` 空参、`\|..\|` rest、`\|(a,b): &(T,U)\|` 元组带类型、**`\|_|` 丢弃参数**(2026-09-28 新增)。**扫描前必须先把字符串/字符字面量与注释逐字符 mask 成空格(保持 offset),否则 `log::info!("(a|b|c)")` 里的 `|` 会被当成闭包分隔符**(2026-09-28);**exempt 必须按 span 豁免,不能整行 skip —— 整行 skip 会让 `items.map(\|x\| x*2).inspect(\|_\| println!("step\|next"))` 这类"同行业务闭包 + 字符串带管道"的真违规一起消失**。`python3 <path>/verify_closure_type_annotations.py <repo>` 单独跑;fixture `~/.hermes/cache/scratch/closure-annot-fixtures/{compliant,violating,tricky,trap}`(`make_fixtures.py` 生成,`test_closure_verifier.py` 双向断言):compliant 0/exit 0,violating 5/exit 1(含元组解构),tricky 1/exit 1(字符串内 `|`、`\|\|` 短路、位运算链、macro_rules 模式全部 0 命中,仅留故意的真违规),trap 1/exit 1(行跳过陷阱)。三仓 old vs new 对拍实测:hyperlane 7→0 / euv 175→132 / ctares 0→0,**新增命中 0**。 |
 | [scripts/verify_doc_comment_format.py](scripts/verify_doc_comment_format.py) | **§2.1 + §2.2 doc-comment 四层校验**(2026-09-27 第三轮 user 钦定加强,check 35 authoritative):Layer 1 存在性 / Layer 2 完整性(`# Arguments` + `# Returns` 严格匹配)/ Layer 3 格式 / Layer 4 **签名类型精确匹配**(2026-09-27 新增)—— `# Arguments` 里每个 `- \`Type\` -` 的 `Type` 必须等于 fn 签名的实际参数类型(保留 `&` 与 `` ` ``),`# Returns` 同理;doc 块第一个非空 `///` 必须是 prose 描述,不能直接是 `# Arguments` / `# Returns`。**测试文件自动 exempt**(R14.5 禁止 tests 内任何注释)。`python3 <path>/verify_doc_comment_format.py <repo>` 单独跑;fixture compliant 0/exit 0,violating 6/exit 1。 |
 | [scripts/verify_hardcoded_strings.py](scripts/verify_hardcoded_strings.py) | **§1.3c 加强 硬编码字符串到 const.rs**(2026-09-26 第三轮 user 钦定,check 35):所有 ≥ 4 个非平凡字符的字符串字面量必须到 const.rs。例外:const.rs 本身、tests/、`#[doc = "..."]` / `#[serde(rename = "...")]` 属性行、format 宏格式串、**foreign-ABI 槽位 `extern "C"` / `extern "system"` / `extern "C-unwind"`(2026-09-28 新增)**。ABI 字符串是**语法关键字槽位,不是程序数据** —— `const ABI: &str = "system"; extern ABI {}` 是 rustc 硬语法错误(`error: expected \`fn\`, found \`ABI\``,已实测),**结构上无法提取到 const.rs**,报它必然是 false positive。正则 `EXTERN_ABI_LINE` 锚定在 `extern` 关键字上(允许前置 `pub`/`pub(crate)`/`pub(in path)`/`unsafe`),**且只豁免捕获到的 ABI 字符串本身那一个 span,同一行上其余字符串全部照报**。**为什么必须按 span 而非按行豁免(2026-09-28 review 实测)**:按行 `continue` 会让 `extern "C" fn f() -> &'static str { "/Users/sqs/.ssh/id_ed25519" }` 这一行上的**所有**字符串一起消失 —— 配合 `#![rustfmt::skip]`(一行即可,且能通过 `cargo fmt --check`)就构成可利用的假阴性,实测可藏 6 处真违规(含私钥路径与硬编码口令),而本脚本的契约是"宁报假阳性也不漏报"。实现上不能只跳过 span 后从头 `finditer(line)`:`STRING_LITERAL` 是按引号配对的,从头扫会从 ABI 的**右引号**开始配对,把两个字符串之间的代码吞成一个大 span(报出 `'" fn f() -> ... { "'` 这种垃圾)并可能漏掉中间的**真**字符串 —— 正确做法是 `STRING_LITERAL.finditer(line, abi_end)`,即**从 ABI 之后**继续扫。回归用例 9 条(extern 块不报 / extern 行带真字符串报 / 一行两个字符串都报 / `pub(in path)` 变体 / 多空格 / `C-unwind` / 含 "extern" 的普通字符串照报)全部通过。`python3 <path>/verify_hardcoded_strings.py <repo>` 单独跑;fixture `~/.hermes/cache/scratch/hardcoded-strings-fixtures/{compliant,violating}`:compliant 3 变体(`"system"` 块 / `"C"`+`"C-unwind"` / `pub unsafe extern "system" fn`)= 0/exit 0,violating 3 变体 = 6 真违规/exit 1(纯路径 / extern 行旁另有真违规 / 含 "extern" 字样的诱饵字符串 / 字节字面量)。**已注册进 `staged_file_gate.py`**,四向实测:干净 0 / 注入硬编码串阻断 / 新建未跟踪文件阻断 / 历史债修好后放行。 |
 | [scripts/verify_lib_rs_doc_comment.py](scripts/verify_lib_rs_doc_comment.py) | **§2.4 lib.rs 必须 `//!` doc block 结构**(2026-09-26 第五轮 user 钦定,check 36):读最近 Cargo.toml 的 `[package].name`,校验 lib.rs 起头 3 行结构(`//! <pkg_name>` / `//!` 空行 / `//! <description>`)。`python3 <path>/verify_lib_rs_doc_comment.py <repo>` 单独跑。Fixture `~/.hermes/cache/scratch/rust-std-fixtures/lib-rs-doc/{compliant,violating}`:compliant 4 个变体都 0/exit 0(最小 / 1-char desc / multi-line / 多空行);violating 5 个变体每个都 1 违规(exit 1) — 共 5 真违规。euv 实测 catch 5 真违规(包名 mismatch / 完全无 `//!` 块)。 |
@@ -184,7 +184,9 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | [scripts/verify_no_self_field_access.py](scripts/verify_no_self_field_access.py) | **§17.3 / §17.12 禁止 `self.field` 直接读写,必须用 Data 宏 get/set**(2026-09-26 user 钦定,check 38):brace 计数跟踪豁免区(手写 accessor fn `get_*`/`set_*`/`try_get_*` 体内、Debug/Display impl 块、`#[cfg(test)]` 块 + tests/),`self.<ident>` 非方法调用即违规。允许 `Self { field: value }` 结构体初始化与 `Self { ..self }` 更新语法。`python3 <path>/verify_no_self_field_access.py <repo>` 单独跑。Fixtures `~/.hermes/cache/scratch/verifier-fixtures/self-{compliant,violating,edge-cases}`:compliant 0/exit 0(accessor 体 / Display impl / cfg(test) / 业务方法用 accessor 四变体),violating 4/exit 1(直读 / 直写 / 字段方法调用 / Drop impl),edge-cases 2/exit 1(6 种豁免 + 4 种违规逐项验证),audit 端到端双向通过。 |
 | [scripts/verify_section_blanks.py](scripts/verify_section_blanks.py) | **§13.8 Cargo.toml 跨段 ≥ 1 空行(loose variant,2026-09-27)**:所有顶层 `[section]` header(列首 `[xxx]` 形式,不含 `[[xxx]]`)之前**至少** 1 个空行 —— **只**当紧邻前一行非空时报 FAIL,**≥ 2 个空行不报**。覆盖 13+ 种 cargo sections:`[package]` / `[workspace]` / `[workspace.dependencies]` / `[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` / `[lib]` / `[[bin]]` / `[profile.*]` / `[patch.*]` / `[package.metadata.*]` 等。**不**作用于 dep 块内部(那是 §13.7 round-4)。Fixture `~/.hermes/cache/scratch/verifier-fixtures/section-blanks-{compliant,violating}`:compliant 1 fixture 0/exit 0,violating 1 fixture 3 真违规/exit 1。`python3 <path>/verify_section_blanks.py <repo>` 单独跑;跳过 `target/` / `~/.cargo/registry/` / `*/tmp/test_*/`(crate-cli 集成测试 fixture)。**注意**:此脚本语义比 §13.7.2 **loose** —— 它允许 ≥ 2 空行。**Canonical 严格版是 §13.7.2**(`verify_dep_order.py::check_cross_section_blanks`,user 原话"**有且只有**一个空行"对应此版,0 **和** ≥2 都报 FAIL)。修代码合规性以 §13.7.2 的 0 violations 为准;§13.8 是更宽松的兜底变体,只关心"段不粘连"时可单跑它。 |
 | [scripts/verify_use_aggregation.py](scripts/verify_use_aggregation.py) | **§6.6 同 root 的 `use` 必须聚合成一个 brace 语句**(2026-09-27 user 钦定,check 41 / 列表第 40 项):use 块状态机 + 花括号深度跟踪(**只扫顶层**,fn 体 / mod 体 / `#[cfg(test)] mod tests` 全部跳过),按 `(root, visibility)` 分组,组内 ≥ 2 条独立 `use` 即违规并输出可复制的合并形式。**8 条豁免**(全部 fixture 覆盖):不同 root / 跨 visibility / glob 并存 / fn 内 use / cfg(test) mod / `#[cfg]` gate 的 import(合并会把属性提升到整个组 = 改语义)/ 无 root 的 `use { ... }` re-export 块(归 §6.1)/ 被另一个 §6.1 stage 隔开的对(**§6.1 三段式顺序 > §6.6 聚合**,不得破坏 check 27)。跨 visibility 豁免是**实测**结论:stable rustfmt 1.9.0 与 nightly 1.101.0(`imports_granularity = "Crate"`)都保持 `pub use` 与私有 `use` 分离,`imports_granularity` 本身还是 nightly-only 选项。`python3 <path>/verify_use_aggregation.py <repo>` 单独跑;跳过 `target/` / `.git/` / `node_modules/` / `tmp/`。Fixture `~/.hermes/cache/scratch/verifier-fixtures/use-agg-{compliant,violating}`:compliant **0 hits / exit 0**(8 个文件各覆盖一条豁免),violating **4 hits / exit 1**(纯拆分 / 注释夹中间 / 三条混合 / `pub use` 拆分),audit 端到端双向通过(check 41 在 violating 侧 FAIL 4 hits,compliant 侧 PASS),`staged_file_gate.py` hook 已注册并实测能拦新违规、放过历史债。三仓实测:**euv 1 违规文件 / 1 hit**(`macros/tests/mod.rs:12`)/ **ctares 0** / **hyperlane 0**。grep 粗扫数字远高于此属正常 —— 粗扫会把**已是 brace 形式**的 `use std::{` 也计入。 |
-| [scripts/verify_no_sibling_dirs.py](scripts/verify_no_sibling_dirs.py) | **§1.3d 孤儿代码文件不能与目录同级**(2026-09-28 user 钦定并同日收窄,check 44):目录有子目录时不得再放**既无模块归属也无关键字槽位**的 `.rs` 文件;豁免 = 入口文件 4 个(`lib.rs`/`main.rs`/`build.rs`/`mod.rs`)+ 关键字文件 9+1 个(9 种 §1.3 关键字 + `macro.rs`)。**收窄原因**:首版"全禁"的标准修法会触发 clippy `module_inception`(euv +2 / ctares +5,两仓 master 均 0 warning),且会误报 ctares 的 24 个 `macro.rs`;`X/X.rs` 形态在两仓 master 里原本一个都不存在。**按目录报**(N 个文件 = 1 条 finding,修复是一次结构性搬迁),不是按文件报。跳过 `SKIP_DIR_NAMES` + 点目录 + git-ignored(`crate-cli/tmp/` 的 scratch crate 布局违规不可能进任何 commit)。`python3 <path>/verify_no_sibling_dirs.py <repo>` 单独跑;fixture `~/.hermes/cache/scratch/verifier-fixtures/sibling-dirs-{compliant,violating,edge-cases}` 双向自测(compliant 0/exit 0,violating 4 in 4 dirs/exit 1,edge-cases 2 in 2 dirs/exit 1)。三仓实测 2026-09-28 修复后 **ctares 0 / hyperlane 0 / euv 2**(euv 2 处孤儿已由 PR #290 修复并合并)。**进** pre-commit hook:`staged_file_gate.VERIFIERS` 已注册,靠 `audit_one(path)` 适配层把目录级判断映射到 staged 文件路径(2026-09-29 补,此前该规则在 hook 里读作恒定 0 —— 见 pitfalls §89)。**残留缺口**:orphan 未 staged 而新增子目录 staged 的组合 gate 抓不到,**check 44 全仓审计仍是权威**,两层职责不可互相替代。 |
+| [scripts/verify_no_sibling_dirs.py](scripts/verify_no_sibling_dirs.py) | **§1.3d 代码文件不能与目录同级 — 只豁免 4 个入口文件**(2026-09-28 钦定 → **2026-09-29 收紧**,check 44):目录有子目录时**不得再放任何 `.rs` 文件,关键字文件 9+1 个也不再豁免**,一律搬进语义化子目录(文件名保持关键字名,如 `renderer/webgpu/struct.rs`)。**收紧原因**:旧实现 `EXEMPT = ENTRY | KEYWORD` 让规则在真实场景读作恒定 0(`engine/src/renderer/` 6 个关键字文件 + `webgl/` 子目录,verifier 仍报 0)。**修法陷阱**:禁止 X/X.rs 形态(`const/const.rs`),它触发 clippy `module_inception`(euv +2 / ctares +5)。**拆分维度是概念不是文件名**:euv 实测拆法 = `state/` + `descriptor/` + `webgpu/` + `webgl/` + `canvas/`,按后端拆会让 webgl/ 依赖 webgpu/(共享 FilterMode/AddressMode/CompareFunction/DrawArgs 等)。**按目录报**(N 个文件 = 1 条 finding,修复是一次结构性搬迁),不是按文件报。跳过 `SKIP_DIR_NAMES` + 点目录 + git-ignored(`crate-cli/tmp/` 的 scratch crate 布局违规不可能进任何 commit)。`python3 <path>/verify_no_sibling_dirs.py <repo>` 单独跑;**自测已固化为脚本** `scripts/self_test_sibling_dirs.py` + `scripts/fixtures/sibling-dirs/{compliant,violating}`,`python3 scripts/self_test_sibling_dirs.py` 双向断言(compliant 0/exit 0,violating 2 dirs 8 files/exit 1,叶子目录关键字文件 0 findings)。**该测试做过变异验证**:把 `EXEMPT` 改回含 KEYWORD → FAIL(exit 1),把 `endswith(".rs")` 改成 `False` → FAIL(exit 1),还原 → PASS —— 证明它抓得住"规则被改宽/被关掉",不是恒过测试。三仓实测 2026-09-29 收紧后 **euv 4 violations in 4 dirs**(`engine/src/renderer` / `core/src/vdom` / `ui/src/component/router` / `ui/src/style/class`)。**ctares / hyperlane 实测 0 violations** —— ctares 有 23 个 `macro.rs`,但**全部位于无子目录的叶子目录**(`clonelicious/src` / `std-macro-extensions/src/{vector_deque,rw_lock}` 等,`subdirs=0`),新规则不命中。**更正旧记录**:SKILL.md 早前写"ctares 24 个 `macro.rs` 与子目录同级会被误报"—— 实测它们都在叶子目录,那句描述的是首版"任何 .rs 都禁"的假想场景,不是 ctares 的真实形态。**进** pre-commit hook:`staged_file_gate.VERIFIERS` 已注册,靠 `audit_one(path)` 适配层把目录级判断映射到 staged 文件路径(2026-09-29 补,此前该规则在 hook 里读作恒定 0 —— 见 pitfalls §89)。**残留缺口**:orphan 未 staged 而新增子目录 staged 的组合 gate 抓不到,**check 44 全仓审计仍是权威**,两层职责不可互相替代。 |
+
+**2026-09-29 修了 gate 的一个真实误报(拆分搬迁会把存量债算成新增)**:`staged_file_gate` 原本只按 `HEAD:<同一路径>` 取基线,只有 git 记成 `R`(rename)时才回退到旧路径。**结构性搬迁几乎不会被记成 R**:一个源文件拆成 N 个目标时,git 只把其中**一个**配对成 rename(如 `renderer/impl.rs → webgpu/impl.rs` 记成 `R059`),其余目标(`canvas/impl.rs` / `state/impl.rs` / `descriptor/impl.rs`)基线为空;`D old` + `M new` 的部分修改更是只拿到**残缺的** HEAD 副本。两类情况都让**搬迁过来的存量债**被算成「本次提交新增」,实测 euv §1.3d 搬迁一次报出 **1235 条假阳性**(仓库级真实数:hardcoded 3182→3163、doc-comment 789→746,都是**下降**)。修法:`head_content()` 改为**并集基线** = 自身 HEAD 内容 + 匹配的拆分源(候选池从 `--diff-filter=D` 扩到 `ADR`,新增 `_same_or_nested_dir` 双向嵌套判断 + `SPLIT_MIN_OVERLAP=0.30` 的 Jaccard 重叠门槛,只接受有实质重叠的源,宁可漏配不可错配)。修后 1235 → 54 → 6 → 0,且注入一条真违规后仍能报出(+1)。**教训**:结构不变时出现「看起来像新增」的巨额违规数,第一反应应该是**质疑基线**而不是相信报告 —— 逐 verifier 做仓库级 HEAD vs 工作树对拍是唯一裁判。
 | [scripts/rust_pre_commit.py](scripts/rust_pre_commit.py) | **2026-09-27 user 钦定:单条命令完工 loop**。Phase 1 auto-fixers(fix_dep_order / strictify_tests_layout / doc_comment_audit 三套幂等)+ Phase 2 audit 44-check + Phase 3 crate fmt 双跑 + --check 幂等 + Phase 4 clippy --all-targets + Phase 5 cargo test --no-run。**Phase 1↔Phase 2 loop 至多 3 次**(auto-fix 可能 unblock audit findings),exit 非零 = 必须修到 0 才能 commit。`python3 <path>/rust_pre_commit.py <repo>` 单条命令,`--audit-only` / `--no-fix` / `--max-iters N` 子标志。这是 user "编码前 skill 加载 + 编码后脚本 loop" 的闭环脚本,任何 Rust 任务完工的唯一条件 = 此脚本 exit 0。 |
 | [scripts/check_cargo_bin_shadow.sh](scripts/check_cargo_bin_shadow.sh) | 验证 rule 13 无 PATH-shadow(`~/.cargo/bin` 下与 rustc/cargo spawn 工具同名的非 rustup-managed 二进制 —— rustc 链接器 `cc` bare-name 撞 stale 二进制会让每个 build script 缺 `.exe`,参见 [references/cargo-tool-shadow.md](references/cargo-tool-shadow.md))。`bash <path>/check_cargo_bin_shadow.sh [CARGO_BIN_DIR]` 默认扫 `~/.cargo/bin`。 |
 | [scripts/strictify_tests_layout.py](scripts/strictify_tests_layout.py) | §14.4 / §14.5 / §14.7 auto-fixer。删注释、合并冗余空白、把违规的 fn.rs use 重新规范到 mod.rs 的 `pub use`。`python3 <path>/strictify_tests_layout.py <repo_root>` in-place rewrite,**幂等**(二次运行 0 diff)。**只对 tests/ 跑,绝不对 src/** —— 写文件名白名单是 mod.rs/fn.rs,跑在 src/ 上会把源码注解乱删。 |
@@ -199,7 +201,7 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
 | [scripts/verify_doc_comment_format.py](scripts/verify_doc_comment_format.py) | **§2.1 + §2.2 doc-comment 四层校验**(2026-09-27 user 钦定,check 25 + 35):Layer 1 存在性 / Layer 2 完整性(严格 `/// # XXX` 行匹配防误报)/ Layer 3 格式 / Layer 4 **签名类型精确匹配**(2026-09-27 新增)—— `# Arguments` / `# Returns` 中的 `Type` 必须等于 fn 签名的实际类型,doc 块第一个非空 `///` 必须是 prose 不能直接是 section header。逻辑与 `doc_comment_audit.py` 共享 fn 解析但 pure-verifier(不修文件)。**接入 audit 前已双向 fixture 自测**。`python3 <path>/verify_doc_comment_format.py <repo>` 单独跑。 |
 | [scripts/verify_module_imports_centralized.py](scripts/verify_module_imports_centralized.py) | **§6.1 + §6.3 + §6.4 三段式 import 集中化校验**(2026-09-26 user 新加,check 26):lib.rs 私有 use 改 pub use / mod.rs 禁注释 + 末行 use super::* / 子文件 use super::*; 唯一合法。**接入 audit 前已双向 fixture 自测**。`python3 <path>/verify_module_imports_centralized.py <repo>` 单独跑。 |
 | [scripts/verify_lib_rs_order.py](scripts/verify_lib_rs_order.py) | **§6.1 lib.rs / mod.rs 三段式 import 顺序校验**(2026-09-26 user 新加,check 27):严格 5 阶段顺序(mod → pub use → pub(crate) use → pub(super) use → private use),mod 声明块内禁止空行。**接入 audit 前已双向 fixture 自测**。`python3 <path>/verify_lib_rs_order.py <repo>` 单独跑。 |
-| [scripts/audit_rust_standards.py](scripts/audit_rust_standards.py) | 完整 44 条 audit 规则(覆盖 §1 / §2 / §5 / §6 / §9 / §11 / §12 / §13.7 round 4 dep order(r4) + §13.7.2a/2b/2c 配套 / §13.8 Cargo.toml section-blank / §14 / §17 / §R1.3c / §9.2 impl Trait 参数禁 / §6.1-6.4 import 集中化,check 19 R14.7 test fn.rs non-super use,check 20 fn-body blank lines,**check 21 §13.7 round 4 Cargo.toml dep block order + cross-section blank + EOF blank + multi-blank-run**,**check 22 §13.7 round 5 features 数组内部排序**,**check 23 §L lombok accessor 禁显式 `pub`** (原 check 22 顺延),**check 24 §17 CI 禁 version bump + version 写盘**,**check 23 §1.3/§6.3 关键字子文件纯净化 + 第一行 `use super::*;` + 全文件 use 集中化**,**check 24 §9.2 fn 参数禁 `impl Trait`,必须用 generic + where**,**check 24 §L lombok accessor 裸属性 `#[get]` / `#[get_mut]` / `#[set]` 禁止(默认 `#[derive(Data)]` 已生成全部 accessor)**(2026-09-27 user 钦定,check 22b `#[get(pub)]` 同一规则的第二级),**check 25 已废弃 2026-09-26 合并到 check 35**,**check 26 §6.1+§6.3+§6.4 import 集中化(lib.rs 私有 use 改 pub use / mod.rs 禁注释 / 子文件 use super::*; 唯一合法)**,**check 27 §6.1 lib.rs/mod.rs 三段式 import 顺序(mod → pub use → pub(crate) → pub(super) → private)**,**check 28 §14.5 tests/ 全文件零注释综合校验(捕 `//`/`///`/`//!` 三种)**,**check 29 §6.2 mod.rs `mod r#xxx;` 必须 bare 禁止 `pub`/`pub(crate)`/`pub(super)` 前缀**,**check 30 §14 `#[allow(...)]`/`#[expect(...)]` 全树扫描(配合 check 2 git-diff 范围作 baseline 把关)**,**check 31 §5.1 `let x = Vec::new();` 等 collection 类型显式标注 + 禁止 `Vec<_>` 占位(子集)**,**check 32 §12 WASM cdylib crate 禁 `#[inline]` 三变体**,**check 33 §5.1 全部 `let` 绑定(含 `let _`)显式类型标注(comprehensive)**,**check 34 §5.2 闭包参数显式类型标注**,**check 35 §2.1+§2.2 非单测 fn doc-comment 四层校验(authoritative,2026-09-27 user 加强 Layer 4 签名类型精确匹配)**,**check 36 §1.3c 加强 硬编码字符串(≥ 4 字符)必须到 const.rs**,**check 36 §2.4 lib.rs 必须 `//!` doc block 3 行结构(`//! <pkg_name>` / `//!` / `//! <desc>`,pkg_name 必须等于 `[package].name`)**,**check 37 §6.5 禁止 `use ... as ...` as 重命名(类型冲突在使用处写最短可区分命名空间)**,**check 38 §17.3/§17.12 禁止 `self.field` 直接读写(必须用 Data 宏 get/set;豁免:手写 accessor 体 / Debug / Display impl / cfg(test))**,**check 39 §13.8 Cargo.toml 顶层 section header 前空行**,**check 41 §6.6 同 root 的 `use` 必须聚合成一个 brace 语句(按 (root, visibility) 分组;§6.1 三段式顺序优先,不得破坏 check 27)**),**check 44 §1.3d 孤儿代码文件不能与目录同级(目录有子目录时不得再放无模块归属的 .rs 文件,豁免入口文件 4 个 + 关键字文件 9+1 个)**)。**False-positive 列表**见 `references/audit-pitfalls.md`(§1-§89,§44 §13.7 round 4 migration notes,§45-§48 是 fix_dep_order.py / verify_dep_order.py 接入 audit 的实测 pitfalls,§49-§53 是 2026-09-26 check 23-28 新接入 pitfalls,§54-§57 是 2026-09-26 第二轮 check 29-32 新接入 pitfalls,§58-§61 是 2026-09-26 第三轮 check 33-36 新接入 pitfalls,§62 是 2026-09-26 第五轮 check 36 新接入 pitfalls,§63-§65 是 2026-09-26 第六轮 verifier 修复 + check 37 新接入 pitfalls,§66 是 2026-09-27 check 35 Layer 4 doc-comment 签名类型匹配接入 pitfalls(euv 仓 801 真违规),§67 是 2026-09-27 check 38 `self.field` 接入 + `self-edge-cases` fixture 精度验证(euv 仓 203 真违规,**推荐独立 PR sweep,不在 audit 接入同一 commit**),§68-§69 是 2026-09-27 check 23 struct.rs impl 豁免清单 + PR 引入 vs baseline 判别流程,§70-§72 是 2026-09-27 第二轮 check 21/22 dep-order + fixture `tmp/test_*` 不入仓 + delegated sub-agent sandbox CWD 不等于父 agent 目标分支,§73-§75 是 2026-09-27 第三轮 fix_dep_order.py 接入 audit 时的三个连环坑(middle-blank trim guard 误接受 + serializer 双空行 + parse/sort/serialize 三函数契约),§76-§78 是 2026-09-27 第四轮 rust_pre_commit.py 单条命令闭环脚本引入:§76 max-iters 3 的 sweet spot(够 auto-fixer 收敛 + 够 audit 报稳定违规清单),§77 audit-pipeline.md 架构文档 vs rust_pre_commit.py 执行器的区分(AI 完工标准 = 跑脚本看到 "PASS — all phases clean" + exit 0),§78 旧模式 "scripts 偶尔不触发" 的 4 个根因(散落 5 步被当可选清单 / clippy warning 当非 error / autocomplete 误判 .rs 跳过 skill / 豁免区被误读为 skip)+ 新脚本如何逐条根除,§79 是 2026-09-27 第五轮 Phase 3 fmt 幂等性哨兵不能用 `git status --short`(会被 Cargo.lock / build artifacts 污染,**改用工具自己的 `--check` 模式**),§80 auto-fixer 必须自给自足不依赖仓库是 git 仓(优先 `pathlib.rglob`,只在 `.git/` 存在时退化 `git ls-files`),§81 max-iters 子标志 `--max-iters N` 排查 fixer 收敛性可调到 5-10,但源码级违规(`self.field` / `use ... as ...` / missing doc-comment)**永远要人改 source**,不能靠加迭代次数撞运气,**§88 是 2026-09-28 §1.3d 当天收窄的教训:新规则的"标准修法"必须先跑 clippy 与 master 基线对比(verifier 报得出违规 ≠ 修法干净,后者是 git 状态,两者之间没有自动校验)+ `rust_pre_commit.py` Phase 4 曾只看 exit code 导致对任何 warning 都报 "PASS (0 warnings)"(已修为数 `^warning:` 行)+ 豁免名单要从"这个文件有没有模块归属"推到底(入口 4 + 关键字 9 + macro.rs),而不是从 user 举例继承 + 给 subagent 的验收条件若依赖一个坏 gate,等于派发"通过一个假检查"**)。 |
+| [scripts/audit_rust_standards.py](scripts/audit_rust_standards.py) | 完整 44 条 audit 规则(覆盖 §1 / §2 / §5 / §6 / §9 / §11 / §12 / §13.7 round 4 dep order(r4) + §13.7.2a/2b/2c 配套 / §13.8 Cargo.toml section-blank / §14 / §17 / §R1.3c / §9.2 impl Trait 参数禁 / §6.1-6.4 import 集中化,check 19 R14.7 test fn.rs non-super use,check 20 fn-body blank lines,**check 21 §13.7 round 4 Cargo.toml dep block order + cross-section blank + EOF blank + multi-blank-run**,**check 22 §13.7 round 5 features 数组内部排序**,**check 23 §L lombok accessor 禁显式 `pub`** (原 check 22 顺延),**check 24 §17 CI 禁 version bump + version 写盘**,**check 23 §1.3/§6.3 关键字子文件纯净化 + 第一行 `use super::*;` + 全文件 use 集中化**,**check 24 §9.2 fn 参数禁 `impl Trait`,必须用 generic + where**,**check 24 §L lombok accessor 裸属性 `#[get]` / `#[get_mut]` / `#[set]` 禁止(默认 `#[derive(Data)]` 已生成全部 accessor)**(2026-09-27 user 钦定,check 22b `#[get(pub)]` 同一规则的第二级),**check 25 已废弃 2026-09-26 合并到 check 35**,**check 26 §6.1+§6.3+§6.4 import 集中化(lib.rs 私有 use 改 pub use / mod.rs 禁注释 / 子文件 use super::*; 唯一合法)**,**check 27 §6.1 lib.rs/mod.rs 三段式 import 顺序(mod → pub use → pub(crate) → pub(super) → private)**,**check 28 §14.5 tests/ 全文件零注释综合校验(捕 `//`/`///`/`//!` 三种)**,**check 29 §6.2 mod.rs `mod r#xxx;` 必须 bare 禁止 `pub`/`pub(crate)`/`pub(super)` 前缀**,**check 30 §14 `#[allow(...)]`/`#[expect(...)]` 全树扫描(配合 check 2 git-diff 范围作 baseline 把关)**,**check 31 §5.1 `let x = Vec::new();` 等 collection 类型显式标注 + 禁止 `Vec<_>` 占位(子集)**,**check 32 §12 WASM cdylib crate 禁 `#[inline]` 三变体**,**check 33 §5.1 全部 `let` 绑定(含 `let _`)显式类型标注(comprehensive)**,**check 34 §5.2 闭包参数显式类型标注**,**check 35 §2.1+§2.2 非单测 fn doc-comment 四层校验(authoritative,2026-09-27 user 加强 Layer 4 签名类型精确匹配)**,**check 36 §1.3c 加强 硬编码字符串(≥ 4 字符)必须到 const.rs**,**check 36 §2.4 lib.rs 必须 `//!` doc block 3 行结构(`//! <pkg_name>` / `//!` / `//! <desc>`,pkg_name 必须等于 `[package].name`)**,**check 37 §6.5 禁止 `use ... as ...` as 重命名(类型冲突在使用处写最短可区分命名空间)**,**check 38 §17.3/§17.12 禁止 `self.field` 直接读写(必须用 Data 宏 get/set;豁免:手写 accessor 体 / Debug / Display impl / cfg(test))**,**check 39 §13.8 Cargo.toml 顶层 section header 前空行**,**check 41 §6.6 同 root 的 `use` 必须聚合成一个 brace 语句(按 (root, visibility) 分组;§6.1 三段式顺序优先,不得破坏 check 27)**),**check 44 §1.3d 代码文件不能与目录同级(2026-09-29 收紧:目录有子目录时**只豁免入口文件 4 个**,关键字文件 9+1 个不再豁免,一律搬进语义化子目录)**)。**False-positive 列表**见 `references/audit-pitfalls.md`(§1-§89,§44 §13.7 round 4 migration notes,§45-§48 是 fix_dep_order.py / verify_dep_order.py 接入 audit 的实测 pitfalls,§49-§53 是 2026-09-26 check 23-28 新接入 pitfalls,§54-§57 是 2026-09-26 第二轮 check 29-32 新接入 pitfalls,§58-§61 是 2026-09-26 第三轮 check 33-36 新接入 pitfalls,§62 是 2026-09-26 第五轮 check 36 新接入 pitfalls,§63-§65 是 2026-09-26 第六轮 verifier 修复 + check 37 新接入 pitfalls,§66 是 2026-09-27 check 35 Layer 4 doc-comment 签名类型匹配接入 pitfalls(euv 仓 801 真违规),§67 是 2026-09-27 check 38 `self.field` 接入 + `self-edge-cases` fixture 精度验证(euv 仓 203 真违规,**推荐独立 PR sweep,不在 audit 接入同一 commit**),§68-§69 是 2026-09-27 check 23 struct.rs impl 豁免清单 + PR 引入 vs baseline 判别流程,§70-§72 是 2026-09-27 第二轮 check 21/22 dep-order + fixture `tmp/test_*` 不入仓 + delegated sub-agent sandbox CWD 不等于父 agent 目标分支,§73-§75 是 2026-09-27 第三轮 fix_dep_order.py 接入 audit 时的三个连环坑(middle-blank trim guard 误接受 + serializer 双空行 + parse/sort/serialize 三函数契约),§76-§78 是 2026-09-27 第四轮 rust_pre_commit.py 单条命令闭环脚本引入:§76 max-iters 3 的 sweet spot(够 auto-fixer 收敛 + 够 audit 报稳定违规清单),§77 audit-pipeline.md 架构文档 vs rust_pre_commit.py 执行器的区分(AI 完工标准 = 跑脚本看到 "PASS — all phases clean" + exit 0),§78 旧模式 "scripts 偶尔不触发" 的 4 个根因(散落 5 步被当可选清单 / clippy warning 当非 error / autocomplete 误判 .rs 跳过 skill / 豁免区被误读为 skip)+ 新脚本如何逐条根除,§79 是 2026-09-27 第五轮 Phase 3 fmt 幂等性哨兵不能用 `git status --short`(会被 Cargo.lock / build artifacts 污染,**改用工具自己的 `--check` 模式**),§80 auto-fixer 必须自给自足不依赖仓库是 git 仓(优先 `pathlib.rglob`,只在 `.git/` 存在时退化 `git ls-files`),§81 max-iters 子标志 `--max-iters N` 排查 fixer 收敛性可调到 5-10,但源码级违规(`self.field` / `use ... as ...` / missing doc-comment)**永远要人改 source**,不能靠加迭代次数撞运气,**§88 是 2026-09-28 §1.3d 当天收窄的教训:新规则的"标准修法"必须先跑 clippy 与 master 基线对比(verifier 报得出违规 ≠ 修法干净,后者是 git 状态,两者之间没有自动校验)+ `rust_pre_commit.py` Phase 4 曾只看 exit code 导致对任何 warning 都报 "PASS (0 warnings)"(已修为数 `^warning:` 行)+ 豁免名单要从"这个文件有没有模块归属"推到底(入口 4 + 关键字 9 + macro.rs),而不是从 user 举例继承 + 给 subagent 的验收条件若依赖一个坏 gate,等于派发"通过一个假检查"**)。 |
 
 ## 关键硬性规则(快速记忆)
 
@@ -317,11 +319,176 @@ description 里写了"euv 任务必同时加载 euv-standards + euv-ui-standards
    - **Pitfall(2026-09-25 实测,从 orphan script 接入这条 check):新加一个独立 verification script 到 audit 流水线前,必须先用一个合规 fixture + 一个违规 fixture 双向验证脚本行为**。`verify_test_imports_centralized.sh` 第一次接入时,双引号 shell heredoc 里的正则 `^use super::\*;` 因 `\!` 和 `\*` 的混淆,grep 反而把 `use super::*;` 自身当成违规,导致**每一个合规文件都被 FAIL**——比"完全不检查"更糟(给用户一种'有检查在跑'的安全感,但实际产出全误报)。**对应规则**:写完 verification script 第一件事,跑 `bash <script> <fixtures/compliant_dir>` 期望 exit 0 + OK 行,再跑 `bash <script> <fixtures/violating_dir>` 期望 exit 1 + violation 行+明确文件路径;两个 fixture 都通过才把这个脚本接到 audit 上。**audit 自身的子检查也走 'subprocess 把 stdout 当 output / stderr 当 diagnostic' 的契约**:wrapper shell 模板想要让 audit 把某条 check 当 pass 看待,必须让它的 stdout 为空(或者被 `grep -v` 过滤掉 OK 行 + 靠 `${PIPESTATUS[0]}` 传递 exit code),不要简单地"script 跑完 exit 0 = pass"——verify 之类的脚本即使在成功路径上也会打印 `OK: N file(s) ...`,audit 默认把任何非空 stdout 视为 FAIL。**audit 调用一个 verification script 时,它的绝对路径必须在 Python 层面通过 `os.path.dirname(__file__)` 拿到,然后用模板变量(本仓用 `{{audit_script_dir}}`) 注入 shell 模板**——别在 shell 子进程里写 `$(dirname "$0")` 找脚本位置,因为 audit 是 `subprocess.run(['bash', '-c', cmd])`,shell 的 `$0` 是 `bash` 不是 audit 自己。
 
 
-17. **孤儿代码文件不能与目录同级**(§1.3d,2026-09-28 user 钦定并同日收窄,user 原话:"如果 rust 代码文件同级有目录,需要报错提示代码文件不能和目录在同一级,注意 lib.rs main.rs build.rs mod.rs 这些除外")—— 一个目录只要拥有**子目录**,就不能再放**既没有模块归属、也没有关键字槽位**的 `.rs` 文件。豁免两类:**入口文件 4 个**(`lib.rs`/`main.rs`/`build.rs`/`mod.rs`,职责就是统领子模块)+ **关键字文件 9+1 个**(`const`/`static`/`fn`/`enum`/`struct`/`trait`/`impl`/`type` + `macro.rs`,各自目录的 `mod.rs` **按名字**声明它们,§1.3a 已管内容)。只有真正的孤儿文件(`inline.rs` / `html_static_style.rs` 这类没有 `mod.rs` 声明的)才违规。**为什么收窄**:首版"任何 .rs 都不得与目录同级"的标准修法是 `const.rs` → `const/{const.rs,mod.rs}`,而新 `mod.rs` 里 `mod r#const;` 与所在目录同名 → clippy `module_inception`,实测 euv **+2** / ctares **+5** warning(两仓 master 都是 0 warning 基线),且 `X/X.rs` 形态在两仓 master 里一个都不存在;同时首版会误报 ctares 的 **24 个** `macro.rs`(合法叶子)。**教训:新规则的"标准修法"必须先跑 clippy 验证再写进规范** —— verifier 能报出违规 ≠ 修法干净,后者是 git 状态,两者之间没有自动校验。验证脚本:`scripts/verify_no_sibling_dirs.py`(check 44),按违规目录报 1 条;三仓实测 ctares 0 / hyperlane 0 / euv 2,euv 的 2 处孤儿(PR #290)已修复合并。**hook 层已注册**(2026-09-29):`staged_file_gate.VERIFIERS` 里加了这一条,靠 `audit_one(path)` 适配层把目录级判断映射到 staged 文件路径 —— 此前它在 hook 里读作恒定 0,写进 audit 不等于 hook 会拦(pitfalls §89)。残留缺口:orphan 未 staged 而新增子目录 staged 的组合 gate 抓不到,**check 44 全仓审计仍是权威**。
+17. **代码文件不能与目录同级(只豁免 4 个入口文件)**(§1.3d,2026-09-28 钦定 → **2026-09-29 收紧**,user 原话:"除了 mod.rs lib.rs main.rs build.rs 之外的 rust 代码文件,同级如果有目录,你一个将此文件移动到合理的目录,如果没有应该根据功能做新增目录")—— 一个目录只要拥有**子目录**,就不能再放任何 `.rs` 文件,**唯一的豁免是 4 个入口文件**(`lib.rs` / `main.rs` / `build.rs` / `mod.rs`),因为它们的职责就是统领子模块。**关键字文件(`const.rs` / `static.rs` / `fn.rs` / `enum.rs` / `struct.rs` / `trait.rs` / `impl.rs` / `type.rs` / `macro.rs`)不再豁免,一律必须搬走。**
+
+    **收紧原因(user 指出旧实现读作恒定 0)**:旧实现是 `EXEMPT = ENTRY | KEYWORD`,所以 `engine/src/renderer/` 放着 6 个关键字文件 + `webgl/` 子目录,verifier 依然报 0 违规。真实场景里规则根本没有约束力。收紧后同一目录立即报 1 条,规则才真正生效。
+
+    **标准修法 = 搬进语义化子目录,文件名保持关键字名。** 正确:`renderer/webgpu/struct.rs`、`vdom/node/impl.rs`。**禁止 X/X.rs 形态**(`renderer/const/const.rs` + `mod r#const;`)——它与所在目录同名,触发 clippy `module_inception`(实测 euv +2 / ctares +5,两仓 master 均 0 warning 基线)。**目录名必须是职责名词**,`const/` `struct/` `impl/` 这类按关键字命名的目录是错的。
+
+    **拆分维度是「概念」不是「文件名」**:新子目录的划分依据是内容职责。euv `engine/src/renderer/` 的实测拆法 = `state/`(两后端共享枚举)+ `descriptor/`(两后端共享描述符)+ `webgpu/` + `webgl/` + `canvas/`。**不能按后端拆**:`FilterMode` / `AddressMode` / `CompareFunction` / `BlendFactor` / `IndexFormat` / `GpuTextureFormat` / `DrawArgs` / `VertexBufferLayout` 被 WebGL 与 WebGPU 共用,按后端拆会让 `webgl/` 依赖兄弟模块 `webgpu/`。
+
+    **lesson(保留自 2026-09-28 收窄,依然成立)**:新规则的"标准修法"必须先跑 clippy 与 master 基线对比 —— **verifier 报得出违规 ≠ 修法干净**,后者是 git 状态,两者之间没有自动校验。
+
+    验证脚本:`scripts/verify_no_sibling_dirs.py`(check 44),**按违规目录报 1 条**(N 个文件 = 1 条 finding,修复是一次结构性搬迁)。跳过 `SKIP_DIR_NAMES` + 点目录 + git-ignored。fixture `~/.hermes/cache/scratch/s13d-fixtures/{compliant,violating}` 双向自测:compliant 0/exit 0(含 4 个入口文件各配子目录 + 无子目录的叶子目录两种形态),violating 2 dirs/exit 1(renderer 6 个关键字文件 + vdom 2 个)。**实测紧收后 euv 报 4 violations in 4 dirs**(`engine/src/renderer` / `core/src/vdom` / `ui/src/component/router` / `ui/src/style/class`)。**hook 层已注册**:`staged_file_gate.VERIFIERS["verify_no_sibling_dirs"]`,靠 `audit_one(path)` 适配层把目录级判断映射到 staged 文件路径(pitfalls §89:写进 audit 不等于 hook 会拦,必须实测 gate 真的报非零才算数)。残留缺口:orphan 未 staged 而新增子目录 staged 的组合 gate 抓不到,**check 44 全仓审计仍是权威**。
 
 ## 跨章节冲突时
 
 按以下优先级(高 → 低):**安全 > 错误处理 > 项目既有规范 > 性能 > 命名 > 风格**。任何与此 skill 冲突的其他 skill 指引,以本 skill 为准。
+
+## 完工验证:先对比基线,再谈 PASS/FAIL(2026-09-29 euv-engine 重构实测)
+
+`audit_rust_standards.py` 的 `SUMMARY: N/44 PASS` **不是本轮改动的成绩单**。euv 仓 master 干净基线本身只有 **32/44**,剩下 12 项是历史债 + **skill 安装缺 verifier 脚本**(`verify_ci_no_bump.py` / `verify_no_impl_trait_params.py` / `verify_module_imports_centralized.py` / `verify_lib_rs_order.py` 等在 `scripts/` 下不存在,audit 报 "companion verifier is missing" 并计 1 hit)。这些 FAIL 与本轮代码无关,照着改会浪费一整轮。
+
+**正确验收动作 = 对比差集,不是看绝对分数:**
+
+```bash
+cd <repo>
+python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo> 2>&1 \
+  | grep -E "^FAIL: [0-9]" | sed 's/ hits.*//' > /tmp/now.txt
+git stash push -u -q          # -u 必带,否则新建目录没进 stash,基线不干净
+python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py <repo> 2>&1 \
+  | grep -E "^FAIL: [0-9]" | sed 's/ hits.*//' > /tmp/base.txt
+git stash pop -q
+diff /tmp/base.txt /tmp/now.txt   # 相同 = 零新增违规;有 '<' 无 '>' 的行 = 真新增,必须修
+git status --short | wc -l         # 核对已恢复
+```
+
+`sed 's/ hits.*//'` 会连命中数一起抹掉,所以**可数的违规(§5.1 let 标注 / §2.1 doc comment / §1.3c 硬编码串)要另跑一次保留数字的 diff** 证明增减。euv 本轮实测:基线 336/789/3182 → 改后 335/770/3173,三项全降 = 真净减,而不是"分数一样所以没动"。
+
+**Pitfall(skills 是 symlink 时 `skill_manage` 会报 "not found in active profile")**:`~/.hermes/skills/<name>` 是指向 `~/.agents/skills/<name>` 的软链时,`skill_manage` 解析不到目标,patch 直接失败。绕过:用 `patch` 工具 / `write_file` 直接改 `~/.agents/skills/<name>/SKILL.md` 真实路径。
+
+## verify_hardcoded_strings 的两个反直觉豁免(2026-09-30 docs/build.rs 实测)
+
+1. **format 宏的第一个字符串参数本身是豁免的。** `panic!` / `assert!` / `format!` / `write!` 直接内联
+   的 format string 不会被报。把消息抽成 `const ERR_X: &str = "..."` **反而新增违规**——那个
+   const 自己的字面量就是要上报的东西。`assert!(cond, "{}", CONST, args)` 也不行:`assert!` 要求
+   format string 是字面量,传常量会编译报 `multiple unused formatting arguments`;`panic!("{}",
+   CONST)` 虽能编译,但配套的 `replacen` 拼接是自找麻烦。**正确做法:format string 就地内联在
+   `panic!` 里。**
+2. **同名 `const.rs` 不是万能解。** 抽取前先确认目标目录不会因此违反 §1.3d:`const.rs` 不是
+   entry file,一旦目标目录已有子目录就会违规。euv 的 `docs/` 已有 `docs/ src/ www/ dist/`,
+   加 `docs/const.rs` 会让 §1.3d 从 0 变 1(实测)。`build.rs` 之所以能免 §1.3d 只因它在
+   `ENTRY_FILE_NAMES` 里。
+
+`# Arguments` 写的是**参数类型**不是参数名:`- &Path - ...` 而不是 `- dir - ...`,否则报
+`type literal 'dir' does not match any parameter type` + `does not cover all signature types`。
+
+## §borrow — RefCell borrow 必须可证明安全或显式处理(2026-09-30 user 钦定)
+
+原话:"你的代码应该安全处理所有 borrow 失败的情况,此仓库的所有地方都应该处理"。
+
+`RefCell::borrow()` / `borrow_mut()` 在已被借用时 **panic**。WASM 里 Rust panic 没有 try/catch,
+一旦触发就是 `already borrowed: BorrowMutError` → 整个实例 abort → 白屏,不是"这次渲染失败"。
+
+**判定分两类,不要一刀切全改 `try_borrow`:**
+
+| 类 | 特征 | 处理 |
+|---|---|---|
+| **安全** | guard 只活一个语句(临时值),或顺序语句里前一个已 drop | **不动**。批量转 `try_borrow` 只增加分支和 unwrap,是代码坏味道 |
+| **重入风险** | guard 绑到具名变量后,其作用域内还有能执行任意代码的调用 | **必须改**:把取值收进 block、drop guard、再调出去 |
+
+**会重入的调用(必须在其之前 drop guard)**:`Signal::set()`(触发 re-render)、任何 web-sys / `js_sys` /
+`Reflect` 调用、`Rc<dyn Fn>` 调用、history API、`alert/confirm/prompt`、`request_animation_frame` /
+`set_timeout` / `set_interval`。
+
+**`try_borrow*` 的结果绝不能 `.unwrap()` / `.expect()`** —— 那等于把要删的 panic 又装回去。
+读路径失败返回自然默认值(丢一帧好过整个 app 死掉),写路径失败跳过写入并 return。
+
+**验证脚本**:`scripts/verify_no_panicking_borrow.py`(已注册进 `staged_file_gate.py` 的 `VERIFIERS`
+与 `audit_rust_standards.py`,check 45)。它用 brace 深度跟踪 guard 作用域,只报"guard 仍存活时遇到
+可重入调用",**故意不报单语句 borrow**。自测 `scripts/self_test_no_panicking_borrow.py`:
+compliant 树 0/exit 0、violating 树 2/exit 1,并对 3 个独立变异(中和重入正则 / 关掉作用域跟踪 /
+中和 guard 绑定正则)做变异测试,任一变异未被捕获即 self-test 失败。
+Fixtures 永久落在 `scripts/fixtures/refcell-borrow/{compliant,violating}/`。
+
+**注意 signals 的隐藏重入**:`Signal::set()` 不是"纯赋值",它会触发订阅者 re-render,re-render 会重新
+进入 hook。`let guard = cell.borrow_mut(); guard.push(x); signal.set(n);` 是真实存在的 abort,
+即使 `push` 和 `set` 看起来毫无关系。
+
+## §lombok — `Getter` derive 在 `Option` 字段上生成 panic(2026-09-30 实测)
+
+本仓库用 `lombok_macros` 10.2.2。**`#[derive(Getter)]` 对 `Option<T>` 字段生成的
+`get_x()` 是 `self.x.clone().unwrap()` —— 无条件 unwrap,`None` 直接 panic。**
+
+用 `RUSTC_BOOTSTRAP=1 cargo rustc -p euv-engine --lib --target wasm32-unknown-unknown -- -Zunpretty=expanded`
+展开后实测:
+
+```rust
+impl ColorAttachment {
+    pub fn get_view(&self) -> JsValue { self.view.clone().unwrap() }   // panic
+    pub fn try_get_view(&self) -> &Option<JsValue> { &self.view }       // 安全
+}
+```
+
+**规则:任何 `Option<T>` 字段,只能调 `try_get_*`。** `get_*` 只留给"调用方保证一定是 Some"
+的非 Option 字段。注释里写"`None` 表示走默认路径"的字段,恰恰是最容易 panic 的。
+
+**为什么 grep 找不到**:`grep -rn "unwrap()" engine/src/renderer/` 返回 **0 命中** ——
+panic 藏在宏展开里,源码根本看不到 `unwrap`。panic 的 `file:246:24` 指向的是
+`#[derive(Clone, Debug, Getter)]` 那一行(第 24 列是 `Getter` 这个 token),
+不是任何一条手写语句。定位手段只能是展开宏:
+
+```bash
+# 1) 列出所有会 panic 的 getter
+grep -oE 'pub fn (get_\w+)\(&self\)[^{]*\{\s*self\.\w+\.clone\(\)\.unwrap\(\)' <expanded.rs>
+# 2) 找出其中真正被调用的(排除 pub fn 定义行)
+grep -n 'get_view()' <expanded.rs> | grep -v 'pub fn'
+```
+
+`engine/src/renderer/descriptor/struct.rs` 里有 **17 个**这样的 getter。历史上
+`ColorAttachment::get_view` / `DepthStencilAttachment::get_view` 让 **WebGPU 每帧 panic** ——
+因为 `begin_render_pass` 传的正是该字段文档里写明的 `view: None` 用例。
+其余 15 个当时无调用点,属于定时炸弹:任何人调用即 panic。
+
+
+---
+
+## WebGPU 静默黑屏:pipeline 的 color target format 必须等于 swapchain format(2026-09-30 实测)
+
+**症状**:WebGPU tab 状态 `WebGPU Active`、FPS 60、`getCurrentTexture` / `submit` / `draw`
+每帧各调用数百次、**零 panic、零 console error、零 WebGPU validation error**,
+但 canvas 纯黑。
+
+**真因**:`create_render_pipeline` 把 color target 写死成 `Rgba8Unorm`,而 canvas 是用
+`navigator.gpu.getPreferredCanvasFormat()` 配置的 —— 桌面 Chrome/macOS 返回
+**`bgra8unorm`**。pipeline 的 attachment state 与 render pass 不兼容,WebGPU 拒绝整个
+command buffer,画面不呈现。
+
+**为什么没有任何报错**:`Queue::submit` 对无效 command buffer 只走
+`uncapturederror` 事件通道,不抛异常;而如果 `uncapturederror` 监听挂在别的 device 上
+(常见于先 `requestAdapter()` 拿到 A、再让 app 用 B),你连 validation 文本都收不到。
+**"没报错"不等于"没问题"** —— 必须用像素证明。
+
+**独立复现(先证明症状可复现,再改引擎)**:
+```js
+// 故意让 pipeline target 与 canvas format 不一致
+ctx.configure({device, format: navigator.gpu.getPreferredCanvasFormat()});
+const pipe = dev.createRenderPipeline({ layout:'auto',
+  vertex:{...}, fragment:{..., targets:[{format:'rgba8unorm'}]},   // ← 不匹配
+  multisample:{count:1}});
+// 渲染后读回:首像素 [0,0,0,0],即完全空白
+```
+同样手法也验证了 **MSAA 不匹配**(`multisample.count: 4` 对 `sampleCount: 1` 的
+attachment)会产生一模一样的静默黑屏,排查时两个都要试。
+
+**修法**:pipeline 的 target 用 renderer 自己配置的 format,不要硬编码。
+```rust
+let target_format: GpuTextureFormat = match self.get_format().as_str() {
+    WEBGPU_FORMAT_BGRA8UNORM => GpuTextureFormat::Bgra8Unorm,
+    _ => GpuTextureFormat::Rgba8Unorm,
+};
+```
+
+**验证方法学(这次靠它才没被"0 error"骗过去)**:
+1. 先把 shader 抽出来单独跑 —— 我自己的 pipeline + readback 拿到 76,800 非黑像素,
+   证明 **shader 无罪**,问题在引擎路径。这个隔离步骤是决定性的。
+2. 用一个自建的 64×64 canvas 做 presentation 探针:能清成洋红色并被截图看到,
+   证明 **headless 的 WebGPU 呈现是好的**,排除环境因素。
+3. 只有排除以上两项后,才去查引擎的 format / MSAA。
+
+**教训顺序**:静默渲染失败时,先隔离变量(自己跑一遍 shader、自己跑一遍 presentation),
+再怀疑引擎。直接盯引擎代码容易在几百行里迷路,而且引擎里 `unwrap_or(UNDEFINED)` 这类
+吞错写法会让人以为"调用成功了"。
 
 ## Pre-commit 必跑(单条命令,自动 loop)
 

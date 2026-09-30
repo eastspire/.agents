@@ -79,16 +79,27 @@ from pathlib import Path
 # Module-entry files: their purpose IS to be the parent of sub-modules.
 ENTRY_FILE_NAMES = frozenset({"lib.rs", "main.rs", "build.rs", "mod.rs"})
 
-# §1.3 keyword files + macro.rs.  Each is a named leaf declared by its own
-# directory's mod.rs, so its presence beside sub-directories is not a
-# layout problem.  `macro.rs` is included because ctares ships 24 of them
-# in exactly this position as valid leaves.
+# §1.3 keyword files.  These are NOT exempt any more.
+#
+# 2026-09-29 user 钦定收紧(原话:"除了 mod.rs lib.rs main.rs build.rs 之外的 rust 代码文件,
+# 同级如果有目录,你一个将此文件移动到合理的目录,如果没有应该根据功能做新增目录"):
+# 只有 4 个入口文件可以与子目录同级。关键字文件必须搬进语义化子目录。
+#
+# 收窄前的问题:旧实现 EXEMPT = ENTRY | KEYWORD,所以 `engine/src/renderer/` 放着
+# 6 个关键字文件 + webgl/ 子目录依然报 0 违规 —— 规则在真实场景里读作恒定 0。
+# 收紧后同名常量从 EXEMPT 摘掉,4 个目录(engine/src/renderer, core/src/vdom,
+# ui/src/component/router, ui/src/style/class)全部报违规,与 user 口径一致。
+#
+# 标准修法必须是「搬进语义化子目录」而不是 X/X.rs 形态:
+# `renderer/const/const.rs` + `mod r#const;` 会触发 clippy `module_inception`
+# (SKILL.md §1.3d 收窄记录:实测 euv +2 / ctares +5 warning)。
+# 正确形态 = renderer/webgpu/const.rs,即目录按功能命名、文件名保持关键字名。
 KEYWORD_FILE_NAMES = frozenset({
     "const.rs", "static.rs", "fn.rs", "enum.rs", "struct.rs",
     "trait.rs", "impl.rs", "type.rs", "macro.rs",
 })
 
-EXEMPT_FILE_NAMES = ENTRY_FILE_NAMES | KEYWORD_FILE_NAMES
+EXEMPT_FILE_NAMES = ENTRY_FILE_NAMES
 
 SKIP_DIR_NAMES = {
     ".git", "target", ".cargo", "node_modules", ".venv", "venv", "dist",
@@ -132,13 +143,15 @@ def audit_one_dir(directory: Path) -> list[str]:
     files_label = _label(code_files)
     dirs_label = _label(sub_dirs)
     return [
-        f"{directory}: orphan code file(s) {files_label} cannot share a level "
-        f"with sub-directory(ies) {dirs_label} (§1.3d); move each into its own "
-        f"sub-module directory (e.g. `{code_files[0][: -len('.rs')]}/"
-        f"{code_files[0]}`) — module-entry files (lib.rs / main.rs / build.rs / "
-        f"mod.rs) and §1.3 keyword files (const/fn/impl/struct/enum/trait/type/"
-        f"static/macro .rs) are exempt because their names are declared by their "
-        f"own directory's mod.rs"
+        f"{directory}: code file(s) {files_label} cannot share a level "
+        f"with sub-directory(ies) {dirs_label} (§1.3d); move each into the "
+        f"semantically correct sub-directory (create one if none fits), keeping "
+        f"the keyword file name — e.g. move `{code_files[0]}` to a sibling "
+        f"sub-module such as `webgpu/` or `node/`. Only the four module-entry "
+        f"files (lib.rs / main.rs / build.rs / mod.rs) may sit beside "
+        f"sub-directories, because their whole job is to declare them. Do NOT "
+        f"remedy with the X/X.rs shape (`{code_files[0][: -len('.rs')]}/"
+        f"{code_files[0]}`): that triggers clippy `module_inception`"
     ]
 
 

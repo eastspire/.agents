@@ -1,0 +1,9 @@
+[package]
+name = "compliant"
+version = "0.1.0"
+
+[dependencies]
+serde = "1"
+log = "0.4"
+external_a = "0.1"
+external_b = "0.1"

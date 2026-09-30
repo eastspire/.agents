@@ -507,7 +507,9 @@ pub struct S {
 
 `get_mut` 在 `get` **之前**匹配(否则 `get` 前缀会吞掉它);`#[getter]` / `#[get_all]` / `#[setter]` 这类更长属性名不误报。
 
-**执行脚本**: `scripts/verify_no_redundant_accessor_attr.py`,audit check 24 调用,并已注册进 `staged_file_gate.py` commit hook。Fixture `~/.hermes/cache/scratch/accessor-attr-fixtures/{compliant,violating,tricky}`。**三仓实测: euv 70 处 / hyperlane 23 处 / ctares 0 处真违规。**
+**执行脚本**: `scripts/verify_no_redundant_accessor_attr.py`,audit check 24 调用,并已注册进 `staged_file_gate.py` commit hook。Fixture `~/.hermes/cache/scratch/bare-accessor-fixtures/`(9 个必抓 + 8 个必放行,含字符串字面量、doc 注释、多行 derive、tuple struct、enum 变体)。**三仓实测: euv 70 处 / hyperlane 23 处 / ctares 0 处真违规。**
+
+**豁免是 item 级、不是文件级**: 某个 struct/enum 的 derive 集合里没有任何 accessor 生成型 derive(`Data` / `Getter` / `GetterMut` / `Setter`)→ **只跳过这一个 item**,该文件里其他带 derive 的 struct 照常检查。同一文件里 `#[derive(Getter)]` 的字段 `#[set]` 放行、`#[derive(Data)]` 的字段 `#[get]` 报错,是预期行为。
 
 
 ## §17.15 `&mut self` 方法封装:disjoint-borrow 在 target struct 上更干净的解法(2026-09-27)

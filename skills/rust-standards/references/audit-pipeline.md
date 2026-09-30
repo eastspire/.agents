@@ -262,9 +262,10 @@ Installed at `~/.git-hooks/pre-commit` with
 `git config --global core.hooksPath ~/.git-hooks`. Runs automatically on
 every `git commit` and **only checks staged files** (not the whole repo).
 
-Five file-level verifiers invoked per staged `.rs` / `.toml`:
+Six file-level verifiers invoked per staged `.rs` / `.toml`:
 - `verify_doc_comment_format.py` (§2.1/§2.2)
 - `verify_no_import_rename.py` (§6.5)
+- `verify_use_aggregation.py` (§6.6) — added 2026-09-27
 - `verify_no_self_field_access.py` (§17.3/§17.12)
 - `verify_lib_rs_doc_comment.py` (§1.3c/§2.4)
 - `verify_dep_order.py` (§13.7 round 4)

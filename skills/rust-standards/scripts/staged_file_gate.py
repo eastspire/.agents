@@ -62,6 +62,11 @@ from pathlib import Path
 
 SUFFIX = ".head-baseline"
 
+# Minimum Jaccard overlap for a staged new file to be treated as a split of
+# a staged-deleted source. Conservative on purpose: a wrong pairing would hide
+# real violations, an absent pairing only over-reports (which is safer).
+SPLIT_MIN_OVERLAP = 0.30
+
 # verifier module name -> human label
 VERIFIERS = {
     "verify_doc_comment_format": "doc-comment §2.1/§2.2",
@@ -71,7 +76,13 @@ VERIFIERS = {
     "verify_no_self_field_access": "self.field access §17.3/§17.12",
     "verify_lib_rs_doc_comment": "lib.rs //! block §2.4",
     "verify_no_redundant_accessor_attr": "bare accessor attr §L",
-    "verify_no_sibling_dirs": "orphan code file beside sub-dirs §1.3d",
+    "verify_no_sibling_dirs": "code file beside sub-dirs §1.3d (only lib/main/build/mod exempt)",
+    "verify_no_panicking_borrow": "RefCell borrow guard held across re-entrant call §borrow",
+    "verify_no_impl_trait_params": "impl Trait in fn parameters §9.2",
+    "verify_no_test_comments": "comments in test files §14.5",
+    "verify_ci_no_bump": "CI version bump / version write §17",
+    "verify_module_imports_centralized": "module imports centralized §6.1/§6.3/§6.4",
+    "verify_lib_rs_order": "lib.rs import group order §6.1",
 }
 
 # Verifiers that only make sense for a specific file name.
@@ -131,9 +142,23 @@ def head_content(repo_root: Path, rel: str) -> str | None:
     — which is exactly the legacy-debt blindness the gate exists to avoid.
     """
     code, out = git(repo_root, "show", f"HEAD:{rel}")
-    if code == 0:
-        return out
-    return head_content_of_rename_source(repo_root, rel)
+    renamed = head_content_of_rename_source(repo_root, rel)
+    split = head_content_of_split_source(repo_root, rel)
+    if code == 0 and out is not None:
+        if split is None:
+            return out
+        # Union baseline. A file that was MODIFIED may still have received
+        # code from a sibling that this commit deleted (the §1.3d move case:
+        # `class/display/fn.rs` existed in HEAD but was only a partial file,
+        # and the rest arrived from the deleted `class/fn.rs`). Baselining
+        # against the partial HEAD copy alone makes the moved-in debt look
+        # brand new. Concatenating the sources gives the gate the full
+        # pre-commit content set; the caller still diffs per-verifier
+        # violation COUNTS, so real new findings are still reported.
+        return out + "\n" + split
+    if renamed is not None:
+        return renamed
+    return split
 
 
 def head_content_of_rename_source(repo_root: Path, rel: str) -> str | None:
@@ -160,6 +185,121 @@ def head_content_of_rename_source(repo_root: Path, rel: str) -> str | None:
             return content
         return None
     return None
+
+
+def head_content_of_split_source(repo_root: Path, rel: str) -> str | None:
+    """Best-effort HEAD baseline for a file created by SPLITTING another file.
+
+    A staged move is often recorded as `D old` + `N x A new` rather than a
+    rename, because one source file was split into several targets (e.g.
+    §1.3d restructuring `class/fn.rs` into `class/{display,page,shell}/fn.rs`).
+    Git cannot pair those, so every new path gets baseline `None` and the
+    whole pre-existing debt in the split source is reported as
+    "introduced by this commit" — the exact legacy-debt blindness the gate
+    exists to prevent.
+
+    Resolution is deliberately conservative: a candidate source is accepted
+    ONLY when the same-directory sibling rule plus a real content overlap
+    both hold, and the accepted baseline is the source's HEAD text. The
+    caller still diffs violation COUNTS against it, so genuinely new
+    violations in the new file are still caught; the fallback merely stops
+    inherited debt from being double-counted as new.
+
+    Returns None (i.e. "treat as a new file") whenever the pairing is
+    ambiguous, which keeps the gate strict in the doubtful case.
+    """
+    target = repo_root / rel
+    if not target.is_file():
+        return None
+
+    # A split may move code in either direction:
+    #   class/fn.rs          -> class/page/fn.rs   (into a NEW subdir)
+    #   renderer/impl.rs     -> renderer/canvas/impl.rs (into a NEW subdir)
+    # so the source is usually the target's PARENT dir, not its own dir.
+    # Accept the source when either directory contains the other.
+    try:
+        target_dir = str(target.parent.relative_to(repo_root))
+    except ValueError:
+        return None
+    if target_dir in {".", ""}:
+        target_dir = ""
+
+    code, out = git(
+        repo_root,
+        "diff",
+        "--cached",
+        "--name-status",
+        "--find-renames",
+        "-M",
+        "--diff-filter=ADR",
+    )
+    if code != 0 or not out.strip():
+        return None
+
+    current_lines = set(_content_lines(target.read_text(errors="replace")))
+    if not current_lines:
+        return None
+
+    best: tuple[float, str] | None = None
+    for line in out.splitlines():
+        parts = line.split("\t")
+        status = parts[0][:1] if parts else ""
+        if status == "D" and len(parts) >= 2:
+            # D<TAB>old
+            old_path = parts[1]
+        elif status == "R" and len(parts) >= 3:
+            # R0xx<TAB>old<TAB>new -- the old path is still a live source:
+            # one source file split into several targets is recorded as a
+            # rename to exactly ONE of them, so the other targets have no
+            # baseline of their own.
+            old_path = parts[1]
+        else:
+            continue
+        if not _same_or_nested_dir(old_path, target_dir):
+            continue
+        found, content = git(repo_root, "show", f"HEAD:{old_path}")
+        if found != 0 or not content:
+            continue
+        old_lines = set(_content_lines(content))
+        if not old_lines:
+            continue
+        # Jaccard overlap: how much of the new file existed in the source.
+        overlap = len(current_lines & old_lines) / len(current_lines)
+        if overlap < SPLIT_MIN_OVERLAP:
+            continue
+        if best is None or overlap > best[0]:
+            best = (overlap, content)
+
+    if best is None:
+        return None
+    return best[1]
+
+
+def _same_or_nested_dir(old_path: str, target_dir: str) -> bool:
+    """True when the deleted file's directory and the target directory nest.
+
+    Covers both split directions: a file split out into a new sub-directory
+    (source is the parent) and one split down from a parent (source is an
+    ancestor). Sibling dirs are excluded: unrelated code should not be
+    used as a baseline.
+    """
+    old_dir = str(Path(old_path).parent)
+    if old_dir in {".", ""}:
+        old_dir = ""
+    if old_dir == target_dir:
+        return True
+    if not old_dir or not target_dir:
+        return False
+    return old_dir.startswith(target_dir + "/") or target_dir.startswith(old_dir + "/")
+
+
+def _content_lines(text: str) -> list[str]:
+    """Significant lines only, so reindentation alone is not an overlap."""
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("//")
+    ]
 
 
 def materialise(target: Path, text: str) -> Path:

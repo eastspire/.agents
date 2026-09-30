@@ -736,7 +736,7 @@ fi
 exit "$exit_code"
 '''),
 
-    # check 22b — §L (2026-09-27 user 钦定): lombok accessor attributes
+    # check 23 — §L (2026-09-27 user 钦定): lombok accessor attributes
     # must not spell out `pub`; the macro already defaults to Public.
     ('no redundant explicit `pub` in lombok accessor attrs (§L)', '''
 # lombok_macros::Visibility derives `Default = Public`
@@ -771,7 +771,7 @@ fi
 exit "$exit_code"
 '''),
 
-    # check 22c — §L (2026-09-27 user 钦定): a BARE lombok accessor attribute
+    # check 24 — §L (2026-09-27 user 钦定): a BARE lombok accessor attribute
     # is redundant, because `#[derive(Data)]` already generates the accessor.
     # Sibling of check 22b (which catches the redundant explicit `pub`); this one
     # catches what is left after the `pub` is dropped.
@@ -810,7 +810,7 @@ fi
 exit "$exit_code"
 '''),
 
-    # check 23 — §17 CI never bumps versions / never writes `version =`
+    # check 25 — §17 CI never bumps versions / never writes `version =`
     # (2026-09-26 added). Companion script: verify_ci_no_bump.py.
     ('CI workflow forbids version bumps and version writes (§17)', '''
 # Forbid any `.github/workflows/*.yml` step that bumps a Cargo.toml
@@ -1301,6 +1301,23 @@ python3 "{{audit_script_dir}}/verify_no_sibling_dirs.py" "{{target}}" \\
 exit_code=${PIPESTATUS[0]}
 if [ "$exit_code" -ne 0 ]; then
     echo "FAIL: verify_no_sibling_dirs.py exited $exit_code" >&2
+fi
+exit "$exit_code"
+'''),
+    # Companion script: verify_no_panicking_borrow.py.
+    ('RefCell borrow guard must not be held across a re-entrant call (\u00a7borrow)', '''
+# Per user directive 2026-09-30: "safe handling of all borrow failures".
+# `RefCell::borrow()`/`borrow_mut()` panic when the cell is already borrowed;
+# in WASM there is no try/catch, so a re-entrant borrow blanks the page. A
+# one-line borrow is already safe and is deliberately not reported -- only a
+# guard still in scope at a call that can re-enter is a violation.
+# Companion script: verify_no_panicking_borrow.py
+cd {{target}}
+python3 "{{audit_script_dir}}/verify_no_panicking_borrow.py" "{{target}}" \\
+    | grep -v -E '^=== no-panicking-refcell-borrow:'
+exit_code=${PIPESTATUS[0]}
+if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: verify_no_panicking_borrow.py exited $exit_code" >&2
 fi
 exit "$exit_code"
 '''),

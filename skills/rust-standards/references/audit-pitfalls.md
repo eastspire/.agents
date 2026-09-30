@@ -6,6 +6,40 @@ statically because the master repo has pattern exceptions that look like
 violations to a non-master-aware script. This document enumerates every
 known false positive so the next session doesn't waste time chasing them.
 
+## 0. A companion verifier that does not exist used to look like a PASS
+
+`run_check` counts stdout lines as hits, so a verifier that produced NO stdout
+could mean "scanned everything, found nothing" **or** "the script is missing and
+python3 printed to stderr and exited 2". Five checks were in the second state
+for the whole life of the audit: `verify_ci_no_bump`, `verify_no_impl_trait_params`,
+`verify_module_imports_centralized`, `verify_lib_rs_order`, `verify_no_test_comments`.
+They were never written; the audit referenced them anyway. All five now exist
+with fixtures and mutation-tested self-tests, and `run_check` reports a missing
+companion as an explicit FAIL.
+
+A missing file, a crashed verifier, and a clean pass are three different
+outcomes. When you add a check, run its self-test before trusting a green audit.
+
+## 0b. Two real bugs a fixture alone would never have found
+
+Both were found only by running the verifiers against euv / hyperlane / ctares,
+because a hand-written fixture is too small to reach the edge:
+
+- **`_skip_whole_block` can return `len(lines)`.** A file ending in an unclosed
+  `fn` (a macro fragment, a truncated file) made the signature scan index past
+  the end and crash with `IndexError`. Every fixture had balanced braces.
+- **A `Path` variable holding a directory is silently unreadable.** Assigning
+  `manifest = parent` instead of `manifest = parent / "Cargo.toml"` then calling
+  `.read_text()` raises `IsADirectoryError`, which `except OSError` swallowed —
+  so every crate looked dependency-free and every §6.1 group-2/group-3
+  distinction collapsed to "local". Errors on the manifest path are now printed
+  to stderr instead of being swallowed.
+
+**A verifier that has never run on a real codebase is not a verifier.** After
+adding fixtures, run each script against at least one real workspace and read
+the findings — 688 "violations" on euv were 5 real ones plus 683 false positives
+from the two bugs above.
+
 ## 1. `mod r#<keyword>;` in any mod.rs — NOT a violation
 
 `mod r#struct;`, `mod r#impl;`, `mod r#fn;`, `mod r#enum;`, `mod

@@ -1,41 +1,36 @@
 #!/usr/bin/env python3
-"""Forbid redundant lombok accessor attributes whose default already generates them.
+"""Forbid bare, argument-less lombok accessor attributes.
 
-Background (rust-standards §L, user rule 2026-09-27):
-"新增校验 #[get]、#[get_mut] 和 #[set] 不应该存在，默认都是生成的".
+Background (rust-standards §17.14.1):
+each lombok derive macro already emits its accessor for every field,
+with no per-field attribute required. `Data` derives all three
+(`lombok-macros/src/generate/fn.rs` calls
+`inner_lombok_data(input, true, true, true)`), and `Getter` /
+`GetterMut` / `Setter` each emit their own single accessor. So a bare
+attribute adds nothing:
 
-`#[derive(Data)]` is `Getter + GetterMut + Setter`, so a field of a derived
-struct ALREADY gets its accessor generated. Writing the attribute with no
-arguments says nothing the derive did not already do:
-
-    #[derive(Data)]
-    pub struct S {
-        #[get]          ->  name: String,          // redundant: Data already makes get_name()
-        #[get_mut]      ->  count: u32,            // redundant: Data already makes get_mut_count()
-        #[set]          ->  flag: bool,            // redundant: Data already makes set_flag()
+    #[derive(Data)]            #[derive(Data)]
+    pub struct S {             pub struct S {
+        #[get]        <-- drop     b: i32,
+        b: i32,      <-- keep }
     }
 
-This is the same class of noise as a redundant `pub` (check 23,
-`verify_no_redundant_accessor_pub.py`): a default re-stated at the use site.
-That script catches `#[get(pub)]`; this one catches the bare `#[get]` that is
-left once the `pub` is removed. The two are complementary rungs of the same
-rule, not duplicates.
+Only the attribute whose accessor the derive set does NOT already
+provide is load-bearing, and those stay:
 
-Deliberately NOT flagged — the attribute carries real information the derive
-cannot infer, so removing it would change behaviour:
+    #[derive(Getter)]          struct with #[set]  -> set is required
+    pub struct S { b: i32 }
 
-    #[get(pub(crate))]            // narrows visibility (the §17.14 exposure rule)
-    #[get(type(copy))]            // changes the return type
-    #[get(pub(crate), type(copy))]  // both of the above
-    #[get(skip)] / #[set(skip)]   // opts the field OUT of generation
-    #[set(Into)] / #[set(clone)]  // parameter conversion
-    #[new(...)] / #[with(...)]    // different macros, different slots
+    #[derive(Data)]            struct with #[set(skip)]  -> skip is config
+    pub struct S {             pub struct S {
+        b: i32,                     #[set(skip)]
+    }                               b: i32,
+                                }
 
-Exemptions:
-  - comment lines (a `//` mentioning `#[get]` is documentation, not an attribute)
-  - the word appears in any other form: `#[getter]`, `#[getter_mut]`, `#[get_all]`
+Attributes carrying arguments (`type(copy)`, `skip`, ...) are never
+touched — their arguments configure generation and are not redundant.
 
-Read-only. Exits 1 when any redundant bare accessor attribute is present.
+Read-only. Exits non-zero when any redundant bare attribute is present.
 """
 
 from __future__ import annotations
@@ -44,35 +39,231 @@ import re
 import sys
 from pathlib import Path
 
-# The three accessor attributes this rule covers. `new` / `with` are NOT here:
-# `New` and `With` are separate derives, so `#[new(...)]` is never implied by
-# `Data` and always carries meaning.
-ACCESSOR_NAMES = ("get", "get_mut", "set")
-
-# A bare accessor attribute with NO argument list: `#[get]`, `#[ set ]`.
-# `(?!\s*[(])` is the load-bearing part — any `(...)` means the attribute carries
-# options and is therefore not redundant. `get_mut` is tried before `get` so the
-# longer name wins (a `get` prefix match would otherwise consume it).
-BARE_ACCESSOR_RE = re.compile(
-    r"#\[\s*(get_mut|get|set)\s*\](?!\s*[(])"
-)
-
-# Guard against longer attribute names that merely start with the same prefix
-# (`#[getter]`, `#[get_all]`, `#[setter]`): the name must end at the `]`.
-LONG_NAME_RE = re.compile(r"#\[\s*(get_mut|get|set)\s*[A-Za-z_0-9]")
-
-# Derives that generate accessors on their own. A bare `#[get]` only *duplicates*
-# generation when the struct actually derives one of these; on a struct that
-# derives nothing, `#[get]` would be the only thing creating the accessor and is
-# then NOT redundant.
-GENERATING_DERIVES = ("Getter", "GetterMut", "Setter", "Data")
-
-# Any `#[derive(...)]` list on the file. Used only as a cheap pre-filter: a file
-# with no derive at all cannot contain a redundant accessor attribute.
-DERIVE_RE = re.compile(r"#\[\s*derive\s*\(([^)]*)\)\s*\]", re.DOTALL)
+# Which accessor kinds each derive macro provides for free.
+PROVIDES: dict[str, set[str]] = {
+    "Data": {"get", "get_mut", "set"},
+    "Getter": {"get"},
+    "GetterMut": {"get_mut"},
+    "Setter": {"set"},
+}
 
 SKIP_DIRS = {"target", ".git", "node_modules", ".cargo", "dist", "www"}
 
+# Bare accessor attribute: no parentheses at all.
+BARE_RE = re.compile(r"#\[(get|get_mut|set)\]")
+
+# Item declarations (braced or tuple structs, enums, unions).
+ITEM_RE = re.compile(r"\b(?:struct|enum|union)\s+(\w+)")
+
+DERIVE_RE = re.compile(r"#\[derive\(([^)]*)\)\]")
+ATTR_RE = re.compile(r"#\[[^\]]*\]")
+
+# Anything that ends the attribute run that may precede an item.
+STOP_RE = re.compile(r"\b(?:fn|impl|trait|mod|use|static|const|type|macro)\b")
+
+
+def strip_comments(text: str) -> str:
+    """Blank out comments and string/char literal bodies, preserving offsets.
+
+    Offset preservation matters: violations are reported at the original
+    line/column. Comment stripping is what keeps prose like
+    "This struct defines ..." or a doc-comment showing `#[set]` from being
+    parsed as code.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        two = text[i : i + 2]
+        if two == "//":
+            while i < n and text[i] != "\n":
+                out.append(" ")
+                i += 1
+        elif two == "/*":
+            depth = 1
+            out.append("  ")
+            i += 2
+            while i < n and depth:
+                if text[i : i + 2] == "/*":
+                    depth += 1
+                    out.append("  ")
+                    i += 2
+                elif text[i : i + 2] == "*/":
+                    depth -= 1
+                    out.append("  ")
+                    i += 2
+                else:
+                    out.append("\n" if text[i] == "\n" else " ")
+                    i += 1
+        elif c in "rb" and re.match(r"r(#*)\"", text[i:]):
+            m = re.match(r"r(#*)\"", text[i:])
+            assert m
+            hashes = m.group(1)
+            end = text.find('"' + hashes, i + m.end())
+            end = n if end == -1 else end + 1 + len(hashes)
+            for ch in text[i:end]:
+                out.append("\n" if ch == "\n" else " ")
+            i = end
+        elif c == '"':
+            out.append(" ")
+            i += 1
+            while i < n and text[i] != '"':
+                if text[i] == "\\":
+                    out.append(" ")
+                    i += 1
+                    if i < n:
+                        out.append("\n" if text[i] == "\n" else " ")
+                        i += 1
+                    continue
+                out.append("\n" if text[i] == "\n" else " ")
+                i += 1
+            if i < n:
+                out.append(" ")
+                i += 1
+        elif c == "'" and re.match(r"'(?:\\.|[^\\'])'", text[i:]):
+            m = re.match(r"'(?:\\.|[^\\'])'", text[i:])
+            assert m
+            for ch in m.group(0):
+                out.append("\n" if ch == "\n" else " ")
+            i += m.end()
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def find_body(text: str, after: int) -> tuple[int, int] | None:
+    """Return the (start, end) span of an item body, or None if unit.
+
+    Skips a generic parameter list first, so const-generic braces like
+    `Foo<{ N }>` do not confuse brace matching.
+    """
+    i = after
+    n = len(text)
+    while i < n and text[i].isspace():
+        i += 1
+    depth = 0
+    while i < n:
+        c = text[i]
+        if c == "<":
+            depth += 1
+        elif c == ">":
+            depth -= 1
+        elif depth == 0 and c in "{(":
+            break
+        elif depth == 0 and c == ";":
+            return None
+        elif depth == 0 and c == "\n" and text[i + 1 : i + 2] == "\n":
+            return None
+        i += 1
+    if i >= n or text[i] not in "{(":
+        return None
+
+    opener = text[i]
+    closer = {"{": "}", "(": ")"}[opener]
+    body_start = i
+    depth = 0
+    while i < n:
+        if text[i] == opener:
+            depth += 1
+        elif text[i] == closer:
+            depth -= 1
+            if depth == 0:
+                return (body_start, i + 1)
+        i += 1
+    return None
+
+
+def derives_for_item(text: str, item_start: int) -> set[str]:
+    """Collect derive names attached to the item starting at item_start.
+
+    Walks left from the declaration over the run of attributes and
+    whitespace. Stops at the first thing that is not an attribute, so
+    an unrelated attribute between two derives does not truncate the run.
+    """
+    derives: set[str] = set()
+    pos = item_start
+    while pos > 0:
+        j = pos
+        # Skip whitespace, then the visibility keyword (`pub`, `pub(crate)`),
+        # so the walk lands on the attribute run in front of the item.
+        while j > 0 and text[j - 1].isspace():
+            j -= 1
+        vis = re.search(r"(?:pub(?:\s*\([^)]*\))?|(?:priv|async|const|unsafe|default)\b)\s*$",
+                        text[:j])
+        if vis:
+            j = vis.start()
+            while j > 0 and text[j - 1].isspace():
+                j -= 1
+        if j <= 0:
+            break
+        if text[j - 1] != "]":
+            break
+        end = j
+        # Walk back to the matching `[`. A naive backward scan stops on the
+        # first `]`, which is the inner closer of a `#[derive(...)]` token
+        # containing a nested list. Track depth so the outer `[` is found.
+        depth = 0
+        while j > 0:
+            j -= 1
+            ch = text[j]
+            if ch == "]":
+                depth += 1
+            elif ch == "[":
+                depth -= 1
+                if depth == 0:
+                    break
+        if j <= 0 or text[j] != "[":
+            break
+        # `text[j:end]` starts at `[`; the `#` sits just before it. Keep it
+        # so the slice is the complete `#[...]` attribute token.
+        attr = text[j - 1 : end] if j > 0 and text[j - 1] == "#" else text[j:end]
+        if not attr.startswith("#["):
+            break
+        m = DERIVE_RE.fullmatch(attr)
+        if m:
+            for part in m.group(1).split(","):
+                name = part.strip()
+                if name:
+                    derives.add(name)
+        pos = j
+    return derives
+
+
+def check_text(text: str) -> list[tuple[int, str, str]]:
+    """Return [(line_no, attribute, item_name)] for redundant bare accessors."""
+    code = strip_comments(text)
+    items = []
+    for m in ITEM_RE.finditer(code):
+        body = find_body(code, m.end())
+        if body is None:
+            continue
+        start, end = body
+        items.append((m.start(), m.group(1), start, end))
+
+    hits: list[tuple[int, str, str]] = []
+    for am in BARE_RE.finditer(code):
+        kind = am.group(1)
+        owner = None
+        for decl_start, name, start, end in items:
+            if start <= am.start() < end:
+                owner = (decl_start, name)
+                break
+        if owner is None:
+            # Not inside a struct/enum body (e.g. an impl or a macro
+            # invocation). Too ambiguous to judge — leave it alone.
+            continue
+        decl_start, name = owner
+        provided: set[str] = set()
+        for d in derives_for_item(code, decl_start):
+            provided |= PROVIDES.get(d, set())
+        if not provided:
+            # No recognised accessor-providing derive; stay conservative.
+            continue
+        if kind in provided:
+            hits.append((code.count("\n", 0, am.start()) + 1, am.group(0), name))
+    return hits
 
 def iter_rust_files(root: Path):
     for path in sorted(root.rglob("*.rs")):
@@ -81,60 +272,24 @@ def iter_rust_files(root: Path):
         yield path
 
 
-def file_generates_accessors(text: str) -> bool:
-    """True when any struct in this file derives an accessor-generating macro."""
-    return any(
-        name in derives
-        for derives in DERIVE_RE.findall(text)
-        for name in (n.strip() for n in derives.split(","))
-        if name in GENERATING_DERIVES
-    )
-
-
-def audit_one(path: Path) -> list[str]:
-    """Per-file check, so staged_file_gate.py can diff HEAD vs worktree."""
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except (OSError, UnicodeDecodeError):
-        return []
-
-    if not file_generates_accessors(text):
-        return []
-
-    findings = []
-    for line_no, line in enumerate(text.split("\n"), start=1):
-        stripped = line.strip()
-        # A comment mentioning the attribute is documentation, not an attribute.
-        if stripped.startswith("//"):
-            continue
-        for match in BARE_ACCESSOR_RE.finditer(line):
-            # `#[getter]` / `#[get_all]` — a different, longer attribute name.
-            if LONG_NAME_RE.match(match.group(0) + ""):
-                tail = line[match.end():]
-                if re.match(r"\s*[A-Za-z_0-9]", tail):
-                    continue
-            findings.append(
-                f"{path}:{line_no}: redundant bare `#[{match.group(1)}]` — "
-                f"`#[derive(Data)]` already generates this accessor; delete the "
-                f"attribute (keep it only if it narrows visibility or sets a "
-                f"type, e.g. `#[{match.group(1)}(pub(crate))]`)"
-            )
-    return findings
-
-
 def main() -> int:
     if len(sys.argv) < 2:
-        print("usage: verify_no_redundant_accessor_attr.py <repo_root>", file=sys.stderr)
+        print("usage: verify_no_redundant_bare_accessor.py <repo_root>", file=sys.stderr)
         return 2
     root = Path(sys.argv[1]).resolve()
-    if not root.is_dir():
+    if not root.exists():
         print(f"not a directory: {root}", file=sys.stderr)
         return 2
 
     files = list(iter_rust_files(root))
     violations = []
     for path in files:
-        violations.extend(audit_one(path))
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for line_no, attr, item in check_text(text):
+            violations.append(
+                f"{path}:{line_no}: redundant bare {attr} on `{item}` — the derive "
+                f"already generates this accessor; delete the attribute"
+            )
 
     for line in violations:
         print(line)

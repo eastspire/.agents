@@ -1,0 +1,9 @@
+name: allowed-with-reason
+on: [push]
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # ci-allow-version-write: this job cuts the release tag for the already-bumped version
+      - run: cc bump --release
+      - run: cargo publish

@@ -192,50 +192,67 @@ pub fn minify_html_template(html: &str) -> String {
 
 **与 §1.3a 的关系**:§1.3a 管 top-level declaration(struct/enum/impl...),§1.3c 管 fn/impl body 内的 literal。两者互补,audit script 的 check 16 检 §1.3a,新增 check 18 检 §1.3c。
 
-### 1.3d 孤儿代码文件不能与目录同级(2026-09-28 user 钦定,同日收窄)
+### 1.3d 代码文件不能与目录同级(2026-09-28 钦定 → **2026-09-29 收紧**)
 
-**user 原话**:"如果 rust 代码文件同级有目录,需要报错提示代码文件不能和目录在同一级,注意 lib.rs main.rs build.rs mod.rs 这些除外"。
+**user 原话(2026-09-28)**:"如果 rust 代码文件同级有目录,需要报错提示代码文件不能和目录在同一级,注意 lib.rs main.rs build.rs mod.rs 这些除外"。
 
-**收窄后的规则**:一个目录只要拥有**子目录**,就不能再放**既没有模块归属、也没有关键字槽位**的 `.rs` 文件。豁免两类:
+**user 原话(2026-09-29 收紧)**:"除了 mod.rs lib.rs main.rs build.rs 之外的 rust 代码文件,同级如果有目录,你一个将此文件移动到合理的目录,如果没有应该根据功能做新增目录,补全到 rust standard hook 里还有 git hook"。
 
-| 豁免类别 | 文件 | 为什么豁免 |
-|---------|------|-----------|
+**规则**:一个目录只要拥有**子目录**,就不能再放任何 `.rs` 文件。
+
+| 豁免 | 文件 | 为什么豁免 |
+|------|------|-----------|
 | 入口文件(4) | `lib.rs` / `main.rs` / `build.rs` / `mod.rs` | 职责就是统领子模块 |
-| 关键字文件(9+1) | `const.rs` / `static.rs` / `fn.rs` / `enum.rs` / `struct.rs` / `trait.rs` / `impl.rs` / `type.rs` + `macro.rs` | 各自目录的 `mod.rs` **按名字**声明它们,§1.3a 已管住内容,父层不必再表态 |
 
-**只有真正的孤儿文件才违规** —— `inline.rs` / `html_static_style.rs` 这类:没有任何 `mod.rs` 声明它,也不在 §1.3 的关键字表里。
+**关键字文件不再豁免。** `const.rs` / `static.rs` / `fn.rs` / `enum.rs` / `struct.rs` / `trait.rs` / `impl.rs` / `type.rs` / `macro.rs` **一律必须搬走**。
 
-#### 为什么收窄(同日实测,推翻首版)
+#### 为什么 2026-09-29 收紧(旧实现读作恒定 0)
 
-首版规则是"任何 `.rs` 都不得与目录同级,只豁免 4 个入口文件"。它有两个实测问题:
+旧实现是 `EXEMPT = ENTRY_FILE_NAMES | KEYWORD_FILE_NAMES`,于是:
 
-**1. 标准修法引入 clippy `module_inception` 警告。** 修法是 `const.rs` → `const/{const.rs, mod.rs}`,而新 `mod.rs` 里必须写 `mod r#const;` —— 模块名与所在目录同名,clippy 默认 `warn`。实测(euv master 与 ctares master 均为 **0 warning** 基线):
-
-| 仓库 | 首版修完 | warning |
-|------|---------|---------|
-| euv | `core/src/vdom/{impl,struct}/mod.rs` 等 | **+2** |
-| ctares | `*/src/const/mod.rs`、`enum/mod.rs` | **+5** |
-
-且 `X/X.rs` 这种形态在两个仓的 master 里**一个都不存在** —— 是规则凭空引入的新模式,不是"跟随既有约定"。
-
-**2. 误报合法文件。** ctares 有 **24 个 `macro.rs`** 与子目录同级(`clonelicious/src/`、`future-fn/src/`、`std-macro-extensions/src/*/`),全是合法叶子,首版全报违规。
-
-**教训:新规则的"标准修法"必须先跑一遍 clippy 验证,再写进规范。** 规则在 audit 里能报出违规 ≠ 修法本身是干净的 —— 后者是 git 状态,前者是 verifier 的输出,两者之间没有自动校验。
-
-**正确形态**(每一层要么只放目录,要么只放关键字文件):
 ```
-✅ crate-cli/src/          # 目录层 + 入口文件 + 关键字文件
-   ├── const.rs  ├── lib.rs  ├── main.rs
-   └── bump/  ├── fmt/  ├── help/  ...
-
-✅ crate-cli/src/version/  # 叶子
-   ├── fn.rs  └── mod.rs
-
-❌ euv/cli/tests/          # inline.rs 是孤儿,没有任何 mod.rs 声明它
-   ├── inline.rs  ├── fmt/  └── hmr/
+engine/src/renderer/
+  const.rs  enum.rs  fn.rs  impl.rs  struct.rs  trait.rs   ← 6 个关键字文件
+  mod.rs                                             ← 入口(豁免)
+  webgl/                                             ← 子目录
 ```
 
-**验证脚本**:`scripts/verify_no_sibling_dirs.py`,被 `audit_rust_standards.py` check 44 调用。**按违规目录报 1 条**(修复是一次结构性搬迁)。Fixture `~/.hermes/cache/scratch/verifier-fixtures/sibling-dirs-{compliant,violating,edge-cases}` 双向自测:compliant 0/exit 0(含"全部关键字文件 + macro.rs 与目录同级"的豁免用例),violating 4 in 4 dirs/exit 1,edge-cases 2 in 2 dirs/exit 1(报告里只列孤儿文件,豁免文件不进 message)。**三仓实测全部 0 violation**;euv master 剩 **2 处真违规**(`cli/tests/inline.rs`、`macros/tests/html_static_style.rs`)。**不进 pre-commit hook**(目录级规则只归 `rust_pre_commit.py` Phase 2,原因见 audit-pipeline.md)。
+这个目录**同时有子目录和 6 个关键字文件,verifier 依然报 0 违规**。规则在真实场景根本没有约束力 —— 这与 audit-pitfalls §89 是同一个失效模式(规则写进了 audit,但对真实形态读作永久的零)。收紧只需一行:`EXEMPT_FILE_NAMES = ENTRY_FILE_NAMES`。
+
+收紧后同一目录立即报 1 条,euv 全仓从 0 变成 **4 violations in 4 dirs**:`engine/src/renderer` / `core/src/vdom` / `ui/src/component/router` / `ui/src/style/class`。
+
+#### 标准修法:搬进语义化子目录,文件名保持关键字名
+
+- ✅ `renderer/webgpu/struct.rs`、`renderer/state/enum.rs`、`vdom/node/impl.rs`
+- ❌ `renderer/const/const.rs`、`vdom/struct/struct.rs`
+
+**禁止 X/X.rs 形态** —— `mod r#const;` 与所在目录同名 → clippy `module_inception`。实测(euv / ctares master 均为 0 warning 基线):euv **+2** / ctares **+5**。`X/X.rs` 在两仓 master 里一个都不存在,是规则凭空引入的新模式。
+
+**目录名必须是职责名词。** `const/` `struct/` `impl/` 这种按关键字命名的目录本身就是错的 —— 它只是把 X/X.rs 换了层皮,依然是"按文件名分组"而不是"按职责分组"。
+
+#### 拆分维度:概念,不是文件名,也不是后端
+
+新子目录的划分依据是**内容职责**。euv `engine/src/renderer/` 的实测拆法:
+
+```
+renderer/
+  state/       两后端共享的状态与格式枚举(LoadOp StoreOp BufferUsage TextureUsage
+               FilterMode MipmapFilter AddressMode CompareFunction BlendFactor
+               BlendOperation PrimitiveTopology IndexFormat ShaderStage FrontFace
+               CullMode VertexAttributeFormat GpuTextureFormat GpuErrorFilter ...)
+  descriptor/  两后端共享的描述符(RenderPipelineDescriptor ColorAttachment
+               DepthStencilAttachment PrimitiveState SamplerDescriptor DrawArgs
+               DrawIndexedArgs DispatchArgs VertexBufferLayout ...)
+  webgpu/      WebGpuRenderer + WebGpuInitError + 其 impl/const/fn
+  webgl/       WebGL 2 后端
+  canvas/      Canvas2D 后端(Camera2D CanvasRenderer DrawList ...)
+```
+
+**不能按后端拆。** 实测 `webgl/` 对 `FilterMode`(2 文件)/ `AddressMode`(3)/ `CompareFunction`(3)/ `BlendFactor`(2)/ `IndexFormat`(2)/ `GpuTextureFormat`(2)/ `DrawArgs`(1)/ `DrawIndexedArgs`(1)/ `VertexBufferLayout`(1) 都有引用 —— 这些是 **WebGL 与 WebGPU 共用**的。按后端拆到 `webgpu/` 下,会让 `webgl/` 依赖兄弟模块。
+
+**保留的 lesson(2026-09-28)**:新规则的"标准修法"必须先跑 clippy 与 master 基线对比 —— **verifier 报得出违规 ≠ 修法干净**,后者是 git 状态,两者之间没有自动校验。
+
+**验证脚本**:`scripts/verify_no_sibling_dirs.py`,被 `audit_rust_standards.py` check 44 调用,**按违规目录报 1 条**。双向 fixture `~/.hermes/cache/scratch/s13d-fixtures/{compliant,violating}`:compliant 0/exit 0(4 个入口文件各配子目录 + 无子目录的叶子目录),violating 2 dirs/exit 1(renderer 6 个 + vdom 2 个关键字文件)。**hook 层**:`staged_file_gate.VERIFIERS["verify_no_sibling_dirs"]` 已注册,靠 `audit_one(path)` 适配层映射到 staged 文件路径;实测对 `engine/src/renderer/struct.rs` 报 +1、对 `mod.rs` 报 0,**不是恒定 0**。残留缺口:orphan 未 staged 而新增子目录 staged 的组合 gate 抓不到,**check 44 全仓审计仍是权威**。
 
 ## 1.4 raw identifier 命名(关键!)
 

@@ -90,6 +90,31 @@ FORMAT_MACROS = {
     "dbg", "error", "warn", "info", "debug", "trace",
 }
 
+# Format macros whose format string is the SECOND argument: the first is a
+# condition (`assert!`) or a value / writer (`assert_eq!`, `writeln!`).
+# The scanner must skip that first argument when looking for the format
+# string, otherwise it credits the condition line and reports the real
+# format string as a §1.3c violation.
+# `macro -> 0-based index of its format string`.
+#
+# `assert!(cond, "..")`        -> 1  (cond first)
+# `assert_eq!(a, b, "..")`     -> 2  (two compared values first)
+# `assert_ne!(a, b, "..")`     -> 2
+# `write!(sink, "..")`         -> 1  (writer first)
+# `writeln!(sink, "..")`       -> 1
+# `format!/println!/panic!/..` -> 0  (message first, or only arg)
+ASSERT_STRING_INDEX = {
+    "assert": 1,
+    "assert_eq": 2,
+    "assert_ne": 2,
+    "write": 1,
+    "writeln": 1,
+}
+
+# The same set, for the single-line scanner.  Kept as an alias so the two
+# code paths cannot drift apart on WHICH macros are assert-like.
+ASSERT_LIKE_MACROS = frozenset(ASSERT_STRING_INDEX)
+
 
 # Match a string literal — at minimum 4 non-whitespace chars
 # (avoid flagging single-char `'.'` literals and empty `""`).
@@ -218,6 +243,16 @@ def _is_format_macro(line: str) -> bool:
                 ):
                     return True
                 continue
+            if macro in ASSERT_LIKE_MACROS:
+                # `assert!(cond, "fmt", ..)`: the literal is the SECOND
+                # argument, so it is exempt only when a comma separates
+                # it from the first argument.  Without this branch a
+                # single-line `assert!(a < b, "msg {}", v)` is reported,
+                # even though the multi-line form of the very same
+                # assertion is exempt.
+                if comma_match is None:
+                    continue
+                return str_match.start() > comma_match.end()
             if comma_match is None or str_match.start() < comma_match.start():
                 # Format string is the first arg — exempt
                 return True
@@ -229,9 +264,14 @@ def _exempt_format_string_lines(lines: list[str]) -> set[int]:
     multi-line format-macro call (rustfmt puts each arg on its own
     line, so the format string may not share a line with the macro).
 
-    For write!/writeln! the format string is the second arg (writer
-    first); for all other format macros it is the first arg.  Arg
-    counting assumes one arg per line, which is how rustfmt wraps."""
+    The format string is NOT always the first argument.  `write!` /
+    `writeln!` take the writer first; `assert!` / `assert_eq!` /
+    `assert_ne!` take the condition (or the two compared values) first;
+    `panic!` / `unreachable!` / `todo!` / `unimplemented!` take the
+    message second only when a payload precedes it.  Getting this wrong
+    shifts arg counting by one, so the scanner credits the line holding
+    the *condition* as the format string and then reports the real format
+    string as a violation."""
     exempt: set[int] = set()
     macro_re = re.compile(r"\b(\w+)!\s*\(")
     for idx, line in enumerate(lines):
@@ -245,7 +285,11 @@ def _exempt_format_string_lines(lines: list[str]) -> set[int]:
             depth = 1 + after.count("(") - after.count(")")
             if depth <= 0:
                 continue
-            target_arg = 1 if macro in {"write", "writeln"} else 0
+            # `target_arg` is the 0-based index of the format string
+            # among the macro's arguments.  Only these put it at 0; every
+            # other macro in FORMAT_MACROS takes at least one
+            # non-format argument first.
+            target_arg = ASSERT_STRING_INDEX.get(macro, 0)
             arg_index = 1 if after.strip() else 0
             j = idx + 1
             while j < len(lines) and depth > 0:
@@ -259,6 +303,7 @@ def _exempt_format_string_lines(lines: list[str]) -> set[int]:
                     arg_index += 1
                 j += 1
     return exempt
+
 
 
 def _comment_start(line: str) -> int | None:
@@ -342,6 +387,12 @@ def audit_one(path: Path) -> list[str]:
     try:
         text = path.read_text()
     except (OSError, UnicodeDecodeError):
+        return []
+    # Skip tests/ (R14.7 self-contained).  This must live HERE, not only in
+    # the repo-wide walker: staged_file_gate.py drives audit_one() directly,
+    # so an exemption that exists only in main() is invisible to the commit
+    # hook and every test edit reads as a fresh batch of violations.
+    if "tests" in path.parts:
         return []
     lines = text.splitlines()
     exempt_lines = _exempt_format_string_lines(lines)

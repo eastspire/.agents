@@ -242,17 +242,49 @@ default = []
 - **组内排序 primary = entry 完整长度**(整条 entry 跨所有行的 whitespace-agnostic 字符总数,含 `key = {...}` 与 features/fields),**secondary = dep key ASCII 字典序**。`euv < euv-ui < euv-cli < euv-core < euv-engine < euv-macros < euv-example` 正是按 entry 长度升序排(`euv = { path = ".", version = "..." }` 最短,`euv-example = { path = "example", version = "..." }` 最长)。三方同理:`log < toml < quote < chrono < ignore < if-addrs < js-sys < serde-wasm-bindgen < wasm-bindgen < alloc-no-stdlib < serde_json < hyperlane < ...`。
 - **同长度时按 dep key 字典序**(`euv-engine` 与 `euv-macros` 都是 52 字符,字典序在前即可)。
 
-### 13.7.4 为什么 round-4 用 entry 完整长度而不是 key 长度或 alphabetic
+### 13.7.4 `features = [...]` 数组内部顺序(round-5,2026-09-27 user 钦定)
+
+- **user 原话:「优先长度,其次字典序」** —— 与 §13.7.3 块内 entry 排序**同一个 sort key**。
+- **primary = 元素字符串长度升序**,**secondary = 元素文本 ASCII 字典序升序**。
+- 适用范围:依赖的 `features = [...]` 数组。`scripts/verify_features_order.py` 是唯一 source of truth,audit check 22 调用它。
+- 与 `verify_dep_order.py` 共用同一套 key(后者 `entry_sort_key` 返回 `(total, key)`),所以 features 数组和它所在的 dep 块**视觉节奏一致**。
+- **只改顺序,不增不删 feature**。feature 对 cargo 是集合,解析与顺序无关,所以这是纯可读性规则,零功能风险。
+
+**不适用(有意跳过)**:
+
+- `[[bin]]` 的 `required-features = []` —— 不同 key,verifier 用 `(?<![\w-])` 前瞻排除。
+- **数组内含注释** —— 重排可能让注释悄悄指向另一个元素,verifier 整段跳过并保持沉默(不报错也不改)。这种情况需要人工判断。
+
+**为什么和 §13.7.3 用同一套 key**:两处都是"一列同质的短字符串",用不同规则会让同一个文件里出现两种视觉节奏。统一之后 dep 块与其 features 数组读起来是同一种韵律。
+
+**排序示例**(`web-sys` 真实数据节选):
+
+```toml
+features = [
+    "Gpu",           # 3
+    "Blob",          # 4
+    "File",          # 4
+    "Node",          # 4
+    "Text",          # 4
+    "Event",         # 5
+    "Element",       # 7
+    "GpuAdapter",    # 10
+]
+```
+
+同长度段(`Blob`/`File`/`Node`/`Text` 都是 4)按字典序排 —— 这正是"其次字典序"的体现,纯 alphabetic 会把 `Element` 排到 `Blob` 前面。
+
+### 13.7.5 为什么 round-4 用 entry 完整长度而不是 key 长度或 alphabetic
 
 - **key 长度太小太均**:大多数 dep key 在 4-12 字符之间,`log`/`toml`/`quote`/`chrono`/`ignore` 都 5-6 字符,key 长度 primary 几乎退化为 alphabetic。user 原话是"整体长度从小到大排序",**整体 = entry 整体**,不是 key 整体。
-- **alphabetic 看不出"短在前"的视觉引导**:alphabetic 是任意选择,扫读 dep 块时不提示"这里有一段短的简单声明"。entry 长度 ascending 是物理视觉规律(短条目在最上,长条目在下),与 §13.7.9 const.rs 内部排序精神一致(const 短在前)。
+- **alphabetic 看不出"短在前"的视觉引导**:alphabetic 是任意选择,扫读 dep 块时不提示"这里有一段短的简单声明"。entry 长度 ascending 是物理视觉规律(短条目在最上,长条目在下),与 §13.7.10 const.rs 内部排序精神一致(const 短在前)。
 - **单规则胜过拼接**:alphabetic + 空行分组的双规则依赖"哪里该有/不该有空行"的判断;length-primary + key-secondary 是单一可计算函数,verifier/fixer 共用同一个 sort key(`scripts/verify_dep_order.entry_sort_key`),无法漂移。
 
-### 13.7.5 为什么保留本地/三方分组 + 边界空行
+### 13.7.6 为什么保留本地/三方分组 + 边界空行
 
 分组让"工作区内部依赖"与"外部依赖"在视觉上立即可分(本地短缩写在多行 entry 上总是较短,长度排序同样把本地排在上)。**唯一空行** = 边界,符合 §13.7.4 的"空行只有视觉分隔意义时才出现"原则——三方组内不再有"无意义空行"。
 
-### 13.7.6 例(`example/Cargo.toml` `[dependencies]`)
+### 13.7.7 例(`example/Cargo.toml` `[dependencies]`)
 
 ```toml
 [dependencies]
@@ -274,7 +306,7 @@ console_error_panic_hook = { workspace = true }
 
 本地组 5 条按 entry 长度升序(`euv`(26) < `euv-ui`(29) < `euv-core`(31) < `euv-engine`/`euv-macros`(33 并列,字典序在前))。中间 1 空行。三方组按 entry 长度升序(`serde`/`tokio`(28) < `chrono`(29) < `hyperlane`(32) < `serde_json`(33) < `color-output`(35) < `compare_version`(38) < `console_error_panic_hook`(47))。
 
-### 13.7.7 例(根 `Cargo.toml` `[workspace.dependencies]`)
+### 13.7.8 例(根 `Cargo.toml` `[workspace.dependencies]`)
 
 ```toml
 [workspace.dependencies]
@@ -322,7 +354,7 @@ tokio = { version = "1.53.1", features = [...] }
 
 > **注意**:`serde` 与 `serde_json` 紧邻且长度不同(`serde` 短,`serde_json` 长),不会因为 key 前缀重叠而被合并——sort 是基于 entry 整体字符数,不是 prefix tree。
 
-### 13.7.8 PR 提交前自检(Python 一行 sort 验证, round-4)
+### 13.7.9 PR 提交前自检(Python 一行 sort 验证, round-4)
 
 ```bash
 python3 -c "
@@ -371,7 +403,7 @@ print('OK')
 
 **该脚本近似于 verifier 的判定**(都基于 entry 完整长度 + dep key 字典序),但**不要用作 PR-time 唯一校验**——verifier 是 source of truth。验证自己改完后跑 `scripts/verify_dep_order.py <repo-root>` 报 0 violations 才算完工。
 
-### 13.7.9 spirit 延伸(const.rs / 关键字文件内部顺序,2026-09-14 PR #233 实测)
+### 13.7.10 spirit 延伸(const.rs / 关键字文件内部顺序,2026-09-14 PR #233 实测)
 
 本规则字面只覆盖 Cargo.toml 的 4 个 dep 块,但同样的"短在前 + 字典序 tiebreak"精神适用于同文件内同类声明的顺序。新增 `pub const FOO: T = ...;` 到 `const.rs` 时,按 (key 长度, ASCII 字典序) 找到正确位置插入,而不是 append 到末尾或紧跟在"语义相关的另一个 const"后面。
 
@@ -379,7 +411,7 @@ print('OK')
 
 `fn.rs` 内部的 `pub fn` 排序在多数项目里保留"调用顺序"(高层 wrapper 在前、底层 helper 在后),不强行套用本规则——但当一个文件里出现多个独立的 `pub fn` 且无明确调用链时(如 `pub fn` 是相互独立的 utility),同样按 `(name length, lex)` 排序更易扫读。
 
-### 13.7.10 修订历史
+### 13.7.11 修订历史
 
 | 日期 | 版本 | 规则 |
 |---|---|---|

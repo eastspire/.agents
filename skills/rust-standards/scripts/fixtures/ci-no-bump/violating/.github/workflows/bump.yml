@@ -1,0 +1,11 @@
+name: bump
+on: [push]
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - run: cc bump --patch
+      - run: crate bump --minor
+      - run: cargo set-version 1.2.3
+      - run: sed -i 's/^version = .*/version = "9.9.9"/' Cargo.toml
+      - run: perl -pi -e 's/version = .*/version = "8.8.8"/' Cargo.toml

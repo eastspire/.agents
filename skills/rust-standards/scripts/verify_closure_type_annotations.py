@@ -84,6 +84,90 @@ CLOSURE = re.compile(
 )
 
 
+def _mask_line(line: str) -> list[bool]:
+    """Return a per-character mask: True where the char is CODE, False
+    where it belongs to a string / char / byte literal or a comment.
+
+    The `|...|` scanner must only ever see real code.  Every reported
+    false positive in a real repo came from a `|` that was really part
+    of a string literal (``log::info!("(a|b|c)")``) or a `||` short
+    circuit.  Masking by position — rather than skipping whole lines —
+    is what makes the exemption safe: a genuine closure on a line that
+    ALSO contains a string with a pipe is still checked (see the
+    `tricky` fixture), which a `continue` on the line would miss.
+    """
+    mask = [True] * len(line)
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        # line comment: everything after `//` (but not `///`, handled as
+        # code by the caller; here only `//` that is not `///`/`//!`)
+        if ch == "/" and line[i:i + 3] not in ("///", "//!") and line[i + 1:i + 2] == "/":
+            for k in range(i, n):
+                mask[k] = False
+            break
+        # raw string r"..." / r#"..."#
+        if ch == "r" and line[i + 1:i + 2] in ('"', "#"):
+            j = i + 1
+            hashes = 0
+            while line[j:j + 1] == "#":
+                hashes += 1
+                j += 1
+            if line[j:j + 1] != '"':
+                i += 1
+                continue
+            close = '"' + "#" * hashes
+            end = line.find(close, j + 1)
+            end = n if end == -1 else end + len(close)
+            for k in range(i, end):
+                mask[k] = False
+            i = end
+            continue
+        # normal string "..." with backslash escapes
+        if ch == '"':
+            j = i + 1
+            while j < n:
+                if line[j] == "\\":
+                    j += 2
+                    continue
+                if line[j] == '"':
+                    j += 1
+                    break
+                j += 1
+            for k in range(i, min(j, n)):
+                mask[k] = False
+            i = j
+            continue
+        # char / byte literal 'x'  (careful: lifetimes look the same)
+        if ch == "'":
+            # a lifetime `'a` has no closing quote on the same token
+            if line[i + 1:i + 2] != "\\" and line[i + 2:i + 3] == "'":
+                for k in range(i, i + 3):
+                    mask[k] = False
+                i += 3
+                continue
+            if line[i + 1:i + 2] == "\\":
+                j = i + 2
+                while j < n and line[j] != "'":
+                    j += 1
+                j = min(j + 1, n)
+                for k in range(i, j):
+                    mask[k] = False
+                i = j
+                continue
+            i += 1
+            continue
+        i += 1
+    return mask
+
+
+def _masked_spans(line: str) -> str:
+    """Return `line` with every literal/comment character replaced by a
+    space.  Offsets are preserved, so span arithmetic stays valid."""
+    mask = _mask_line(line)
+    return "".join(ch if keep else " " for ch, keep in zip(line, mask))
+
+
 def _list_rs_files(root: Path) -> list[Path]:
     r = subprocess.run(
         ["find", str(root), "-name", "*.rs",
@@ -103,6 +187,12 @@ def _has_explicit_type(param: str) -> bool:
         return True  # empty (shouldn't happen but be safe)
     if p == "..":
         return True  # rest pattern
+    if p == "_":
+        # `|_|` binds nothing by name.  There is no identifier to attach a
+        # type to, and writing `let _: u32 = ...` for a discarded
+        # argument would change nothing about the reader's ability to see
+        # the type.  Treat like the rest pattern: no annotation possible.
+        return True
     # `&pat: T` or `&mut pat: T`
     if p.startswith(("&mut ", "&")):
         # Strip leading ref, check for `: T`
@@ -145,23 +235,144 @@ def _is_macro_pattern(params: str) -> bool:
     return False
 
 
+def _is_op_chain(p: str) -> bool:
+    """True when the captured text is an operator chain, not a binding.
+
+    Covers `==`, `!=`, `<=`, `>=`, `&&`, `||`, and arithmetic.  A closure
+    parameter list can never contain a comparison or boolean operator, so
+    their presence settles the question regardless of the surroundings.
+    """
+    return bool(re.search(r"==|!=|<=|>=|&&|\|\||\+\+|--|[+\-*/%^]", p))
+
+
+def _is_pattern_tuple(p: str) -> bool:
+    """True when `p` is a tuple/paren BINDING pattern rather than a call.
+
+    `|(a, b)|`, `|&(x, y)|` and `|(a, (b, c))|` are closures over tuple
+    patterns; `(a & b)` and `(a as u32)` are expressions.  The difference
+    is what the parens contain: only bindings, refs, `_`, and `mut`.
+    """
+    s = p.strip()
+    if not s.startswith("(") or not s.endswith(")"):
+        return False
+    inner = s[1:-1].strip()
+    if not inner:
+        return False
+    # split on top-level commas
+    parts, depth, cur = [], 0, ""
+    for ch in inner:
+        if ch in "([{<":
+            depth += 1
+        elif ch in ")]}>":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur)
+    parts = [x.strip() for x in parts if x.strip()]
+    if not parts:
+        return False
+    for part in parts:
+        e = part
+        for _ in range(2):  # `mut` and `&`/`&mut`, in either order
+            e = re.sub(r"^(?:mut|&{0,2})\s+", "", e)
+        if not e:
+            continue
+        if e == "_":
+            continue
+        if _is_pattern_tuple(e):  # nested tuple
+            continue
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(\s*:\s*.+)?", e):
+            continue
+        return False
+    return True
+
+
+def _next_nonspace(line: str, index: int, step: int) -> str | None:
+    """Return the nearest non-whitespace character to `line[index]`,
+    scanning in direction `step`, or None at end of line.
+
+    `index` is the edge of the captured `|...|` group.  When scanning
+    forwards the group-closing `|` itself is skipped, so the caller sees
+    the operator that follows the chain (`a | b | c` => `c`).
+    """
+    i = index
+    while True:
+        i += step
+        if i < 0 or i >= len(line):
+            return None
+        ch = line[i]
+        if ch.isspace():
+            continue
+        if ch == "|":
+            # the group delimiter, not an operand
+            continue
+        return ch
+
+
 def _is_bitwise_or_chain(
     params: str, line: str, span: tuple[int, int]
 ) -> bool:
-    """True when the `|...|` match is a bitwise-or chain, not closure params.
+    """True when the `|`...`|` match is a bitwise-or / boolean short-circuit
+    chain, not closure parameters.
 
-    A closure parameter list is a comma-separated binding list; it never
-    contains a shift or a cast.  The `|` delimiters sit outside the captured
-    group, so the shape is judged from the source text surrounding the span.
+    A closure parameter list is a comma-separated binding list: its content
+    is identifiers, `&`/`&mut`/`_`/patterns, and `: Type` annotations.  An
+    operand chain is none of those — it contains calls, `&` masks, casts or
+    a bare parenthesised expression, and it is always delimited by `|` that
+    has a non-empty operand on BOTH sides (the `|` delimiters sit OUTSIDE
+    the captured group, so the shape is judged from the source around the
+    span, not from the captured text).
+
+    Both cases below were read as closures before this check existed:
+      `name.contains('/') || name.contains('\\')`      (`||` short circuit)
+      `(hash_b & hash_c) | (hash_b & hash_d) | ...`     (bitwise mask chain)
     """
-    if not re.search(r"<<|>>|\bas\b", params):
+    p = params.strip()
+    if not p:
         return False
+    # --- BINDING LISTS: never an operand chain.  Checked FIRST, because a
+    # tuple pattern like `|(k, v)|` is full of parens and commas and would
+    # otherwise be mistaken for a call expression.
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", p):
+        return False
+    if re.fullmatch(r"(?:mut\s+)?(?:&{0,2}\s*)?[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*(?:mut\s+)?(?:&{0,2}\s*)?[A-Za-z_][A-Za-z0-9_]*)*", p):
+        return False
+    if re.fullmatch(r"\([^)]*\)\s*:\s*.+", p):  # tuple pattern WITH type
+        return False
+    # An un-annotated tuple pattern: `(a, b)`, `&(a, b)`, `mut (a, b)`,
+    # `(a, (b, c))`, and any mix of refs/underscores inside.  This is a
+    # binding list, so the presence of parens is not evidence of a call.
+    if _is_pattern_tuple(p):
+        return False
+    # Operand on both sides of each delimiter => an operator chain.
+    # The captured group is the text BETWEEN two `|` chars, so for
+    # `a | b | c` it is the middle operand `b`.  A real closure is
+    # introduced by an opening `|` that has NO operand before it, which
+    # makes the pair asymmetric — so the "before" char must be one that
+    # can legally precede a value (identifier, `)`, `]`, quote, digit).
+    # NOTE: skip whitespace before inspecting the neighbouring char;
+    # `a | b | c` puts a space between the operand and the delimiter, and
+    # testing the raw neighbour would see `' '` and wrongly conclude the
+    # chain ends there.
     start, end = span
-    before = line[max(0, start - 3):start]
-    after = line[end:end + 3]
-    # A bit-or chain has an operand on both sides of each delimiter, and the
-    # line carries further `|` operators beyond the two delimiters.
-    return bool(before.strip()) and bool(after.strip()) and "|" in line[end:]
+    before = _next_nonspace(line, start, -1)
+    after = _next_nonspace(line, end, +1)
+    if before is None or after is None:
+        return False
+    if not re.match(r"[\w)\]\"']", before):
+        # nothing that can end an operand precedes the opening `|`
+        return True
+    if before in {"|", "&", "!", "=", "<", ">", "+", "-", "*", "/", "%", "^"}:
+        return True
+    # `a | b` / `a || b`: the captured text is an expression, not a
+    # binding list — calls, masks, casts and quotes cannot appear in a
+    # parameter pattern.
+    if "(" in p or ")" in p or "&" in p or "'" in p or "\"" in p or "<<" in p or "as " in p:
+        return True
+    return False
 
 
 def audit_one(path: Path) -> list[str]:
@@ -175,17 +386,29 @@ def audit_one(path: Path) -> list[str]:
         # content inside `// ...` lines.
         if line.lstrip().startswith(("/", "*")):
             continue
+        # Scan only the CODE part of the line: string / char literals and
+        # trailing comments are blanked out first, preserving offsets, so
+        # a `|` inside `log::info!("a|b|c")` is never read as a closure
+        # delimiter (2026-09-28).  Exempting by span, not by line, keeps
+        # real closures on the same line visible.
+        code = _masked_spans(line)
         # Skip macro_rules! lines whose `|` sits inside a `$( ... )`
         # repetition (2026-09-28).  A macro matcher and a macro body are
         # both patterns, not closures: `move |$( $arg:ident $(: $ty:ty)? ),*|`
         # must not be asked for a type annotation, because adding one means
         # editing the macro and breaking it.  A real closure with real
         # parameters is still checked, so this is not a blanket exemption.
-        for m in CLOSURE.finditer(line):
+        for m in CLOSURE.finditer(code):
             params_str = m.group("params")
             if _is_macro_pattern(params_str):
                 continue
-            if _is_bitwise_or_chain(params_str, line, m.span("params")):
+            # An operator chain (`a == b || c == d`, `(a & b) | (c & d)`) is
+            # never a closure.  Checked before the bitwise-specific helper
+            # because that one needs the surrounding span; this one is
+            # self-contained and covers `==`/`!=`/`<=`/`&&` too.
+            if _is_op_chain(params_str):
+                continue
+            if _is_bitwise_or_chain(params_str, code, m.span("params")):
                 # `|`-separated bit operations, e.g.
                 # `((a as usize) << 16) | ((b as usize) << 8)`, were being read
                 # as closure parameters.  A `|` chain is not a closure: the

@@ -214,3 +214,78 @@ euv cli 实测:`FmtResult` 是本地 `pub(crate) struct FmtResult`(`cli/src/fmt/
 - audit:`audit_rust_standards.py` check 37。
 - fixture:`~/.hermes/cache/scratch/verifier-fixtures/rename-{compliant,violating}`,双向通过(0 / 3 hits,exit 0/1)。
 - 三仓收敛(2026-09-26):hyperlane 2 / euv 6 / ctares 1 → 全部 0。
+
+## 6.6 同 root 的 `use` 必须聚合成一个 brace 语句(2026-09-27 user 钦定)
+
+**user 原话**: "同一作用域内,相同 crate/模块 root 的 use 必须聚合成一个 brace 形式语句,禁止拆成多行独立 use"
+
+### 规则
+
+同一文件、同一作用域内,**2 个及以上独立的顶层 `use` 语句**且 **root segment 相同** → 必须合并成一个 brace 语句。root segment = 路径中第一个 `::` 之前的部分(`std` / `serde` / `super` / `crate` / 任何本地模块名)。
+
+```rust
+// ❌ 违规:同一 root `std` 被拆成 3 条独立语句
+use std::ffi::c_void;
+use std::path::Path;
+use std::collections::HashMap;
+
+// ✅ 正确:聚合成一个 brace 语句
+use std::{collections::HashMap, ffi::c_void, path::Path};
+
+// ✅ 正确:不同 root 各自独立是正常的,不算违规
+use std::path::Path;
+use serde::Serialize;
+use tokio::sync::Mutex;
+
+// ✅ 正确:已经聚合的 + 不同 root
+use std::{fmt::{self, Debug}, path::Path};
+pub use serde::Serialize;
+```
+
+### 分组粒度:按 (root, visibility) 分组 —— 这是实测结论,不是拍脑袋
+
+**实测(2026-09-27,rustfmt 1.9.0-stable + nightly 1.101.0):**
+
+| rustfmt 配置 | `use std::a; use std::b;` | `pub use std::a; use std::b;`(跨 visibility) |
+| --- | --- | --- |
+| stable 默认(`Preserve`) | **不合并**,仅按字母重排 | **不合并**,仅重排 |
+| nightly `imports_granularity = "Module"` | **不合并** | **不合并** |
+| nightly `imports_granularity = "Crate"` | **合并** → `use std::{a, b};` | **不合并**,`pub use` 仍独立 |
+
+结论:
+
+1. `imports_granularity` 是 **nightly-only** 选项(配了但用 stable 只会 warning 忽略),三个仓都没有 `rustfmt.toml`,所以 rustfmt 默认**永远不会**帮你合并 —— 这正是需要 verifier 的原因。
+2. 即使 nightly `Crate` 粒度,`pub use` 与私有 `use` 也**始终保持分离**。这是**有意的语义**(re-export vs 私有导入),不是代码漂移。
+
+因此:**跨 visibility 的同 root 组合予以豁免**,verifier 按 `(root, visibility)` 二元组分组,`pub use std::X;` + `use std::Y;` 不报。
+
+### 豁免清单(每一条都有 fixture 覆盖)
+
+| # | 场景 | 为什么豁免 |
+| --- | --- | --- |
+| 1 | 不同 root(`use std::...` + `use serde::...`) | 正常的多 crate 导入,聚合反而降低可读性 |
+| 2 | 同 root 但 visibility 不同(`pub use std::X;` + `use std::Y;`) | 见上表实测:rustfmt 刻意保持分离,re-export 与私有导入语义不同 |
+| 3 | glob 与非 glob 并存(`use super::*;` + `use super::Foo;`) | 合并会改变解析语义 —— 显式项可以 shadow glob 项 |
+| 4 | fn 体内部的 `use` | §6.4 已禁止 fn 内 use,不重复报 |
+| 5 | `#[cfg(test)] mod tests` 内的 use | 测试局部导入,属 §14 范畴 |
+| 6 | 被属性 gate 的 import(`#[cfg(windows)] use std::ffi::c_void;`) | **合并会把属性提升到整个 brace 组**,导致非 Windows 平台也带上条件 —— 合并等于改语义;ctares `server-manager/src/lib.rs:31` 就是这个形态 |
+| 7 | 无 root 的 brace re-export(`use { r#struct::*, r#type::* };`) | 本来就已是聚合形式,归 §6.1 三段式管辖 |
+| 8 | 两条同 root 语句被**另一个 §6.1 stage** 隔开 | 见下方优先级 |
+
+### 优先级:§6.1 三段式顺序 > §6.6 聚合
+
+`lib.rs` / `mod.rs` 的 §6.1 三段式严格顺序(mod → `pub use` → `pub(crate) use` → `pub(super) use` → private use)是**硬性**规则(见 check 27)。**当聚合要求与三段式顺序冲突时,以三段式顺序为准。**
+
+- 两条同 root、同 visibility 的语句如果处在**同一个 stage 内的连续段**(中间只有注释/空行)→ 报,应该合并。
+- 如果它们被**另一个 stage** 隔开(例如 private `use` 和 `pub use` 中间插了 `mod` 声明)→ **不报**。合并会要求把一条 import 移过 stage 边界,直接破坏 check 27。
+
+verifier 用"连续段"(run)切分实现这一点:两个 `use` 之间若存在超过 2 行的间隔,视为跨 stage,不聚合、不报告。**注释行不算 stage 边界** —— 注释夹在两条同 root `use` 之间仍然会被报出并要求合并。
+
+### 验证
+
+- 脚本:`scripts/verify_use_aggregation.py <repo>`(use 块状态机 + 花括号深度跟踪,**只扫顶层**)。
+- audit:`audit_rust_standards.py` check 41(列表第 40 条)。
+- hook:`staged_file_gate.py` 已注册 `verify_use_aggregation`,只拦**新引入**的违规,不拦历史债。
+- fixture:`~/.hermes/cache/scratch/verifier-fixtures/use-agg-{compliant,violating}`:compliant 0 hits / exit 0(8 个豁免文件),violating 4 hits / exit 1(4 个违规文件)。audit 端到端双向通过(check 41 在 violating 侧 FAIL 4 hits,在 compliant 侧 PASS)。
+- 三仓实测(2026-09-27):**euv 1 违规文件 / 1 hit**(`macros/tests/mod.rs:12`)/ **ctares 0** / **hyperlane 0**。
+  - **注意**:`grep` 粗扫出的"多条 `use std::`"绝大多数**本来就已经是 brace 形式**(如 euv `core/src/lib.rs:15` + `:28` 分别是 `pub use std::{` / `use std::{`),不是违规;粗扫数字远高于 verifier 数字属正常。verifier 会解析出每条语句的**真实 root**再分组,无 root 的 `use { ... }` re-export 块不参与分组。

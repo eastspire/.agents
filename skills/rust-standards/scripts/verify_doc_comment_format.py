@@ -343,6 +343,13 @@ def audit_one(path: Path) -> list[str]:
         text = path.read_text()
     except (OSError, UnicodeDecodeError):
         return []
+    # Skip tests/ (R14.5 forbids comments in test files, so a test fn is
+    # never expected to carry a doc block).  This must live HERE, not only
+    # in the repo-wide walker: staged_file_gate.py drives audit_one()
+    # directly, so an exemption that exists only in main() is invisible to
+    # the commit hook and every test edit reads as a fresh violation.
+    if "tests" in path.parts:
+        return []
     lines = text.splitlines()
     fn_locs = _find_fn_locs(lines)
     test_regions = _scan_test_regions(lines)
