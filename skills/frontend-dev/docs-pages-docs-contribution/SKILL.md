@@ -194,7 +194,11 @@ curl -s --compressed -o /tmp/out.html -w "%{http_code} %{size_download}\n" \
 
 ## PR flow — direct to master, NO fork, NO PR
 
-`docs-pages/docs` is **private + eastspire admin**, and as of 2026-09-05 the entire `docs-pages/*` namespace is on `gh-pr-creation-workflow` Track 1 (direct-push). The flow is:
+`docs-pages/docs` is **private + eastspire admin**. Since 2026-09-27 the routing
+rule is by change type, not by org: Markdown and config edits in
+`src/**/*.md`, `sidebar`/`navbar`/`config.js` push straight to `master`
+(`git-standards` §3.3a); anything else branches and opens a PR. The flow for
+the direct-push case:
 
 - `git push origin master` directly (admin SSH)
 - **No PR, no branch, no fork**. Just commit on `master` and push.
@@ -275,7 +279,7 @@ The CURE for case (4) is rare but real: check the GitHub Actions run for `docs-p
 - [ ] `gh api repos/docs-pages/docs/contents/src/<crate>/README.md --jq .sha` confirms the new file landed (not 404)
 - [ ] `gh api repos/docs-pages/docs/contents/src/.vuepress/sidebar.js --jq '.content' | base64 -d` includes `"/<crate>": 'structure'`
 - [ ] `src/.vuepress/sidebar.js` was edited in the same commit as the subdir scaffold (so they deploy together)
-- [ ] Push landed on master (no PR opened, no branch — Track 1 direct push)
+- [ ] Push landed on master (no PR opened, no branch — docs/config direct push)
 - [ ] 2-3 min after push, `curl -s --compressed -w "%{http_code} %{size_download}" https://ltpp.vip/<crate>/` shows size > 10000
 - [ ] Side-by-side probe of `https://ltpp.vip/<existing-crate>/` to confirm other paths unaffected
 - [ ] No version numbers in any prose (grep `<crate>` for `euv 0` / `当前版本` / `同步至`)

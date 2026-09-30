@@ -263,19 +263,25 @@ Once you have a real `git` repo with the base branch checked out, continue with 
 
 Effective 2026-09-25 (user request "更新 skill 所有我的仓库和我的组织下的
 代码提交直接基于源仓库主分支牵出新的分支提交 PR，而不是 fork 仓库，PR 合并
-之后自动删除历史分支，保证分支干净"), ALL eastspire-owned namespaces
-use the same branch + PR flow. The previous 3-track scheme
-(`eastspire/*` and `docs-pages/*` direct-push master, everything else
-fork-first) is retired. See `gh-pr-creation-workflow` for the canonical
+之后自动删除历史分支，保证分支干净"), all eastspire-owned namespaces use
+the same branch + PR flow for **code changes**, with no fork step. The previous
+3-track scheme (`eastspire/*` and `docs-pages/*` direct-push master, everything
+else fork-first) is retired. See `gh-pr-creation-workflow` for the canonical
 single-track reference.
 
-| Org | Workflow | Notes |
+Refined 2026-09-27: **the change type is checked first, not the org.** Docs,
+config and comment-only changes direct-push to the default branch in *every*
+repo — the table below applies only once `classify_change.py` has returned
+`NEEDS_PR`. A comment-only edit to a `.rs` file is a direct push, not a PR;
+that is the user's explicit rule. See `git-standards` §3.3a.
+
+| Org | Workflow (code changes) | Notes |
 | --- | --- | --- |
 | `eastspire/*` (personal, non-fork) | Branch off default + push to upstream + open PR + `--delete-branch` | Self-account; PR review is self-approval but enforced for branch hygiene |
 | `hyperlane-dev/*` | same as `eastspire/*` | eastspire is admin, repo has non-eastspire maintainer |
 | `euv-dev/*` | same | same |
 | `crates-dev/*` | same | same |
-| `docs-pages/*` | same (was direct-push no-PR before 2026-09-25) | eastspire is the entire admin team |
+| `docs-pages/*` | same for code (docs/config direct-push) | eastspire is the entire admin team |
 | Third-party (e.g. `tokio-rs/serde`) | `gh repo fork` + branch + push to fork + open PR | eastspire has no admin role — legacy Track 2 |
 
 All eastspire-owned repos have `delete_branch_on_merge=true` set at the
@@ -321,9 +327,10 @@ fork` (verified on `eastspire/.agents`). For the three maintainer-orgs
 or produces a meaningless same-account fork — so always push the branch
 direct to upstream and open the PR from there. The 2026-09-25
 simplification collapses the previous "direct push master for personal +
-docs-pages" track into the same flow because the user wants PR
-ceremony + branch hygiene across the entire eastspire-owned set,
-including the personal admin namespaces.
+docs-pages" track into the same flow because the user wants PR ceremony +
+branch hygiene across the entire eastspire-owned set. One exception, added
+2026-09-27: **docs / config / comment-only changes bypass the PR cycle
+entirely and direct-push** — see `git-standards` §3.3a.
 
 For the full decision tree see `gh-pr-creation-workflow`. For the
 historical context of the 3-track scheme that existed 2026-08-28 →

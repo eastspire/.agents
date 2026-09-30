@@ -38,6 +38,24 @@ grep -oE "pub struct [A-Z][A-Za-z]+" /root/projects/euv/engine/src/renderer/stru
 
 ### Step 3: Lombok Getter 规则
 
+**可见性判定铁律 (2026-09-27 实测, 修正了一整轮误判)**:
+
+`lombok_macros` 的 `Visibility::default() == Public` (lombok_macros 10.1.11, `src/visibility/enum.rs:9-16`)。因此:
+
+| 写法 | 生成的 getter | 外部 crate 能否读 |
+|---|---|---|
+| 裸 `#[get]` / `#[get(type(copy))]` + 任意可见性字段 | **pub** | 能 |
+| `#[get(pub(crate))]` | `pub(crate)` | **不能** |
+| `#[get(pub)]` | `pub` | 能 |
+
+**所以字段写 `pub(crate)` 本身不阻断外部读取**。审计 euv-engine 可见性时:
+
+- 真正的硬阻断只有两种: ①**项本身** `pub(crate)` 但所在模块已被 `pub use xxx::*` re-export (外部引用直接 E0425); ②**显式** `#[get(pub(crate))]`。
+- 真正「无读取路径」的是**裸写字段、完全没加 `#[get]`** 的那批 —— 那些要补 getter。
+- **trait 内的 fn 和 trait impl 内的方法继承 trait 可见性, 不是问题, 不要动**。euv-engine 里有 43 + 131 条这种, 改它们是纯浪费。
+
+已知实测可用的默认 pub getter: `Camera3D::get_position()` / `Color::get_red()` / `Transform2D::new()`。
+
 Lombok `Getter` 对:
 - `u32` 字段生成 `fn get_x(&self) -> u32`(**value** — 不要 `*` 解引用)
 - `Option<T>` 字段生成 `fn get_x(&self) -> Option<T>`(**value**)
@@ -113,6 +131,7 @@ euv fmt 2>&1 | grep "Formatted"                                         # 必须
 ## 历史
 
 - **2026-08-15**:euv 0.13.3 第一次补完(descriptor 完整字段 / async readback / dynamic offsets / writeTexture / generateMipmaps /error scope)。一次过 0 错 + 0 fail + 0 fmt 改动。
+- **全量审计后的定性结论**:本 crate 20k+ 行代码**零 `unimplemented!` / `todo!` / `TODO`**, 但功能完整度远低于「无 stub」的表象 —— 71 个功能点里真正完整的只有 7 个。缺口集中在「有实现无调用」「死字段」「子系统根本不存在」三类,详见上面「有实现但零调用」一节。**不要用「没有 unimplemented!」推断功能完整。**
 
 - **2026-08-15 (同一会话后续)**:加 13 个新 API 的 **integration test shape pin**(`engine/tests/webgpu_renderer_api_shape.rs`,15 个测试全过)。在 `example/src/lib.rs` 加 `webgpu_renderer_completion_demo` 真实 demo 函数(`pub async fn`,编译时验证 13 个 API 在 wasm 上下文中的真实可用性)。**euv fmt 仍然 0 改动**。
 
@@ -152,16 +171,23 @@ fn _type_check<S: AsRef<str>>(
 let _ = _type_check::<&str>;
 ```
 
-### `RenderPassColorAttachment` 字段是 `pub(crate)` — 设计缺陷
+### `RenderPassColorAttachment` 字段可见性 — 已修复 (2026-09-27)
 
-`RenderPassColorAttachment.view` / `resolve_target` / `clear_value` / `load_op` / `store_op` 全是 `pub(crate)`,**example 外部 crate 无法构造**。只有 `begin_render_pass_full` 内部代码能填字段。
+**原设计缺陷已修掉**:`renderer/struct.rs:586-636` 的 11 个字段原先既是 `pub(crate)` 又带 `#[get(pub(crate))]`(双重阻断),`example` 外部 crate 无法构造。现在字段是 `pub` + `#[get(pub)]`,`RenderPassDepthStencilAttachment` 的 11 个同样已开放,外部 crate 可以直接构造并传给 `begin_render_pass_full`。改动时同步确认了 `impl.rs` 的 `effective_load_op` / `effective_store_op` 语义(字段为 `None` 时回落到 swap-chain view / MSAA 中间 view)。
 
-**影响**:
-- example 不能用 `begin_render_pass_full`(传不出 color attachment)
-- 必须走旧的 `begin_render_pass` 或 `render_frame_with_bind_group`,**这两个会用 swap chain view 当默认 view**
-- 未来如果想给 caller 自定义 color attachment,要么加 `pub fn builder()`,要么把字段 `pub`
+**保留私有的两个**:`RenderPassDescriptorCache` 的字段(内部缓存,只开放类型名让外部能命名它)、`cell/struct.rs` 的 `EngineCell.inner`(`UnsafeCell` + `&'static mut` 借出,开放会把 aliasing UB 契约暴露到外部)。
 
-**Demo 函数怎么处理**:`example/src/lib.rs::webgpu_renderer_completion_demo` 用 closure `_type_check` 把签名**pin 住**(编译时验证),不实际调 — 这就是 Lombok `pub(crate)` 设计下的**正确 demo pattern**。
+### 「有实现但零调用」不等于功能完整
+
+审计 euv-engine 时最容易被骗的一类:某个子系统 struct / impl / 文档注释**全都齐全**,`cargo check` 也过,但**引擎自己从不调用它** —— 用户实际用不到。判据不是「代码存在吗」,而是:
+
+```bash
+grep -rn "<TypeName>" engine/src/ | grep -v "^engine/src/<module>/"   # 模块外有引用吗
+```
+
+实测 12 个这种: `AssetLoader` / `AudioClip` / `Camera3D` / `Updatable` / `Tween` / `Timer` / `ParticleEmitter` / `EventBus` / `RenderLayer::get_z_index`。**零 `unimplemented!` 不代表功能完整** —— 这个 crate 全树 20k+ 行一个 `todo!` 都没有,缺口全在这种「书架」形态里。
+
+同类的还有**死字段**:声明 + 有 getter + 有 doc,但**解算器从不读取**。`physics/struct.rs` 的 `friction` 就是(`grep -rn friction engine/src/` 只有字段和常量声明,零读取点)→ 物理表现是「物体接触后无限滑行」。**字段存在的意义取决于有没有读取点,而不是有没有 setter。**
 
 ### `TextureViewDescriptor::full()` 才有,`RenderPassColorAttachment::full()` 没有
 

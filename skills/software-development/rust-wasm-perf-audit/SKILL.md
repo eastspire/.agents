@@ -104,6 +104,67 @@ async def measure():
 
 分级清单（确定大头 / 局部 / 架构级），每条：file:line + 触发频率 + 量化（"1000 元素树 = 每次更新 1000 次 Vec 分配"）+ 修法。结尾给动手顺序建议。
 
+
+---
+
+## euv 引擎性能审计 2026-09-30 结论:两项已优化,一项已落地(OPT 40)
+
+> 下次审计先读这一节,不要重复提 B1/B2。
+
+### B1 WebGL descriptor cache —— **已存在,不需要做**
+
+`use_program` 早有脏检查(`engine/src/renderer/webgl/impl.rs:2090`):
+`if !Object::is(self.get_bound_program(), candidate)` 才发 `useProgram`。
+实测 WebGL 每帧 **4 次 GL 调用**(clearColor / clear / useProgram / drawArrays),已近下限。
+
+**更重要的是 WebGL2 没有 render-pass descriptor 这个对象** —— 状态直接设在 context 上,
+不存在 WebGPU 那个 `RenderPassDescriptor` 可以缓存。给不存在的东西做缓存是照搬概念。
+
+### B2 静态子树共享(`Rc<[VirtualNode]>`) —— **实测无可回收的浪费**
+
+实测(counter 页一次 signal 更新 / timer 页 6 秒):
+- `createElement` **0** 次、`setAttribute` **0** 次、`append/remove` **0** 次
+- 一次更新只有 **1 次** Reflect 穿越;MutationObserver 6 秒 **0** 条记录
+- `render()` 走 `patch_root` 增量,不是全量替换
+
+细粒度 patch 已在工作,静态子树并没有被重建。**改这个是纯架构复杂度换零收益。**
+
+### B3 事件委托祖先链 —— **已落地为 OPT 40**
+
+改动前实测:event 页一次点击 **71 次 `getAttribute`**,0 次 `composedPath`。
+原因是 `registry/fn.rs` 的 Rust 循环每层祖先一次 `get_attribute` + 一次 `parent_node`
+= 每层 2 次 JS 穿越;该按钮祖先链深 **15** 层。
+
+**做法(用户指定)**:不用 `#[wasm_bindgen(inline_js)]`(那会多出
+`pkg/snippets/.../inlineN.js` 文件,数量随 feature 增长),改为
+**`Mount::setup` 里 `js_sys::eval` 一次性把 `__euvEventIdChain` 注入 globalThis**,
+之后按名调用。注入幂等,重复 mount 不重复 eval。
+
+实现要点:
+- `thread_local! RefCell<Option<Option<Function>>>` 缓存 handle:外层 `Option` = "查过了",
+  内层 `None` = "查过且不存在",这样 host 若剥掉该全局,代价是每页一次探测而非每事件一次。
+  **用 `RefCell` 而不是 `UnsafeCell`**:`Option<Option<Function>>` 不能 move 出裸指针,
+  `UnsafeCell` 版本编译不过(也没有 unsafe 的必要)。
+- `Function::call2(this, a1, a2)` **第一个参数是 this**,要传 `globalThis`,不是事件。
+- 保留纯 Rust 祖先循环作为 fallback:全局缺失 / 返回非数组 / 出现非数字项时退回,
+  **绝不让事件静默失效**。
+- 三个字符串字面量按 §1.3c 进 `const.rs`(`GLOBAL_THIS_NAME` / `EVENT_TARGET_PROP`
+  / 复用已有的 `DATA_EUV_ID`)。
+
+**验收**(浏览器实测,event 页 412 节点):
+- `globalThis.__euvEventIdChain` 是 function ✓
+- `example/www/pkg/snippets` **不存在** ✓
+- 包体 2,316,848 → 2,319,203 bytes(**+2.3KB**,即注入的那段 JS)
+- 包装 global 计数:一次点击触发 **6 次** fast-path walk(回退路径会是 0)✓
+- 正确性:counter 点击 0→1、form 输入 `aabbcc` 全部正常 ✓
+
+**测量陷阱(这次踩了两次)**:祖先遍历的 `getAttribute` 次数**不是**好指标 —— 快路径把
+这些读取搬进了 JS,`getAttribute` 计数不降反升(58~88),因为它连同 click 触发的
+re-render 写入一起计。**唯一可靠的判据是"注入的 global 被调用了几次"**:
+回退路径必然是 0。计数包装必须装在 wasm 缓存 handle **之前**,
+否则 Rust 缓存的是旧 Function,包装无效(会误读成 0 = 快路径没生效)。
+用 `Page.addScriptToEvaluateOnNewDocument` + 轮询等 global 出现再包装。
+
 ## 关联
 
 - euv 专项发现（0.18.36 实测，含 file:line 清单）：`references/euv-perf-findings-0.18.36.md`

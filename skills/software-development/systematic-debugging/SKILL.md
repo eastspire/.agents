@@ -67,6 +67,30 @@ You MUST complete each phase before proceeding to the next.
 
 **BEFORE attempting ANY fix:**
 
+### 0. Never use a destructive git command to isolate a regression
+
+`git checkout HEAD -- <path>`, `git restore <path>`, `git checkout .` and
+`git stash` **discard uncommitted work**. Using one to "bisect which half of my
+change broke it" destroys the other half — and the half you just reverted is
+usually the expensive one, because it is the work you have not re-derived yet.
+
+Real instance: bisecting a blank-page regression, `git checkout HEAD -- engine/`
+reverted a large completed refactor in `engine/`, and `git checkout HEAD -- ui/ core/`
+destroyed three directory splits. Both had to be redone from notes.
+
+**Isolate a regression without destroying anything:**
+
+| Goal | Wrong | Right |
+|---|---|---|
+| Compare against a known-good build | `git checkout HEAD -- .` | `git worktree add /tmp/base HEAD` — a second checkout, your tree untouched |
+| Revert ONE file to HEAD | `git checkout HEAD -- f.rs` | `cp f.rs /tmp/f.rs.bak` first, or `git show HEAD:f.rs > /tmp/f.rs.head` and diff |
+| Test a hypothesis in a scratch dir | reverting in place | copy the tree: `rsync -a --exclude target ./ /tmp/trial/` |
+| Stash for real | `git stash` | `git stash push -u -m "<label>"` **and verify the pop restores it** before continuing |
+
+The un-restored file is unrecoverable once its only copy was a deleted path in the
+index. `git checkout-index -a -f` restores the index but leaves files that the
+refactor *deleted* sitting there as orphans.
+
 ### 1. Read Error Messages Carefully
 
 - Don't skip past errors or warnings

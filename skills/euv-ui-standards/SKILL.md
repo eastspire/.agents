@@ -1,7 +1,7 @@
 ---
 name: euv-ui-standards
-description: '**euv UI 设计规范 + 363 个全局 class! + 38 个 euv_* 函数（28 个组件目录） + 34 个 example page — 用 euv 写页面/组件/UI 时必加载**。涵盖：(1) 全局 class! 注册表（`ui/src/style/class/fn.rs`，共 363 个，按 c_page_/c_home_/c_euv_button_/c_euv_navbar_/c_euv_sidebar_/c_euv_toc_/c_euv_pagination_/c_euv_dropdown_/c_euv_drawer_/c_card_/c_modal_/c_vconsole_/c_nav_/c_app_/c_mobile_/等前缀分组）；(2) design tokens（`vars!` 主题变量 — monochrome 黑/白 + light/dark，spacing 阶 / 字号阶 / 圆角 / 阴影 / 缓动 / safe-area）；(3) 38 个 euv_* 函数（28 个组件目录） API + HTML 结构：渲染组件（euv_button / euv_card / euv_badge / euv_tag / euv_alert / euv_input / euv_checkbox / euv_field / euv_modal / euv_loading / euv_info / euv_logo / euv_header / euv_virtual_list — select/textarea 是 §3.7/§3.8 的裸 div，不用 euv_select）、站点组件（euv_navbar / euv_sidebar / euv_toc / euv_pagination / euv_dropdown / euv_drawer / euv_hero / euv_feature_grid / euv_markdown / euv_result / euv_doc_layout，§3.F）、导航组件（euv_nav_items / euv_nav_item / euv_mobile_nav_item）、路由组件（euv_routes / euv_page_router）、调试组件（euv_vconsole_panel / euv_vconsole_fab / euv_vconsole_drawer / euv_debug）；(4) 全 34 个 example page 列表（about / animation / hooks_async / attrs / badge / binding / browser / camera / canvas / conditional / counter / dynamic / event / file / form / game_2d / game_3d / hooks_i18n / hooks_protect / hooks_timing / keep_alive / lifecycle / list / modal / not_found / observer / select / sse / timer / virtual_list / webgpu_status / websocket + lighting / raytrace 2 个新增 + 1 个 home_page 入口）；(5) page 标准模板（用 `euv_header` 包装标题/icon/subtitle，32/34 页都用此模式，仅 about 是 hero 自定义、webgpu_status 例外）；(6) 响应式（唯一断点 `@media (max-width: 767px)`）+ 深色模式 + a11y（focus-visible 隐藏由 border 反转表达 / touch tap-highlight / prefers-reduced-motion）。触发词:euv ui, euv-ui, euv class!, euv_header, euv_field, euv_virtual_list, euv_routes, euv_vconsole, design tokens, design system, euv design system, design class, euv utility, btn class, card class, modal class, form class, euv page template, euv responsive, euv dark mode, euv theme, vars! 主题, spacing scale, color palette, typography scale, euv atomic CSS、euv_navbar、euv_sidebar、euv_markdown。**当且仅当任务完全不涉及 euv UI 页面/组件/样式**才不加载。'
-  euv example/example 项目 UI 设计系统全量规范。涵盖 363 个全局 class!（注册于 `ui/src/style/class/fn.rs`，单一真源）、design tokens（colors / spacing / font-size / transition / safe-area）、38 个 euv_* 函数（28 个组件目录） HTML 结构（euv_header / euv_field / euv_button / euv_card / euv_badge / euv_tag / euv_alert / euv_input / euv_checkbox / euv_modal / euv_loading / euv_info / euv_logo / euv_virtual_list + 站点组件 euv_navbar / euv_sidebar / euv_toc / euv_pagination / euv_dropdown / euv_drawer / euv_hero / euv_feature_grid / euv_markdown / euv_result / euv_doc_layout（§3.F）+ 路由/导航/调试三组 euv_routes / euv_page_router / euv_nav_items / euv_nav_item / euv_mobile_nav_item / euv_vconsole_panel / euv_vconsole_fab / euv_vconsole_drawer — select/textarea 见 §3.7/§3.8 裸 div）、页面骨架（app 壳、page_router、page_container，**所有非 hero page 都以 `euv_header { icon title subtitle }` 开头**）、断点（@media (max-width: 767px)）、响应式规则、class 编写约定（不在 page 内写 class! 块）。触发词：euv UI、euv 样式、euv design token、c_page_container、c_home_、c_euv_button、c_card、c_badge、c_euv_tag、c_euv_input、c_modal_content、c_nav_item_active、c_app_root、c_app_nav、c_app_main、euv_header、euv_field、euv_routes、euv-ui-standards。'
+description: '**euv UI 设计规范 + 496 个全局 class! + 38 个 euv_* 函数（28 个组件目录） + 34 个 example page — 用 euv 写页面/组件/UI 时必加载**。涵盖：(1) 全局 class! 注册表（`ui/src/style/class/*/fn.rs`，共 496 个，按 c_page_/c_home_/c_euv_button_/c_euv_navbar_/c_euv_sidebar_/c_euv_toc_/c_euv_pagination_/c_euv_dropdown_/c_euv_drawer_/c_card_/c_modal_/c_vconsole_/c_nav_/c_app_/c_mobile_/等前缀分组）；(2) design tokens（`vars!` 主题变量 — monochrome 黑/白 + light/dark，spacing 阶 / 字号阶 / 圆角 / 阴影 / 缓动 / safe-area）；(3) 38 个 euv_* 函数（28 个组件目录） API + HTML 结构：渲染组件（euv_button / euv_card / euv_badge / euv_tag / euv_alert / euv_input / euv_checkbox / euv_field / euv_modal / euv_loading / euv_info / euv_logo / euv_header / euv_virtual_list — select/textarea 是 §3.7/§3.8 的裸 div，不用 euv_select）、站点组件（euv_navbar / euv_sidebar / euv_toc / euv_pagination / euv_dropdown / euv_drawer / euv_hero / euv_feature_grid / euv_markdown / euv_result / euv_doc_layout，§3.F）、导航组件（euv_nav_items / euv_nav_item / euv_mobile_nav_item）、路由组件（euv_routes / euv_page_router）、调试组件（euv_vconsole_panel / euv_vconsole_fab / euv_vconsole_drawer / euv_debug）；(4) 全 34 个 example page 列表（about / animation / hooks_async / attrs / badge / binding / browser / camera / canvas / conditional / counter / dynamic / event / file / form / game_2d / game_3d / hooks_i18n / hooks_protect / hooks_timing / keep_alive / lifecycle / list / modal / not_found / observer / select / sse / timer / virtual_list / webgpu_status / websocket + lighting / raytrace 2 个新增 + 1 个 home_page 入口）；(5) page 标准模板（用 `euv_header` 包装标题/icon/subtitle，32/34 页都用此模式，仅 about 是 hero 自定义、webgpu_status 例外）；(6) 响应式（唯一断点 `@media (max-width: 767px)`）+ 深色模式 + a11y（focus-visible 隐藏由 border 反转表达 / touch tap-highlight / prefers-reduced-motion）。触发词:euv ui, euv-ui, euv class!, euv_header, euv_field, euv_virtual_list, euv_routes, euv_vconsole, design tokens, design system, euv design system, design class, euv utility, btn class, card class, modal class, form class, euv page template, euv responsive, euv dark mode, euv theme, vars! 主题, spacing scale, color palette, typography scale, euv atomic CSS、euv_navbar、euv_sidebar、euv_markdown。**当且仅当任务完全不涉及 euv UI 页面/组件/样式**才不加载。'
+  euv example/example 项目 UI 设计系统全量规范。涵盖 496 个全局 class!（注册于 `ui/src/style/class/*/fn.rs`（data/display/forms/identity/overlay/page/shell 七个文件），单一真源）、design tokens（colors / spacing / font-size / transition / safe-area）、38 个 euv_* 函数（28 个组件目录） HTML 结构（euv_header / euv_field / euv_button / euv_card / euv_badge / euv_tag / euv_alert / euv_input / euv_checkbox / euv_modal / euv_loading / euv_info / euv_logo / euv_virtual_list + 站点组件 euv_navbar / euv_sidebar / euv_toc / euv_pagination / euv_dropdown / euv_drawer / euv_hero / euv_feature_grid / euv_markdown / euv_result / euv_doc_layout（§3.F）+ 路由/导航/调试三组 euv_routes / euv_page_router / euv_nav_items / euv_nav_item / euv_mobile_nav_item / euv_vconsole_panel / euv_vconsole_fab / euv_vconsole_drawer — select/textarea 见 §3.7/§3.8 裸 div）、页面骨架（app 壳、page_router、page_container，**所有非 hero page 都以 `euv_header { icon title subtitle }` 开头**）、断点（@media (max-width: 767px)）、响应式规则、class 编写约定（不在 page 内写 class! 块）。触发词：euv UI、euv 样式、euv design token、c_page_container、c_home_、c_euv_button、c_card、c_badge、c_euv_tag、c_euv_input、c_modal_content、c_nav_item_active、c_app_root、c_app_nav、c_app_main、euv_header、euv_field、euv_routes、euv-ui-standards。'
 ---
 
 # euv example 项目 UI 设计规范（全量）
@@ -14,7 +14,7 @@ description: '**euv UI 设计规范 + 363 个全局 class! + 38 个 euv_* 函数
 
 | I want to...                                                                                                                                | Jump to                                                           |
 | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Find the source files that define all design classes(以 `grep -cE "^\s+pub c_" ui/src/style/class/fn.rs` 实地为准;skill 不维护具体数字) | [Source of Truth](#0-source-of-truth)                             |
+| Find the source files that define all design classes(以 `grep -cE "^\s+pub c_" ui/src/style/class/*/fn.rs` 实地为准;skill 不维护具体数字) | [Source of Truth](#0-source-of-truth)                             |
 | Use `var!(xxx)` to reference colors / spacing / fonts                                                                                       | [Design Tokens](#1-design-tokens)                                 |
 | Build the app shell, page container, nav, main area                                                                                         | [Global Skeleton](#2-global-skeleton)                             |
 | Use a built-in component (button / card / badge / tag / alert / input / checkbox / nav / header / field / virtual_list / vconsole / routes) | [Core Component HTML Templates](#3-core-component-html-templates) |
@@ -28,9 +28,30 @@ description: '**euv UI 设计规范 + 363 个全局 class! + 38 个 euv_* 函数
 
 ---
 
+## 手势识别 hook 的实现约束(2026-09-30 `component/touch/` 实测)
+
+1. **只有 `App::use_window_event(name, FnMut())` 一个事件注册入口,它丢弃 `Event`**
+   (`HookContext::window_event` → `Registry::register_window_event(event_name, FnMut() + 'static)`)。
+   拿不到 `Event` 就拿不到 `TouchEvent.touches()`,所以**手势 hook 不能自注册 window 监听**。
+   正确形态是返回 `Option<Rc<dyn Fn(Event)>>` 四件套,由调用方在 `html!` 上挂
+   `ontouchstart` / `ontouchmove` / `ontouchend` / `ontouchcancel`。
+   真实用例见 `example/src/page/game_2d/view/fn.rs`、`example/src/page/raytrace/view/fn.rs`。
+2. **`#[derive(Data)]` 只支持 struct,enum 上用它会 panic**(`message: #[derive(Data)] is only supported for structs`)。
+   enum 上要 `#[get(type(copy))]` 式的 Data accessor 就不行,只能手写 impl。
+3. **`#[get(type(copy))]` 生成的 getter 返回 `&T` 而不是 `T`**,拿它做数值比较要写
+   `*self.get_x() <= limit`,直接 `self.get_x() <= limit` 报 `expected &f64, found f64`。
+4. **`js_sys::Date::now()` 在非 wasm target 上 panic**(js-sys 依赖 wasm-bindgen 的 JS runtime)。
+   任何要在 host 上跑的 `cargo test` 都会 SIGABRT(不是普通 panic,是 abort)。
+   纯逻辑 hook 必须 `#[cfg(target_arch = "wasm32")]` / `#[cfg(not(...))]` 双分支。
+   同理 `web_sys::Window` 没有 `performance_now()` 方法。
+5. **§17.3 禁 `self.field`**:hook 内部的状态机(非 signal 的 `RefCell` struct)也要用
+   `set_*` / `get_*` accessor,`*self.get_travel() <= config.tap_slop`。
+   判定路径长度是否算 tap 必须**同时**看净位移和累计路程,只看净位移会把"画圈回到原点"
+   的手势误判成 tap。
+
 ## 0. Source of Truth
 
-- 全局 class! 注册表(查 `grep -cE "^\s+pub c_" ui/src/style/class/fn.rs` 实地;skill 不维护具体数字):`ui/src/style/class/fn.rs`(行数 wc -l 即得)
+- 全局 class! 注册表(查 `grep -cE "^\s+pub c_" ui/src/style/class/*/fn.rs` 实地;skill 不维护具体数字):`ui/src/style/class/*/fn.rs`(7 个文件,496 个 class;行数 wc -l 逐个即得)
 - 全局 vars! token：`ui/src/style/var/fn.rs`（light + dark 主题，约 285 行）
 - 全局 CSS reset & keyframes：`ui/src/style/css/fn.rs`（由 `inject_app_global_css()` 注入）
 - 38 个 euv_* 函数（28 个组件目录） view HTML：`ui/src/component/<name>/view/fn.rs`
@@ -47,7 +68,7 @@ description: '**euv UI 设计规范 + 363 个全局 class! + 38 个 euv_* 函数
 
 | 数量类别           | 数值  | 验证命令（源码为准）                                              |
 | ------------------ | ----- | ----------------------------------------------------------------- |
-| 全局 class         | 363   | `grep -cE '^\s*pub c_[a-z_0-9]+ *\{' ui/src/style/class/fn.rs`      |
+| 全局 class         | 496   | `cat ui/src/style/class/*/fn.rs | grep -cE '^\s*pub c_[a-zA-Z0-9_]+'`      |
 | example 本地 class | 20    | `grep -cE '^\s*pub c_[a-z_0-9]+ *\{' example/src/style/class/fn.rs` |
 | euv_* 组件函数     | 38    | `grep -rhoE '^\s*pub (async \|unsafe )?fn euv_[a-z_0-9]+' ui/src/component \| grep -oE 'euv_[a-z_0-9]+' \| sort -u \| wc -l` |
 | 含 euv_* 的组件目录 | 28    | `grep -rlE 'fn euv_[a-z_0-9]+' ui/src/component \| cut -d/ -f4 \| sort -u \| wc -l` |
@@ -59,7 +80,7 @@ description: '**euv UI 设计规范 + 363 个全局 class! + 38 个 euv_* 函数
 
 > **强制约束**：
 >
-> 1. **所有 class! 块都在 `ui/src/style/class/fn.rs` 这一个文件里维护**，page 自己的 `view/fn.rs` **不写** `class! { … }` 块，**只引用** `c_xxx()` 函数。
+> 1. **所有 class! 块都在 `ui/src/style/class/` 下的 `*/fn.rs` 七个文件里维护**，page 自己的 `view/fn.rs` **不写** `class! { … }` 块，**只引用** `c_xxx()` 函数。
 > 2. **必须以 `c_` 前缀 + page/component 名 + 元素名** 命名（例：`c_video_list_viewport`、`c_home_title`、`c_euv_button_primary_md`）。
 > 3. 跨 page 复用的样式，命名里不带 page 名（如 `c_card`、`c_euv_button_primary_md`、`c_app_root`）。
 
@@ -776,7 +797,7 @@ Css::inject_css(r#"
 
 **坑 3：sidebar hover 加粗"左边框"是 `box-shadow: inset 4px 0px 0px var(--accent)`，不是真的 border**
 
-用户原话："侧边栏悬浮确实左侧边框加粗"——但 euv-ui 源码 (`ui/src/style/class/fn.rs` ~line 3672) 的 hover 是用 `box-shadow` 做 inset 视觉，不是改 `border-left-width`。所以 grep `:hover` 找 sidebar rule 时找不到 border 改动是正常的。完整 euv example 的 hover 规则：
+用户原话："侧边栏悬浮确实左侧边框加粗"——但 euv-ui 源码 (`ui/src/style/class/*/fn.rs` ~line 3672) 的 hover 是用 `box-shadow` 做 inset 视觉，不是改 `border-left-width`。所以 grep `:hover` 找 sidebar rule 时找不到 border 改动是正常的。完整 euv example 的 hover 规则：
 
 ```css
 .c_euv_sidebar_link:hover {
@@ -983,11 +1004,11 @@ example 项目现共 **34 个 page**（`example/src/page/` 下 34 个目录；`l
 
 1. `example/src/page/<page_name>/` 建：`mod.rs`（`pub mod view;`）、`view/fn.rs`、可选 `hook/` 子目录（如果用 `use_xxx` 状态）。
 2. `view/fn.rs` 写 `#[component] fn page_<name>(node: VirtualNode<Page<Name>Props>) -> VirtualNode`，全 html!。
-3. **不要**在 `view/fn.rs` 写 `class! { ... }`。新样式 → `git diff` 提给 ui 包 `ui/src/style/class/fn.rs` 加，或本地 `example/src/style/class/fn.rs`（仅当该样式只本页用）。
+3. **不要**在 `view/fn.rs` 写 `class! { ... }`。新样式 → `git diff` 提给 ui 包 `ui/src/style/class/*/fn.rs` 加，或本地 `example/src/style/class/fn.rs`（仅当该样式只本页用）。
 4. `#[component]` 首行 `let Page<Name>Props = node.try_get_props().unwrap_or_default();`（命名强约束，便于后续补 props）。
 5. 视图顺序：`page_router > page_container > euv_header > 若干 euv_card`，卡之间用 `page-block-gap=24px`（mobile 20）隔开（外层 gap 或 `style="margin-top:var!(page-block-gap)"`）。
 6. 路由注册：`example/src/page/mod.rs` 加 `mod <name>;` + `pub(crate) use <name>::*;`，并在 `euv_routes` 的 `routes: Vec<EuvRouteConfig>` 数组里追加 `{ path: "/<name>", component: ... }`。
-7. 导航暴露：在 nav 配置（`example/src/navigation.rs` 或内联）的 `c_nav_items` 数组里追加 `EuvNavItem`，desktop 端点中显示、移动端 drawer 也复用。
+7. 导航暴露：在 nav 配置（`example/src/component/nav/view/fn.rs` 的 `c_nav_items` 数组，或内联）的 `c_nav_items` 里追加 `EuvNavItem`，desktop 端点中显示、移动端 drawer 也复用。
 
 **最小 page（基于 `lifecycle` 真实例子）**：
 
@@ -1069,7 +1090,7 @@ div { class: c_home()
 ## 9. Quick Notes / Anti-Patterns
 
 ❌ 写 class! 时硬编码颜色/间距 — 一律 `var!(xxx)`。
-❌ **在 `class!` 块里给每条属性加 `// 解释这条 CSS 是什么 / 为什么这样写` 的注释** — 属性本身就是 self-documenting，注释占空间、PR # 噪音、euv fmt 不动它们。例外：(a) 解释**结构性**决策（如某个 class 在 mobile vs desktop 的语义区别、跨 framework 的契约变量如 `--euv-mobile-safe-top`），(b) 引用 PR 号的简短 fix 指针（如 `// PR #NNN`）。**禁用的注释**：解释某条 property 作用的 tutorial 段落、warning "不要删除这条"，把 commit message 内容复述到代码里。reviewer 看到 6 行的 CSS rule + 11 行的 `// 因为 iOS WebKit …` = 立即 reject。`ui/src/style/class/fn.rs` 历史上 tab/overlay fix 的 commit 把所有 why 注释合并到 commit message body 即可（PR #231 / PR #232 body 已包含完整 rationale）。2026-09-14 user explicit correction: "删除样式代码里的注释" — 适用于本文件 + `ui/src/style/css/fn.rs` + `ui/src/style/var/fn.rs` + `example/src/style/class/fn.rs`。
+❌ **在 `class!` 块里给每条属性加 `// 解释这条 CSS 是什么 / 为什么这样写` 的注释** — 属性本身就是 self-documenting，注释占空间、PR # 噪音、euv fmt 不动它们。例外：(a) 解释**结构性**决策（如某个 class 在 mobile vs desktop 的语义区别、跨 framework 的契约变量如 `--euv-mobile-safe-top`），(b) 引用 PR 号的简短 fix 指针（如 `// PR #NNN`）。**禁用的注释**：解释某条 property 作用的 tutorial 段落、warning "不要删除这条"，把 commit message 内容复述到代码里。reviewer 看到 6 行的 CSS rule + 11 行的 `// 因为 iOS WebKit …` = 立即 reject。`ui/src/style/class/*/fn.rs` 历史上 tab/overlay fix 的 commit 把所有 why 注释合并到 commit message body 即可（PR #231 / PR #232 body 已包含完整 rationale）。2026-09-14 user explicit correction: "删除样式代码里的注释" — 适用于本文件 + `ui/src/style/css/fn.rs` + `ui/src/style/var/fn.rs` + `example/src/style/class/fn.rs`。
 ❌ 添加阴影、彩色背景、圆角 — design system 是黑/白硬边。
 ❌ 在 page 里写新 class! — 全局或本地 class! 块集中维护。
 ❌ 自定义 `<button class="mybtn" />` — 用 `euv_button`。

@@ -150,7 +150,13 @@ diff /tmp/baseline_audit.log /tmp/yours_audit.log | head -30
 ```
 
 **判定规则**:
-- baseline 已 fail + yours 也 fail → **pre-existing,不是你的错** → 报告时标注 "pre-existing on master,verified by stash+retest" → 不要试图修
+- baseline 已 fail + yours 也 fail → **pre-existing,不是你的错** → 报告时标注 "pre-existing on master,verified by baseline retest" → 不要试图修
+- **monorepo 里全局 FAIL 数没有意义,先按路径过滤再下结论**:
+  ```bash
+  python3 ~/.agents/skills/rust-standards/scripts/audit_rust_standards.py 2>&1 \
+    | grep -c "<你改动的 crate 目录>/"    # 0 = 你碰的目录零违规,哪怕全局 FAIL 一大堆
+  ```
+  报告写「32/39 PASS,7 个 FAIL **零条命中我改的目录**,且与 master baseline 逐字节相同」远比只报一个 FAIL 数字有用 —— 后者会让 reviewer 以为你引入了 7 个违规。
 - baseline pass + yours fail → **你的改动引入** → 必修
 - baseline fail + yours pass → 不可能(你的改动修了 pre-existing),sanity check
 
@@ -160,9 +166,53 @@ diff /tmp/baseline_audit.log /tmp/yours_audit.log | head -30
 - `cargo clippy` 报 8 warnings,你想知道哪个是 pre-existing → 同上
 - `cargo check --workspace` 报 E0425 ambiguous glob,你想知道是不是引入的 → 同上
 
-**变体**:如果只想测某一个 file 的影响(不想 stash 全部),用 `git stash push -- <file>` 或 `git restore <file>`。但**全 stash 最可靠**,因为 PR 里多 file 改动可能互相掩盖问题。
+**首选替代 — `git worktree`,完全不碰 stash 栈**:
 
-**踩坑**:stash pop 后如果有 conflict(例如你改的文件 master 上别人也改过),解决 conflict 后**重新跑完整测试套**,不要假设 stash 前后状态等价。**stash 不是原子事务**。
+`git stash` 是**叠在工作区里已有的 stash 栈之上**的。用户工作区常留着他自己的 `wip:` stash,`git stash pop` 之后弹出的**不一定是你刚压的那条** —— 实测直接产生一片 `UU` / `AA` conflict,清理成本远高于建立 baseline 本身的成本。**先 `git stash list`;非空就别走 stash 路线。**
+
+```bash
+# 1. 有别人的 stash → 走 worktree,别动 stash 栈
+git stash list
+
+# 2. 旁边开一个干净 worktree 当 baseline,主工作区一个字节都不动
+git worktree add /tmp/baseline-wt master
+(cd /tmp/baseline-wt && cargo test --workspace 2>&1 | tee /tmp/baseline_test.log)
+(cargo test --workspace 2>&1 | tee /tmp/yours_test.log)   # 主工作区
+diff /tmp/baseline_test.log /tmp/yours_test.log | head -30
+
+# 3. 收尾
+git worktree remove /tmp/baseline-wt
+```
+
+**只测单个 file 的影响**用 `git restore <file>`(同样不碰 stash 栈)。只有多 file 改动可能互相掩盖时,才需要上面那种全量对照 —— 而那个场景用 worktree 也能做。
+
+**踩坑**:stash 不是原子事务。pop 出 conflict 后要重新跑完整测试套,不要假设前后状态等价;而且**弹错的可能不是你压的那条** —— `git stash list` 确认后再 pop,不要盲 pop。
+
+### 3.4b 撒销验证时别把工作区搞脏 (2026-09-27 教训)
+
+验证「撒销 fix 后测试确实 fail」时,最直觉的做法是:
+
+```bash
+# ❌ 危险:会弄脏 index,且失败时容易忘记恢复
+git checkout master -- <file>
+cargo test <pattern>
+# ... 忘了 cp 回去 / git add 回去 ...
+```
+
+`git checkout <ref> -- <file>` 同时改**工作区和 index**,失败分支里极易留下「工作区是旧版、HEAD 是新版」的错位状态,而 `git status` 会把它显示成 `MM`,很容易被误读成「我改的东西还在」。
+
+**正确做法 — 先备份,恢复后用 diff 对齐 HEAD**:
+
+```bash
+cp <file> /tmp/fixed.rs
+git checkout master -- <file>
+cargo test <pattern>          # 期望 FAIL
+cp /tmp/fixed.rs <file>
+git reset -q HEAD <file>      # 关键:清掉 checkout 带进来的 index 变更
+git diff HEAD -- <file>       # 必须为空 = 与 commit 逐字节一致
+```
+
+`git diff HEAD -- <file>` 为空是唯一的可信证据 —— 不要只看 `git status` 的短格式。
 
 ### 3.5 验证完成后 — Regression test (重要)
 
@@ -190,6 +240,10 @@ fn it_compiles_and_works() {
 
 两边都满足 → test 严格,可推。
 只满足后者 → test 是 placebo,**别推 PR**。
+
+**「撒销后 fail」仍然不够 —— 还要确认 test 真的进入了被测代码路径。** 物理/仿真类测试尤其危险:如果摆放参数让两个物体从头到尾没接触,`resolve_collision` 根本不会被调用,那么**加不加摩擦代码它都 pass**,撒销验证会给出「通过」的假信号(实测踩过:滑动体离地 0.7 单位 + 每步重置初速度,两个 bug 叠加导致全程零接触,摩擦测试加了和没加一样绿)。
+
+判据:**测试要断言「接触发生了」本身**,而不只是断言结果 —— 先断言 `depth > 0` / 碰撞回调被触发,再断言摩擦后的速度;并且步进模拟时**不要每步重置初速度**,否则摩擦再强也永远衰减不到 0。完整配方见 `references/sim-regression-tests.md`。
 
 ---
 
@@ -249,7 +303,9 @@ Closes #NNNN
 | 行为 | 后果 |
 |------|------|
 | 看 issue 标题就选 | tracing 调研错方向,改了 Add→Call 但 issue 讲的是 EnvFilter |
-| regression test 不验证撤销 fix 后还 fail | serde 写了 test 但加不加都过,fix 不可观测 |
+- regression test 不验证撒销 fix 后还 fail | serde 写了 test 但加不加都过,fix 不可观测 |
+- 在 monorepo 里只报全局 audit FAIL 数 | reviewer 以为你引入了那些违规;先按路径过滤再说 |
+| 用 `git stash` 建 baseline 撞上用户自己的 stash | pop 弹错条目 → 一片 conflict;先 `git stash list`,改走 worktree |
 | 工作目录顺手 reformat | PR 噪音,被 maintainer 反感 |
 | 改 doc example 不跑 doc-test | clap #4904 模式必须 verify |
 | `git push origin master` | 违反用户 master 保护规则 (memory 已记) |

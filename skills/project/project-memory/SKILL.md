@@ -35,13 +35,13 @@ All repos live under `~/github/<owner>/<repo>/` (per `repo-projects` user prefer
 | `hyperlane-dev`  | hyperlane Rust framework repos       | eastspire admin, **fork + PR** (active maintainer outside eastspire) |
 | `crates-dev`     | Rust crates release                  | eastspire admin, **fork + PR** (active maintainer outside eastspire) |
 | `euv-dev`        | euv UI framework repos               | eastspire admin, **fork + PR** (`eastspire/euv` fork exists; active maintainer outside eastspire) |
-| `docs-pages`     | Eastspire documentation site         | eastspire admin, **direct push master** (no fork, no PR — promoted 2026-09-05; full admin team is eastspire) |
+| `docs-pages`     | Eastspire documentation site         | eastspire admin; **code via branch+PR, docs/config direct-push** (change-type rule, 2026-09-27) |
 
 ### Key repos — what lives where
 
 | Repo                                 | Owner/org            | What it is                                                | Editing rule                                                  |
 | ------------------------------------ | -------------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
-| `docs-pages/docs`                    | docs-pages           | VuePress source: `src/**/*.md`, sidebar/navbar/config.ts | **Source of truth** for the docs site. Edit + `git push origin master` (Track 1 direct-push; no PR). |
+| `docs-pages/docs`                    | docs-pages           | VuePress source: `src/**/*.md`, sidebar/navbar/config.ts | **Source of truth** for the docs site. Markdown/config edits push straight to `master`; anything else branches and PRs (rule: `git-standards` §3.3a). |
 | `docs-pages/pages`                   | docs-pages           | Vercel build output: `*.html` + assets                    | **Do NOT edit by hand** — `Deploy from @<sha>` commits overwrite it. UI rebuilds on next deploy. |
 | `euv-dev/euv`                        | euv-dev              | The euv framework Rust source (workspace, 6 member crates) | Fork + PR — push feature branches to the `eastspire/euv` fork, PR with `--head eastspire:<branch>`. |
 | `euv-dev/euv-cli`                    | euv-dev              | Standalone CLI binary crate                               | Same as above (fork + PR).                              |
@@ -63,9 +63,9 @@ If unsure which repo a request refers to, **ask before editing** — the wrong r
 
 ### Hard rules
 
-1. **Non-personal repos: all code changes go through PR** — no direct push to base branches there. Personal repos (`eastspire/*`) are exempt: direct push to `master` is allowed (rule changed 2026-08-28).
-2. **Fork-first for every non-personal repo** (rule changed 2026-08-28) — the 4 eastspire orgs (`euv-dev`, `docs-pages`, `crates-dev`, `hyperlane-dev`) count as non-personal: `gh repo fork <org>/<repo>` once per repo (the `eastspire/<repo>` forks for `euv` and `hyperlane-quick-start` already exist), push feature branches to the **fork**, open the PR against the org repo with `--head eastspire:<branch>`.
-3. **Personal repos: no fork, no PR** — repos under the `eastspire` **user account** itself (e.g. `eastspire/.agents`) accept direct commits + pushes to `master`. Forking your own personal repo fails with "single user account cannot own both parent and fork", and the PR step is explicitly waived.
+1. **Route by change type, not by repo (rule rewritten 2026-09-27).** Docs, config, and comment-only changes commit straight to the default branch in **any** repo — no branch, no PR. Only changes to executable code go through the PR cycle. Mixed changes → PR (从严). The mechanical test: `python3 ~/.agents/skills/git-standards/scripts/classify_change.py` → `VERDICT: DIRECT_PUSH | NEEDS_PR`. Full boundary table: `git-standards` §3.3a. This supersedes the earlier "personal repos are exempt, org repos are not" split.
+2. **Branch-and-push-to-upstream for every non-personal repo** (rule changed 2026-08-28, refined 2026-09-25): the 4 eastspire orgs (`euv-dev`, `docs-pages`, `crates-dev`, `hyperlane-dev`) push feature branches **directly to upstream** and open the PR from there — no fork. The `eastspire/<repo>` forks for `euv` and `hyperlane-quick-start` are historical, not the flow. `gh repo fork` on a user-owned repo fails outright ("a single user account cannot own both a parent and fork").
+3. **PR merge deletes the branch** — `gh pr merge <N> --squash --delete-branch`, then `git branch -D <branch>` locally (squash merge means `-d` refuses). Prerequisite: repo-level `delete_branch_on_merge=true`; the CLI flag is a silent no-op without it. All eastspire-owned repos were flipped to `true` in a 2026-09-25 batch.
 4. **Exception: `docs-pages/docs` is private with fork disabled** — skip the fork, use the Contents API + git refs flow below (direct branch on upstream is the only option).
 5. **PR body / commit message in English** — every public PR/issue/commit on these orgs uses English, three conventional sections (`## Summary` / `## Verification` / `## Notes`), no Chinese. Applies to commit messages too (rule extended 2026-08-27).
 6. **`gh pr edit` for GraphQL fields silently fails** when `GH_TOKEN` lacks `read:org` scope. Fall back to REST `PATCH /repos/<owner>/<repo>/issues/<N>` (PRs share the issue endpoint) to update body/title without force-push/reopen.
@@ -87,7 +87,7 @@ git push -u origin <branch>
 gh pr create --repo <owner>/<repo> --base master --head eastspire:<branch> --title "..." --body-file /tmp/pr-body.md
 ```
 
-For Track 1 repos (owner ∈ {`eastspire`, `docs-pages`}): skip everything — commit directly on `master` and `git push origin master`. No fork, no branch, no PR. This applies to `eastspire/*` AND `docs-pages/*` (e.g. `docs-pages/docs`); opening a PR for any of these repos is wrong, not optional.
+For code changes, every repo — `eastspire/*` and the four orgs alike — branches off the default branch, pushes to upstream, opens a PR, and deletes the branch after merge. For docs / config / comment-only changes, skip all of that and push straight to the default branch (rule: `git-standards` §3.3a). Opening a PR for a comment-only change is wrong, not optional — and so is direct-pushing a code change.
 
 ### For large Track 2 repos where `git checkout <tree>` times out (Contents API workaround)
 

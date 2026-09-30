@@ -1,25 +1,40 @@
 ---
 name: gh-pr-creation-workflow
-description: Single-track GitHub contribution workflow for eastspire-owned namespaces (eastspire/* + hyperlane-dev/* + euv-dev/* + crates-dev/* + docs-pages/*). For any of these repos the agent branches from the upstream default branch, pushes the branch directly to upstream, opens a PR, and auto-deletes the head branch once the PR merges. Third-party repos where eastspire is not admin still go through `gh repo fork` + PR. Use when deciding whether to push directly, branch, fork, or open a PR; covers the gh CLI commands, remote layout, and the eastspire-admin exception for fork-disabled private repos.
+description: GitHub contribution workflow for eastspire-owned namespaces (eastspire/* + hyperlane-dev/* + euv-dev/* + crates-dev/* + docs-pages/*). **Decide the change type first, the namespace second: docs / config / comment-only changes commit straight to the default branch with no PR; only changes to executable code branch, push, open a PR, and delete the branch after merge.** Third-party repos where eastspire is not admin still go through `gh repo fork` + PR. Use when deciding whether to push directly, branch, fork, or open a PR; covers the gh CLI commands, remote layout, the mechanical `classify_change.py` classifier, branch deletion (including the repo-level `delete_branch_on_merge=true` prerequisite), and the eastspire-admin exception for fork-disabled private repos.
 license: MIT
 ---
 
 # GitHub contribution workflow (eastspire)
 
-Single-track workflow that decides **where to push** and **whether to open a PR**
-based on whether eastspire has admin/maintain/write on the repo's namespace.
-Replaces the 3-track scheme (2026-08-28 → 2026-09-25) where `eastspire/*` and
-`docs-pages/*` direct-pushed to master with no PR while everything else
-fork-firsted. As of 2026-09-25 (user request "更新 skill 所有我的仓库和我的组织
-下的代码提交直接基于源仓库主分支牵出新的分支提交 PR，而不是 fork 仓库，PR 合并
-之后自动删除历史分支，保证分支干净") ALL source-side contributions flow through
-the same PR cycle so the repo stays a clean merge graph and the branch list
-stays empty after merge.
+Two dimensions decide every contribution: **what changed** (docs / config /
+comments vs. executable code) and **where the repo lives** (eastspire-owned vs.
+third-party). The first decides *whether* you open a PR, the second decides
+*how* the branch reaches the repo. Run them in that order.
+
+This replaced the 3-track scheme (2026-08-28 → 2026-09-25) where `eastspire/*`
+and `docs-pages/*` direct-pushed to master with no PR while everything else
+fork-firsted (2026-09-25: all source-side contributions through one PR cycle), and
+it further replaces the 2026-09-27 per-repo split, where every change in every
+namespace went through a PR and a `README.md` typo fix cost a full PR cycle.
+**Now the type of change decides.**
 
 ## Decision tree (decide in 3 seconds)
 
+**Check the change type FIRST, then the namespace.** The type decides *whether*
+you open a PR; the namespace decides *how* you get the branch there (push to
+upstream vs. fork). Getting the order wrong means either a pointless PR for a
+typo fix, or an unreviewed code change shipped to `master`.
+
 ```
-Where does this repo live?
+STEP 1 — What does the diff change?            (run classify_change.py)
+├─ docs / config only, or every changed line is
+│  a comment / docstring / blank line          → DIRECT_PUSH, no PR. STOP.
+│  (SKILL.md, README.md, *.yml, Cargo.toml, /// in a .rs file, …)
+├─ mixed docs+code, or anything binary,
+│  generated, or a lockfile                    → NEEDS_PR. Go to STEP 2.
+└─ any changed line of executable code         → NEEDS_PR. Go to STEP 2.
+
+STEP 2 — Where does the repo live?             (decides the mechanics only)
 ├─ eastspire/*                       (personal)           ─┐
 ├─ hyperlane-dev/*                   (eastspire admin)     │
 ├─ euv-dev/*                         (eastspire admin)     ├─→ BRANCH + PUSH-TO-UPSTREAM + PR + --delete-branch
@@ -30,12 +45,48 @@ Where does this repo live?
    └─ forking disabled + private     → Contents/git-refs API + branch on upstream + PR
 ```
 
-The split is **per-repo**, not per-change. A 1-line typo follows the same flow
-as a 2000-line refactor. The only special case is **personal forks under
-`eastspire/*` of third-party repos** (`eastspire/serde`, `eastspire/euv`
-mirror, etc.) — those still mirror their upstream through `gh repo fork` and
-use the legacy Track 2 flow when contributing back, because direct push to
-the third party isn't permitted.
+The mechanical classifier, so step 1 is a command and not a judgement call:
+
+```bash
+python3 ~/.agents/skills/git-standards/scripts/classify_change.py
+# VERDICT: DIRECT_PUSH → commit on the default branch, stop
+# VERDICT: NEEDS_PR    → continue below
+```
+
+Until 2026-09-27 the split was **per-repo** — "a 1-line typo follows the same
+flow as a 2000-line refactor". That is now wrong: the user's rule is
+**「对于修改文档和修改配置的改动请直接提交不要创建 pr，只有对于代码造成了改动才需要
+创建 pr，pr 合并之后分支需要删除」** plus **「修改代码的注释也是直接提交不需要创建
+pr」**. A comment-only or config change goes direct **in every namespace**,
+including `euv-dev/*` and `crates-dev/*` — not only in `eastspire/.agents`.
+Full rule and boundary table: `git-standards` §3.3a.
+
+The one remaining per-repo carve-out: **personal forks under `eastspire/*` of
+third-party repos** (`eastspire/serde`, `eastspire/euv` mirror, etc.) — those
+still mirror their upstream through `gh repo fork` and use the legacy Track 2
+flow when contributing back, because direct push to the third party isn't
+permitted.
+
+## Direct-push route (docs / config / comments — no PR)
+
+When step 1 returns DIRECT_PUSH, there is no branch, no PR and no review. Skip
+straight to committing on the default branch:
+
+```bash
+git fetch origin && git checkout <default-branch> && git pull --ff-only origin <default-branch>
+git add <only-your-files>          # stage precisely, no -A
+git commit -m "<type>(<scope>): <subject>" -m "<body wrapped 72, English>"
+git push origin <default-branch>   # direct, no PR
+```
+
+Applies in **every** namespace — `eastspire/*`, `euv-dev/*`, `hyperlane-dev/*`,
+`crates-dev/*`, `docs-pages/*`. `.agents` (the skill library) is the everyday
+example, not a special case.
+
+No branch means no `--delete-branch` step: nothing was created, so nothing has
+to be cleaned up. If branch protection rejects the push, that repo does not
+accept direct commits — fall back to the full PR flow and say so rather than
+retrying with an admin token.
 
 ## Universal flow for eastspire-owned repos
 
@@ -314,11 +365,13 @@ public clones work fine.
     `clap-rs/clap`), use the **legacy Track 2 fork-first flow**
     documented in *Exception: personal forks under `eastspire/*`*
     above.
-11. **`docs-pages/*` is now main-flow (no special-case)** — direct
+11. **`docs-pages/*` is main-flow for code (no special-case)** — direct
     push to upstream + PR + `--delete-branch`, same as `euv-dev` and
     `hyperlane-dev`. The old 2026-09-05 "direct push master, no PR"
-    shortcut is retired. `docs-pages/pages` (Vercel build output)
-    still should not be edited directly — edit `docs-pages/docs`
+    shortcut is retired **for code changes**. Docs and config changes in
+    `docs-pages/*` are now direct-push like everywhere else (per the
+    change-type rule, not per-org), and `docs-pages/pages` (Vercel build
+    output) still should not be edited directly — edit `docs-pages/docs`
     (VuePress source) and let the auto-deploy regenerate.
 12. **`gh pr view N` stdout is often empty** with restricted-scope GH_TOKEN. Use `gh pr view N --json ...` or `gh api repos/<org>/<repo>/pulls/N` for reliable reads.
 13. **`gh pr edit --title` silently fails** when token lacks `read:org` (GraphQL path). For renaming PRs, use REST: `curl -X PATCH -H "Authorization: token ***" https://api.github.com/repos/<org>/<repo>/pulls/<N> -d @payload.json`.
