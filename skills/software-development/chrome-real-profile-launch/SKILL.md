@@ -1,7 +1,7 @@
 ---
 name: chrome-real-profile-launch
-description: "Use when browser automation must run with the user's REAL Chrome logins. Always go through scripts/run.sh — it stops previous CDP browsers, force-overwrites the scratch copy, and launches Chrome. Never drive the system profile directly."
-version: 2.0.0
+description: "Use when browser automation must run with the user's REAL Chrome logins. Always go through scripts/run.sh — it reuses one shared Chrome instance across sessions (new tab, never a relaunch) and only cold-starts when none is healthy. Never drive the system profile directly."
+version: 3.0.0
 author: local
 license: MIT
 platforms: [macos, linux, windows]
@@ -18,7 +18,11 @@ metadata:
 **Every** browser operation that needs the user's real logins goes through
 `scripts/run.sh`. There is no other supported path.
 
-Three requirements, all mandatory, all enforced by that script:
+Four requirements, all mandatory, all enforced by that script:
+
+0. **One shared instance per machine, one port, one tab per caller.** Several
+   Hermes sessions need the browser at once. They must not each start their
+   own — see "Concurrent sessions" below.
 
 1. **Never drive the real profile directory.** It is only ever read.
 2. **Never start without stopping the previous CDP browser.** A stale instance
@@ -33,23 +37,61 @@ Three requirements, all mandatory, all enforced by that script:
 ```bash
 S="$HOME/.agents/skills/software-development/chrome-real-profile-launch/scripts"
 
-bash "$S/run.sh"                  # auto-pick a free port
-bash "$S/run.sh" --port 9223      # explicit port
-bash "$S/run.sh" --work /path/dir # custom scratch dir
-bash "$S/run.sh" --headed         # visible window instead of headless
-bash "$S/run.sh" --stop           # just stop CDP browsers, copy nothing
-bash "$S/run.sh" --keep           # reuse the existing copy, skip step 2
+bash "$S/run.sh"                          # reuse or start; opens a tab
+bash "$S/run.sh" https://example.com      # same, on a given URL
+bash "$S/run.sh" --no-tab                 # just make sure one is running
+bash "$S/run.sh" --port 9223              # pin the shared port
+bash "$S/run.sh" --work /path/dir         # custom scratch dir
+bash "$S/run.sh" --status                 # report, change nothing
+bash "$S/run.sh" --headed                 # visible window
+bash "$S/run.sh" --fresh                  # force a clean start
+bash "$S/run.sh" --stop                   # stop the shared instance
 ```
 
-`run.sh` exits 0 only after CDP answers, and prints the browser version. It
-refuses to launch if the copy is missing `Default/Cookies`, and it detects the
-singleton failure explicitly rather than timing out.
+`run.sh` exits 0 only after a browser is actually serving the request, and
+prints the browser version. It refuses to launch if the copy is missing
+`Default/Cookies`, and it detects the singleton failure explicitly rather than
+timing out.
 
-Port selection is automatic and free to override: `run.sh` scans 9223-9228 for
-a free port because 9222 is agent-browser's default and collides often. The
-port is only yours to choose — there is no fixed constant.
+**Calling it twice is the normal case, not an error.** The first call starts
+the shared instance; every later call reuses it and returns a new tab. Do not
+"clean up" a browser you are about to reuse, and do not call `stop-cdp.sh`
+because you finished one piece of work while another session is mid-task.
+
+Port selection is automatic and free to override: the first launch scans
+9223-9228 and then publishes its choice to
+`~/.hermes/state/chrome-real-profile.port`, so later sessions join that same
+port instead of starting a second browser. 9222 is skipped because it is
+agent-browser's default and collides often.
+
+## Concurrent sessions
+
+Sessions share a browser. They do not each get one.
+
+| Situation | What `run.sh` does |
+|---|---|
+| An instance is already healthy | Opens a new tab. Nothing is stopped, copied or relaunched. |
+| No instance, several sessions arrive at once | Exactly one takes the lock and cold-starts; the others wait, then find it ready and open a tab. |
+| A session wants a clean state | Pass `--fresh` explicitly, knowing it evicts every other session's tabs. |
+
+The `mkdir` lock covers the start path because "check, then start" is a race:
+without it, two sessions both see nothing and each `rm -rf` the other's
+half-built profile. A lock older than 10 minutes is treated as abandoned and
+cleared, so a killed process cannot wedge every future session.
+
+Each call gets its own tab, so two sessions never fight over one page. Tabs
+accumulate — a session that opened twenty leaves twenty. Close tabs via CDP
+(`/json/close/<targetId>`) rather than restarting the browser, because
+restarting is exactly what disrupts the other sessions.
+
+Measured with 4 concurrent sessions from cold: 1 performed the start, 3 waited
+and reused, the profile was copied once, one port was in use, and 4 tabs
+existed. A second wave of 4 all reused, took no new port, and grew the target
+count instead.
 
 ## What run.sh does, in order
+
+Only when no healthy instance exists. If one does, none of this runs.
 
 | Step | Action | Why it is not optional |
 |---|---|---|
@@ -86,9 +128,16 @@ curl -s -X PUT "http://127.0.0.1:9241/json/new?about:blank"
 ## Verify the skill itself
 
 ```bash
-bash "$S/verify.sh"              # full flow, 16 checks
-bash "$S/negative-control.sh"    # proves the Singleton pitfall is real
+bash "$S/verify.sh"                 # full flow, 16 checks
+bash "$S/concurrency-test.sh 4      # 4 sessions race for one instance
+bash "$S/negative-control.sh"       # proves the Singleton pitfall is real
 ```
+
+`concurrency-test.sh` is what keeps the sharing claim honest. It fires N
+sessions simultaneously from cold and fails unless exactly one did the start,
+the profile was copied once, only one CDP port is in use, the state file
+agrees, and a second wave reuses the same pid. If it ever reports two cold
+starts, the lock has regressed.
 
 `negative-control.sh` is the part that makes the pitfall section falsifiable: it
 copies **without** the `Singleton*` exclusion and asserts Chrome dies. If it ever
@@ -113,6 +162,12 @@ removed a planted `STALE_MARKER` (force-overwrite), and came back ready.
   looks logged out for a reason that has nothing to do with cookies.
 - **A fixed readiness sleep.** After `stop-cdp` frees 4 GB of memory the machine
   is busy; poll the log's `DevTools listening` line instead.
+- **Treating a live instance as something to clean up.** Stopping it because
+  *your* task finished pulls the ground out from under every other session.
+  The lifecycle is the shared instance's, not the caller's.
+- **Tabs as a shared resource.** Each session gets its own tab; they are not
+  reused across sessions, and a long session leaves them behind. Close them
+  over CDP.
 - **A boolean guard read backwards.** `if [ "$READY" -ne 0 ]` reports failure
   when `READY=1` means success — it failed the whole flow twice before a `bash -x`
   trace showed `[ 1 -ne 0 ]` returning true. When a readiness flag is involved,

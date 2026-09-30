@@ -1193,8 +1193,8 @@
       "sourceType": "local",
       "skillPath": "skills/software-development/chrome-real-profile-launch/SKILL.md",
       "installedAt": "2026-09-30T14:23:40.504Z",
-      "updatedAt": "2026-09-30T14:33:40.379Z",
-      "skillFolderHash": "031c70c5625cbf00f3dd916169d50d0a6aa8dd68"
+      "updatedAt": "2026-09-30T14:44:45.554Z",
+      "skillFolderHash": "1978ab505fe8f7dd54f4e5846efc830ae091ced7"
     },
     "hermes-agent-skill-authoring": {
       "source": "local",
