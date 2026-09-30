@@ -15,13 +15,20 @@ metadata:
 
 ## What this skill actually concludes
 
-Posting to X without an X API app is **not reliably possible**, and the
-obvious workaround **destroys the user's unsaved drafts**. Both statements were
-measured on 2026-09-30 against a logged-in `@eastspire_sheng` session; the
-evidence is below so nobody re-derives it.
+Two separate findings, both measured on 2026-09-30 against a logged-in
+`@eastspire_sheng` session. The first was wrong in this skill's earlier
+revision and is corrected below; the correction matters more than the
+conclusion.
 
-Use **`xurl`** for posting. It is the official API and needs one app
-registered. Use the browser only to *read*.
+1. **The restored drafts are LOCAL, not on x.com.** The drafts dialog is
+   empty (`emptyState`: "保留想法 / 还没有准备好发帖？") while a new composer
+   still comes back with text. X is restoring unsent content out of this
+   machine's own browser storage. Therefore the drafts *can* be cleared, and
+   clearing them cannot destroy anything on the account.
+2. **Posting still needs an API app.** The internal endpoints refuse a web
+   session even with a valid bearer, so the browser is for reading.
+
+Use **`xurl`** for posting. Use the browser only to *read*.
 
 ## The failure that matters: X restores drafts into every new composer tab
 
@@ -38,8 +45,16 @@ Measured directly.
    - `location.href` was the tab we opened, so the CDP target was correct.
    - The new target id was not in the pre-existing target list, so it was
      genuinely a new tab.
-   - `localStorage` and `sessionStorage` held no draft-like key, so the
-     restoration comes from the server, not the browser.
+   - `localStorage` and `sessionStorage` held no draft-like key, which at the
+     time looked like proof the drafts were server-side. **That inference was
+     wrong.** The storage is in IndexedDB, and the drafts dialog being empty
+     while a composer restores text is what actually settles it: nothing is
+     stored on x.com.
+
+Each open produced a *different* draft, so it is a pool, not one slot. Closing
+composer tabs does not help: after closing every composer tab on a freshly
+launched instance, a new composer still came back with text. Discarding the
+restored draft via `app-bar-close` also does not help.
 
 Consequence: **any "open a new tab, type, click Post" automation will overwrite
 and publish whichever draft X happens to restore.** There is no selector that
@@ -48,6 +63,52 @@ avoids this; the selector finds a real editor that already has text in it.
 What saved the drafts was a content assertion, not a better selector: the script
 compared the editor's text against what it was about to type and refused. If
 that check is missing, the user's unfinished tweet goes out under automation.
+
+## Clearing the local drafts (the actual fix)
+
+Because the drafts are local, `Storage.clearDataForOrigin` over CDP removes
+them and leaves the login alone — **do not include `cookies` in
+`storageTypes`** or the session is lost and has to be re-established.
+
+```python
+c.send("Storage.clearDataForOrigin",
+       origin="https://x.com",
+       storageTypes="local_storage,indexeddb,cache_storage,service_workers")
+```
+
+Then verify: open a composer and read
+`document.querySelector('[data-testid="tweetText"]').textContent`. Empty means
+the pool is clear.
+
+**Do not use `indexedDB.databases()` in the page.** It hangs indefinitely
+under headless Chrome — measured twice, each time a multi-minute stall. The
+protocol method does not depend on the page and is the one to use.
+
+With a clean pool the composer is safe to drive: type with
+`document.execCommand('insertText')`, re-read the editor and compare it to
+what was intended, then click `[data-testid="tweetButton"]`.
+
+## Two CDP client bugs that cost hours here
+
+Both were silent, which is what made them expensive. Use a client that handles
+them, or copy `scripts/cdp.py` from this skill.
+
+**WebSocket control frames are not JSON.** opcodes 8/9/10 (close/ping/pong) and
+2 (binary) share the framing but not the payload. Parsing a ping as JSON raises
+`UnicodeDecodeError`; swallowing that as "no reply" makes every
+`Runtime.evaluate` look like it never ran. Check `b1 & 0x0F` before decoding.
+
+**The first few evaluates on a new tab lose their replies.** While the renderer
+swaps execution contexts the reply never comes back. Measured: 33 s of warm-up
+on a fresh target, then 0.5 s per call. Fail fast (a 6 s wait) and retry
+immediately — a long wait per attempt turns this into minutes of apparent
+hang, and an unbounded wait produced a 14-minute freeze here. Budget ~35 s of
+warm-up per new tab and reuse one tab when several calls are needed.
+
+A `js()` that returns `None` on failure is the root of a whole class of false
+conclusions. It must return a distinguishable error marker, and every caller
+must check it. Two separate rounds concluded "the click did nothing" when the
+real problem was a lost reply.
 
 ## Why not the internal API
 
@@ -130,6 +191,21 @@ Guardrails when reading:
 - A login check that only looks for the absence of a login link is not proof.
   Verify with body text, and prefer an element the logged-out page lacks, such
   as `[data-testid="SideNav_AccountSwitcher_Button"]`.
+
+## The scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts/cdp.py` | Minimal CDP client. Control-frame handling, retrying `js()`, `set_port()`, `composer_text()`. |
+| `scripts/selftest.py` | Verifies the client before trusting it. **Run this first.** |
+| `scripts/bench.py` | Measures evaluate latency. Use it to tell warm-up from a real stall. |
+| `scripts/probe_draft_restore.py` | Re-derives the draft-restore finding and refuses rather than acting. |
+
+`selftest.py` earns its place: on its first run it reported `close_tab` as
+broken when the check's own arithmetic was wrong (the preceding open had
+already restored the count), and it flagged a "slow" client that was really
+just doing its warm-up. Both were faults in the check, and neither was
+visible without running it.
 
 ## Never
 
