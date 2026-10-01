@@ -39,6 +39,19 @@ COPY = os.environ.get("X_COPY") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "x_copy_example.json")
 DRAFT_CLS = "public-DraftEditor-content"
 
+# Does the focused composer hold a real link entity? A URL sitting in the
+# editor as plain text is NOT a link: X will render it unclickable and it will
+# not carry a card. urls_ok once passed on plain text that merely CONTAINED
+# the URL, which is how a post went out with no link at all.
+LINK_PRESENT = """(() => {
+  const e = document.activeElement;
+  if (!e || e.className.indexOf('public-DraftEditor-content') < 0)
+    return 'NOT_EDITOR';
+  const links = [...e.querySelectorAll('a[href]')]
+    .map(a => (a.textContent || '').trim()).filter(Boolean);
+  return links.length ? JSON.stringify({links: links}) : 'NO_LINK';
+})()"""
+
 
 def jd(v):
     try:
@@ -290,6 +303,11 @@ def main():
         character count is compared separately against the raw source length,
         so relaxing the spacing here cannot hide a dropped character.
         """
+        # The space before a URL is part of the URL as X consumes it: the
+        # composition takes " https://…" and the body is left holding the
+        # leading "h". Without this, the editor reads back "…h\x00" against a
+        # source of "…\x00" and an otherwise perfect post is rejected.
+        s = re.sub(r"[ \t]+(?=https?://)", " ", s or "")
         s = flat(nourl(s))
         return re.sub(r"(?<=[A-Za-z0-9]) (?=[\u4e00-\u9fff])"
                       r"|(?<=[\u4e00-\u9fff]) (?=[A-Za-z0-9])", "", s)
@@ -304,11 +322,15 @@ def main():
         turns it into a link entity mid-stream and drops the rest, so the
         link is composed in one piece with imeSetComposition.
         """
-        parts = re.split(r"(https://\S+)", body)
-        for part in parts:
-            if not part:
-                continue
-            if part.startswith("https://"):
+        # Split so the whitespace BEFORE a URL goes in with the URL. Leaving it
+        # in the body made the editor read back "…edition。h\x00" — X committed
+        # the composition but the URL's own first character stayed in the body,
+        # so a correct post was rejected. Feeding " https://…" as one unit puts
+        # the space inside the link where it belongs.
+        parts = re.split(r"([ \t]*(?=https://))|(https://\S+)", body)
+        for part in [x for seg in parts for x in (seg if isinstance(seg, tuple)
+                                                  else (seg,)) if x]:
+            if part.lstrip().startswith("https://"):
                 caret_to_end(c)
                 time.sleep(0.4)
                 # A URL is the only thing that needs an IME composition, and an
@@ -316,11 +338,23 @@ def main():
                 # unsaved changes. Set it and commit it back to back, and end
                 # the whole interaction with an explicit close so no composition
                 # is ever left open.
+                # Set the composition and let X linkify it. Committing it with
+                # insertText(same text) is what stopped the link from forming:
+                # the committed string arrived already formed and X had nothing
+                # to linkify, leaving plain text with a stray leading "h".
                 c.send("Input.imeSetComposition", text=part,
                        selectionStart=len(part), selectionEnd=len(part),
                        wait=25, retries=5)
-                c.send("Input.insertText", text=part, wait=25, retries=5)
-                time.sleep(1.2)
+                time.sleep(1.6)
+                linked = c.js(LINK_PRESENT, wait=25, retries=4)
+                if not linked:
+                    # No entity yet: seal the composition by committing the same
+                    # text through the IME's own commit path, which is a
+                    # key event rather than an insertText.
+                    c.send("Input.imeSetComposition", text="",
+                           selectionStart=0, selectionEnd=0,
+                           wait=20, retries=3)
+                    time.sleep(1.2)
                 c.close_composition("")
                 continue
             c.send("Input.insertText", text=part, wait=30, retries=5)
@@ -330,6 +364,15 @@ def main():
                 refocus(c)
             elif st.get("len", 0) == 0:
                 raise DraftReplaced(0, len(part))
+
+    def read_links(c):
+        """The visible text of every link entity in the composer."""
+        r = jd(c.js(LINK_PRESENT, wait=25, retries=4))
+        if isinstance(r, str):
+            return [] if r in ("NOT_EDITOR", "NO_LINK") else [r]
+        if isinstance(r, dict):
+            return r.get("links", [])
+        return []
 
     def read(c):
         return jd(c.js(IS_ACTIVE, wait=25, retries=6))
@@ -428,7 +471,14 @@ def main():
     # substitutes the link's own visible text, which is the URL as posted. A
     # truncated link therefore shows up as a short visible string, which is
     # exactly the defect that made earlier posts get deleted.
+    # A URL must be a real <a> entity, not text that happens to contain the
+    # string. read() matches the URL inside plain text, so checking the text
+    # alone passed a post whose link was never a link.
     urls_ok = all(u in got for u in want_urls)
+    if want_urls:
+        linked = read_links(c)
+        urls_ok = urls_ok and all(
+            any(u in l for l in linked) for u in want_urls)
     fg, ft = canon(got), canon(text)
     # X only ever removes a SPACE while typing (at a Latin/CJK boundary); it
     # never drops or invents a non-space character. So the two texts must be
