@@ -1,13 +1,27 @@
 #!/usr/bin/env python3
 """
-Verify §1.3 / §1.3a / §1.3c keyword-file purity + relaxed sub-file
-use rule for any Rust project.
+Verify §1.3 / §1.3a / §1.3c / §1.4 keyword-file purity + filename
++ relaxed sub-file use rule for any Rust project.
+
+§1.4 (added 2026-09-30, user directive): every `.rs` file under src/ must
+be named after a Rust keyword.  A file called `inline.rs` is a violation even
+when its contents are correct, because the name itself is what makes the
+layout navigable — `fn.rs` says "functions live here" without opening it.
+
+  euv:  cli/src/build/inline.rs existed for months and no hook caught it,
+        because `audit_one()` returned `[]` for any basename outside
+        KEYWORD_BASENAMES.  A file the rule does not recognise was treated as
+        a file the rule does not apply to, so the one case worth reporting
+        was the one case silently dropped.  The exemption list below is now
+        the ONLY way out.
 
 Per rust-standards (2026-09-26 user tightening + sixth-iteration relaxation):
 
-  • Each file under src/ must be exactly one of the 9 keyword basenames:
+  • Each file under src/ must be exactly one of the keyword basenames:
         const.rs / static.rs / fn.rs / enum.rs / struct.rs /
-        trait.rs / impl.rs / type.rs / mod.rs
+        trait.rs / impl.rs / type.rs / mod.rs / macro.rs
+    A name outside this set is itself a §1.4 violation (added 2026-09-30),
+    not a file the rule ignores.
     Exempt: lib.rs / raw_html.rs / main.rs / bin/<name>.rs / build.rs
     and the whole tests/ tree.
 
@@ -78,6 +92,10 @@ FORBIDDEN_DECLS: dict[str, str] = {
     "trait.rs":  r"^(pub |pub\(crate\) )?(struct |enum |fn |impl |type )",
     "impl.rs":   r"^(pub |pub\(crate\) )?(struct |enum |fn |trait |type )",
     "type.rs":   r"^(pub |pub\(crate\) )?(struct |enum |fn |impl |trait )",
+    # macro.rs holds the `macro_rules!` bodies, which are function-shaped:
+    # `macro_rules! name { ... }` and the `pub use name;` re-export. A real
+    # `fn`/`struct`/`impl` in the same file is a misplaced declaration.
+    "macro.rs":  r"^(pub |pub\(crate\) )?(struct |enum |trait |impl |type )",
     # mod.rs is the only keyword file that itself contains sub-module
     # declarations — `mod r#xxx;` is allowed (and required).  No
     # `pub struct` / `pub fn` / etc. at column 0 in mod.rs.
@@ -130,6 +148,12 @@ def _is_exempt(path: Path, root: Path) -> bool:
     if "tests" in parts:
         return True
     if "target" in parts or ".cargo" in parts:
+        return True
+    # `tmp/` is scratch output: `crate fmt` / integration tests write throwaway
+    # projects there (hyperlane and ctares both have a gitignored
+    # cli/tmp/test_fmt/test.rs left over from a fmt test run). Those are not
+    # part of the crate's source layout and must not be judged by §1.4.
+    if "tmp" in parts:
         return True
     bn = path.name
     if bn in EXEMPT_BASENAMES:
@@ -250,6 +274,13 @@ def _check_use_centralized(
     first = _first_non_comment_line(text)
     if first is None:
         return []
+    # §14.1 makes `tests/` the one place a `use crate_name::*;` is
+    # *mandatory*: a test module lives outside the crate, so it has no
+    # `super::*` chain to inherit. Flagging it here contradicts §14.1
+    # directly, and every `tests/mod.rs` in every repo trips it. §6.4 is
+    # about src/, where lib.rs already re-exports everything.
+    if "tests" in path.parts:
+        return []
     leading_line_no = first[0]
     for i, line in enumerate(lines, start=1):
         if inside_raw[i - 1]:
@@ -271,13 +302,44 @@ def _check_use_centralized(
     return violations
 
 
-def audit_one(path: Path, root: Path) -> list[str]:
-    """Return all violations for this single file."""
+def _infer_root(path: Path) -> Path:
+    """Best-effort crate root for a file, so `audit_one(path)` can stand alone.
+
+    Walks up from the file to the nearest ancestor whose child directory is
+    `src`, which is the shape every crate in every repo here has. Falls back
+    to the file's own parent when no such ancestor exists, so the relative
+    label degrades to the bare file name instead of raising.
+    """
+    for candidate in [path.parent, *path.parents]:
+        if candidate.name == "src":
+            return candidate.parent
+    return path.parent
+
+
+def audit_one(path: Path, root: Path | None = None) -> list[str]:
+    """Return all violations for this single file.
+
+    `root` is optional so this entry point matches the signature
+    `staged_file_gate.py` calls it with (`audit_one(path)`). When omitted it
+    is derived from the path, which is only used to render a repo-relative
+    label in the message and to recognise `tests/` / `target/` components —
+    both still resolve correctly from an absolute path.
+    """
+    if root is None:
+        root = _infer_root(path)
     if _is_exempt(path, root):
         return []
     basename = path.name
     if basename not in KEYWORD_BASENAMES:
-        return []
+        # §1.4: an unrecognised basename is a violation in its own right.
+        # Returning [] here used to make a badly-named file invisible to
+        # every check, which is how cli/src/build/inline.rs survived.
+        rel = path.relative_to(root)
+        keywords = ", ".join(sorted(n[:-3] for n in KEYWORD_BASENAMES))
+        return [
+            f"{rel}: §1.4: `{basename}` is not a keyword file name; "
+            f"move its contents into one of {keywords}"
+        ]
     try:
         text = path.read_text()
     except (OSError, UnicodeDecodeError):

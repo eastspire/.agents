@@ -373,6 +373,123 @@ git status --short | wc -l         # 核对已恢复
 `# Arguments` 写的是**参数类型**不是参数名:`- &Path - ...` 而不是 `- dir - ...`,否则报
 `type literal 'dir' does not match any parameter type` + `does not cover all signature types`。
 
+## 校验脚本输出**绝对路径**,`grep '^engine/'` 永远匹配 0 行(2026-09-30 euv-engine 实测)
+
+`verify_doc_comment_format.py` / `verify_hardcoded_strings.py` 打印的是
+`Path(sys.argv[1]).resolve()` 拼出的**绝对**路径。传 `.` 时输出
+`/Users/sqs/code/euv/engine/src/...`,不是 `engine/src/...`。所以:
+
+```bash
+python3 ~/.agents/skills/rust-standards/scripts/verify_doc_comment_format.py . \
+  | grep '^engine/'          # ❌ 恒 0 行,看起来像「干净」
+  | grep 'engine/src/'       # ✅ grep 路径片段,不锚定行首
+```
+
+**「0 行」在这里有两种含义:真的干净,或者 grep 写错了。** 分不清就别下结论 ——
+先去掉 grep 跑一次,确认脚本自己输出了 `=== doc-comment format: N violation(s) ===`
+汇总行,再解释那个 0。派发子 agent 前尤其要自己过一遍:子 agent 会照抄一个恒返回 0
+的验收命令,然后汇报 PASS。
+
+## §2.2 的 `# Arguments` 存在与否是**双向**约束(2026-09-30 实测)
+
+Layer 2 只查「有非 self 参数 ⇒ 必须有 `# Arguments`」,但 Layer 4 查反方向:doc 里的类型
+必须在签名参数集合内,而 `self`/`&self`/`&mut self`/`mut self` 被**从集合中剥离**。所以
+`fn f(self) -> u32`、`fn f(&self) -> u32` 写 `# Arguments` 必违规,哪怕写的是
+``- `self` - ...`` 或 ``- `&self` - ...``。修这类自指方法是**删掉整段**,不是改类型。
+反之签名是 `&str` 时 doc 必须写 ``- `&str` - ...``,`&` 不能省;`-> &'static str`
+的 `# Returns` 同理,漏 `&` 会报 ``'static str ... does not match ... &'static str``。
+
+泛型边界永远不能写进 doc:`fn f(s: S)` 写 `S` 而不是 `S: AsRef<str>`;`-> Tween<T>` 写
+`Tween<T>` 而不是 `Tween<T: Interpolable + Copy>`。
+
+## 诊断信号:同一处报出两个**互相矛盾**的类型,是 doc block 粘连(2026-09-30 euv 实测)
+
+`_extract_doc_block` 只向上扫**连续**的 `///` 行。相邻两个 fn 之间没有空行时,
+后一个 fn 的文档会被并进前一个的 block 并**归给后一个 fn**。症状:一个零参数 fn 被报
+``&RenderConfig` does not match any parameter type in the signature `[]``,同时前一个 fn
+的返回类型也报「不匹配」——因为 verifier 读到的其实是后一个 fn 的类型。
+
+看到这种「同一处报两个矛盾类型」,问题在**归属**不在笔误。按 Layer 4 逐条改类型会越改
+越乱。修法是插空行 / 重新分配文档,让每个 fn 拥有自己的 block。
+(euv 真实案例:`renderer/webgpu/impl.rs` 里 `init` 与 `timeout_promise` 的 `///` 粘连。)
+
+## 并行修同一 crate 的多个文件:`cargo fmt` 会跨文件重写(2026-09-30 实测)
+
+`cargo fmt -p <crate>` 重写**整个 crate**,包括其他 agent 正在编辑的文件。子 agent
+跑一次裸 `cargo fmt` 就可能格式化掉同伴写了一半的 `impl.rs`,产出无法归属的 diff,而且
+几乎无法被察觉 —— 格式化的 diff 看起来无害。
+
+多 agent 并行期间的硬约束:只允许 `cargo fmt -p <crate> -- --check`(只读),
+改不动就手工对齐格式并报告哪些文件有偏差,**绝不允许**写入式 `cargo fmt`。
+
+同理,并行期间 clippy 会看到同伴的半成品,报出不属于你的错误。正确处理是
+「重跑一遍再下结论」,不是「去修那个文件」——那会破坏文件所有权边界。
+
+## 共享工作树上「白名单外」的编译错误,先查归属再动手(2026-10-01 euv-engine 实测)
+
+多 session 共用一个 repo 时,`cargo clippy -p <crate>` 会把**别人**半成品的错误报在
+你眼前。此时「顺手修好」和「不动」都不对:修了就越界并可能破坏对方正在写的逻辑
+(它可能下一秒就要把那段重写);不动则你的验收永远不绿。
+
+判定流程(按顺序,别跳):
+
+1. **`git stash list` / `git log` 认栈。** 先看这个错误所在文件有没有被别的分支
+   或 stash 覆盖过 —— 命中说明有人在处理它,不是你的孤儿。
+2. **在子 agent 的 transcript 里搜那个路径。** 全 0 命中才说明**你的** agent 没碰过它
+   (注意:要搜 `write_file|patch` 之类的**写**动作,搜路径名会命中同伴报出来的
+   clippy 错误文本,产生假阳性)。
+3. **哈希 + `stat` 连续观察 30~60 秒。** 哈希不变 = 对方已经停手,那个缺陷被遗弃了;
+   仍在变 = 对方在写,停手、报告,不要动。
+4. **确认是废弃缺陷后,仍然先别改它 —— 先证明「只有它挡着」。**
+   用 `git worktree` 起一个**一次性隔离副本**:把 live tree 的相关目录整体覆盖进去,
+   只把**这一处**废弃缺陷修掉,在副本里跑 build。副本绿了,你就拿到了「我的改动是干净的」
+   的硬证据,同时 live tree 一行未动。
+   (不要用 `git stash` 做这件事 —— 你会连带 stash 掉别人的在途改动。)
+
+2026-10-01 euv-engine 实例:另一个 Hermes session 在并发做同一次 rust-standards
+清理,给 `renderer/status/const.rs` 里的 `WEBGPU_VERTEX_STEP_MODE_VERTEX` /
+`_INSTANCE` 各写了两遍,`euv-engine` 因此编译不过,但那**不在**我这次的白名单里。
+隔离副本里去掉重复定义后,engine 干净构建、只剩 2 个既有 warning —— 既证明了我的改动
+无回归,又一行没碰别人的文件。
+
+⚠️ 隔离副本有两个容易踩的坑:
+- **去重要连 doc 注释一起处理。** 用 `awk` 只删 `pub(crate) const X` 那一行,会留下
+  悬空的 `///` → `error: expected item after doc comment`。按「定义行 + 其上方连续
+  注释块」一起删,或直接用 Python 逐行处理。
+- **别只 copy 你白名单里的文件。** 你的 `impl.rs` 可能依赖别人新增的 `const.rs` 条目;
+  漏拷会得到一堆 `cannot find value ... in this scope` 的**假错误**,让人误判自己的
+  改动坏了。整体覆盖相关目录最省事。
+
+## 同 session 并行时:`git stash` 会吞掉同伴的在途改动(2026-10-01 euv-engine 实测)
+
+一个子 agent 跑 `git stash push` 做「临时检查」,**把另外 5 个 agent 全部在途的
+未提交改动一次性扫走了** —— 受害者那边 `git status` 突然显示自己的文件干净、校验器
+回到 100+ 违规,但他没做过任何 revert,一脸茫然。`git checkout stash@{0} -- <path>`
+救回来了,工作最终没丢。
+
+三条规则:
+
+1. **并行/多 session 期间禁止 `git stash push`。** 它的作用域是**整个工作树**,
+   不是「我这几个文件」;`git stash push -- <path>` 也只挡被显式列出的文件,
+   而 `git stash` 默认带走一切未提交改动。要临时存自己的东西,用
+   `cp` 到 scratch 目录,不要用 stash。
+2. **发现自己的改动凭空消失,先 `git stash list` + `git stash show --name-only`,
+   再怀疑自己。** 「我没改过它」和「它被改回去了」是两件事,后者在你的
+   `git diff` 里看不出任何痕迹。
+3. **子 agent 报告「我被别人的操作干扰了 / 我从 stash 恢复了」时,必须独立复核
+   恢复后的最终状态**,不能因为它说「已恢复」就结案 —— 恢复动作本身可能只捞回了
+   一部分文件。逐文件重跑校验器 + `git diff --quiet` 逐个确认,17/17 都在才算完。
+
+同一批里还有两个反例值得记住:
+- **「A agent 说 B 文件的 fmt 挂了」** 可能是瞬时的 —— B 当时正在写那个文件。我复核时
+  `cargo fmt -- --check` 已经是 exit 0。**子 agent 报告的失败要用自己的时间点重测**,
+  并发环境下的失败声明会过期。
+- **「这个文件是别人改的,不是我」也可能是假的归属。** 一次 fan-out 里,某个 agent
+  报告 `asset/impl.rs` 的 4 处违规「被并发 agent 修好了」,于是没动手。复核时
+  `git diff` 显示那确实是正确的 bound-stripping 修复 —— 但**没人能证明是谁写的**。
+  在 fan-out 里,「文件被别人动过」和「文件已经是合规的」是两件独立的事,前者不构成
+  跳过的理由;要跳过得先自己确认它合规(我这次就是这么重新验证的)。
+
 ## §borrow — RefCell borrow 必须可证明安全或显式处理(2026-09-30 user 钦定)
 
 原话:"你的代码应该安全处理所有 borrow 失败的情况,此仓库的所有地方都应该处理"。
@@ -420,8 +537,41 @@ impl ColorAttachment {
 }
 ```
 
-**规则:任何 `Option<T>` 字段,只能调 `try_get_*`。** `get_*` 只留给"调用方保证一定是 Some"
-的非 Option 字段。注释里写"`None` 表示走默认路径"的字段,恰恰是最容易 panic 的。
+**规则:任何 `Option<T>` 字段,只能调 `try_get_*`。** `get_*` 只留给"调用方保证一定是 Some"的
+非 Option 字段。注释里写"`None` 表示走默认路径"的字段,恰恰是最容易 panic 的。
+
+### user 钦定(2026-09-30):「data 宏保留,如果 option 不要 panic 需要使用 try get」
+
+**不要为了消除 panic 就把字段从 `Option<T>` 改成 `T` + 手写 getter,也不要动 `#[derive(Data)]`。**
+正确做法分两种,按「是否真的可能为 `None`」选:
+
+| 情况 | 做法 |
+| --- | --- |
+| 字段**可能**为 `None`(创建失败、未分配、配置缺省) | 保留 `Option<T>` + `Data`,调用方一律 `try_get_*()` |
+| 字段**构造后必然有值**,`.expect()` 只是把不变量写死 | 存成非 `Option` 字段,`Data` 直接生成无 panic 的 `get_*()` |
+
+第二种的判定标准是**上游是否真的可能失败**。实测(euv `WebGl2Backend`):
+构造点已经握着 `canvas: HtmlCanvasElement`,`context.canvas()` 永远拿得到同一个元素
+—— 所以把 `canvas` 存成字段、删掉手写 `get_canvas()` 里的 `.expect()`,`Data` 自动生成
+不会 panic 的 `get_canvas()`,**49 个调用点一行都不用改**。反过来 `AssetEntry.image`
+来自 `HtmlImageElement::new().ok()?`,**真的可能为 `None`**,必须留 `Option` 并改用
+`try_get_image()`。
+
+**判据三连问**(避免假违规):
+1. 这个 getter 展开后**到底 panic 不 panic**?—— 别看字段名,看 `-Zunpretty=expanded`
+   里 `get_x` 的 body 有没有 `.unwrap()`。**accessor 声明成 `-> Option<T>` 时 lombok
+   生成的是 `self.x.clone()`,不 panic**;只有声明成 `-> T`(裸内层类型)才 unwrap。
+2. 接收者**是不是那个类型**?—— 字段名跨类型重名极多:`get_min()` 同时存在于
+   `Counter`(`min: Option<i32>`,panic)和 `AABB3D`(`min: Vector3D`,安全)。
+   纯字段名匹配会报出 ~180 条假命中。
+3. 调用点**是否已经在消费 `Option`**?—— `match x.get_f() { Some(..) => .. }` /
+   `let x: Option<T> = e.get_f();` / `.as_ref()` / `.unwrap_or(..)` 都说明它返回的是
+   `Option`,安全。**注意 `.clone()` 不算安全证据** —— panic 型 `get_x() -> T` 在调用点
+   被 `.clone()` 是极常见的写法。
+
+**自动化**:`scripts/verify_no_panicking_option_getter.py <repo>`(新增,已做变异测试:
+5 个真实/合成违规全部捕获,干净树 0 误报)。它按「struct 声明 → 接收者类型 →
+Option 消费形态」三重解析,**不做裸字段名匹配**。提交前跑。
 
 **为什么 grep 找不到**:`grep -rn "unwrap()" engine/src/renderer/` 返回 **0 命中** ——
 panic 藏在宏展开里,源码根本看不到 `unwrap`。panic 的 `file:246:24` 指向的是
@@ -645,3 +795,364 @@ git config --global core.hooksPath ~/.git-hooks
 | `rust_pre_commit.py --max-iters` 调到 100 指望"总有一次能清干净" | max-iters 解决的是 auto-fixer 收敛,不是源码级违规;`self.field` / `use ... as ...` / missing doc-comment 永远要人改 source | audit-pitfalls §81 — 默认 3 次,排查 fixer 收敛性可调到 5-10,源码违规必须人修 |
 
 **当 audit 报 FAIL 但 §xx 的 false-positive 描述符合**:先 git diff 看该文件是不是上游原状 carry-over,如果是,在 PR body 标注"upstream code, deferred to follow-up",**不要为了 PASS 改原代码语义**(会偏离 monorepo PR scope)。
+
+---
+
+---
+
+## §5.1 豁免:字符串字面量内的第二语言(2026-09-30)
+
+`example/src/page/*/hook/const.rs` 把 **WGSL shader 源码放在 Rust 原始字符串里**
+(`r#"..."#`)。那里的 `let ball = u_balls.balls[vi / 6u];` 是 shader 语句,不是
+Rust `let` 绑定,§5.1 不适用。逐行扫描把它们当 Rust 解析,产生 **104 个幽灵违规**
+(4 个 shader 文件:raytrace 58 / lighting 32 / game_3d 10 / game_2d 4)。
+
+`verify_let_type_annotations.py` 现在用 `_string_literal_lines()` 屏蔽
+字符串字面量占据的行(跟踪任意 `r#*"` 哈希数的原始字符串 + 普通字符串,
+按行状态机判定闭合)。**doc 注释不屏蔽** —— 它们仍是 Rust 源码位置,
+由 doc 格式 verifier 负责。
+
+变异测试(5/5 通过,关键是第 5 条 —— 字符串状态机不能泄漏到后续行):
+
+| 探针 | 期望 delta |
+|---|---|
+| 多行 fn 里的真实 `let real_a = 5;` | +1 |
+| 已标注 `let real_b: u32 = 5;` | +0 |
+| `r#"..."#` 内的 `let fake = 1;` | +0 |
+| 普通 `"..."` 内的 `let fake = 2;` | +0 |
+| shader 字符串**之后**的真实 `let real_c = 3;` | +1 |
+
+陷阱:`LET_NO_ANNOT` 是 `^\s*let` 行锚定的,`fn f() { let x = 5; }` 这种
+单行写法**根本不匹配**。写变异探针时若用单行 fn,会误判成"豁免过头"。
+
+## §5.2 假阳性:`match` or-pattern 被当成闭包参数(2026-10-01 vice-city-web 实测)
+
+`verify_closure_type_annotations.py` 只用正则找 `|...|`,**不区分闭包与
+`match` 的 or-pattern**。`match` 的 `|` 落进同一组 capture,于是:
+
+```rust
+match asset {
+    PROP_BENCH | PROP_TRASH_BIN | PROP_FIRE_HYDRANT | PROP_NEWSSTAND | PROP_PHONE_BOOTH => {
+        SMALL_PROP_COLLIDER_SCALE
+    }
+    _ => FULL_PROP_COLLIDER_SCALE,
+}
+```
+
+报出 `closure parameter without explicit type annotation: 'PROP_TRASH_BIN' in |...|`
+—— 每个 or 分支一个 hit,而 `|` 之间根本没有闭包。
+
+**判据**:命中的 token 是**大写常量名**且同一行出现 ≥ 2 个 `|` 分隔的
+分支 → or-pattern;真闭包参数是小写 binding(`|car|` / `|p|` / `|value|`),
+同一行通常只有一对 `|`。
+
+**为什么源码改不掉**:or-pattern 的 `|` 是 match 语法,两侧不能挂类型标注;
+真加上去就改 matcher 语义。`audit-pitfalls` 已列 `macro_rules!` / 位运算 `|` /
+字符串内 `|` 三类同类豁免,or-pattern 是第四类。
+
+**处置**:记为 verifier false positive,不改源码(同 §59 `bitwise |` 的结论)。
+量级参考:vice-city-web 8 千行只有这一处。verifier 侧的真修法是给
+CLOSURE 正则加「or 分支全是大写常量 / 路径」的负向条件。
+
+## §1.3c 豁免:`class! { .. }` 样式宏块内的 CSS 字面量(2026-09-30 user 钦定)
+
+**user 原话**「样式宏里的常量需要豁免」。`class!` 是本仓声明 CSS 规则的 DSL 宏,
+块内的字符串字面量(`"flex"` / `"100%"` / `":hover"`)就是**类定义本体**,
+不是零散的程序数据 —— 抽到 `const.rs` 只会把一张可读的 CSS 表换成几千行
+`const DISPLAY_FLEX: &str = "flex";` 的间接层,渲染结果一模一样。
+
+判定理由与已有的 `vars! { .. }` 豁免**完全同源**:两个宏的存在意义就是让设计
+系统的字面量集中在一处声明式的地方,而不是散落在逻辑里。
+
+`verify_hardcoded_strings.py` 里 `_style_macro_block_lines()` 用花括号深度跟踪,
+所以 `class!` 内的 `@media { .. }` 嵌套也被覆盖,且在匹配的右花括号处停止 ——
+**不会**一路豁免到文件末尾。实测 euv 3160 → 1437(-1723)。
+
+**变异验证(必须做,豁免类改动最容易被滥用)**:
+
+| 探针 | 期望 | 实测 |
+|---|---|---|
+| `class!` 块**内**加 `"100%"` | 0 | 0 ✅ |
+| `class!` 块**外**加 `"leak_me"` | +1 | +1 ✅ |
+| `class!` 块**闭合后**加 `"tail_leak"` | +1 | +1 ✅ |
+
+**边界**:只豁免 `class!` 和已存在的 `vars!`。`#[component]` 函数体里的
+`"Ctrl+"` / `"FocusIn: focus entered"` 这类是**真实违规** —— 那是普通 Rust
+逻辑里的程序数据(example 单文件 206 条),不在豁免范围。
+
+---
+
+## 进程级全局 + `unsafe impl Sync` = 真 UB,并行测试会崩
+
+**症状**:`cargo test -p euv-macros --test mod` 随机失败(约 1/8 ~ 1/3),
+`--test-threads=1` 必过。失败形态不固定:SIGSEGV / SIGTRAP 静默 abort,
+或者 `Lazy instance has previously been poisoned`。**这类失败会被误当成
+"flaky, 加 --test-threads=1 绕过" —— 不要绕,那是真 bug。**
+
+### 判据:哪些全局可以碰,哪些不行
+
+`static mut` + `UnsafeCell` + `unsafe impl Sync` 只在**真·单线程**里安全。
+WASM 确实是单线程,所以注释里写 "SAFETY: only accessed from the main thread" 并不能
+让 host 测试变安全 —— `cargo test` 是多线程的,而这些 crate 在 host 上能编译运行。
+注释里那句 SAFETY 说明是**关于 wasm 的,不是关于这个类型的**。
+
+### 两个真实根因(euv 2026-09-30 实例)
+
+**1. save/restore 型全局 —— `HookContext::with`**
+
+```rust
+let previous = *slot.take();      // 存旧值
+*slot = Some(new.clone());
+callback();                        // 业务
+*slot = previous;                  // 还原
+```
+
+进程级全局上做这个模式,在两个线程交错时**必然**出事:A 存、B 存、A 还原、
+B 还原时拿到的是 A 刚放回去的值 → 同一个 `Rc` 被 drop 两次 →
+`alloc/src/rc.rs: assert_unchecked must never be called` → **non-unwinding panic → abort**。
+
+**修法:thread-local**。save/restore 本来就是 per-thread 语义,`thread_local!`
+让这对操作对其他线程天然原子。
+
+**2. 共享可变容器 —— `SIGNAL_SLAB: Vec<Box<dyn AnySignalInner>>`**
+
+多线程同时 `push` 同一个 `Vec` → 堆损坏 → 静默 SIGSEGV。
+
+注意 `SignalSlab` **不是 `Send`**(里面是 `Box<dyn FnMut()>` 监听器),
+所以 `Mutex`/`RwLock` 根本装不上,编译器会直接拒绝。**唯一正确的解是 `thread_local!` + `RefCell`。**
+
+而且 thread-local 在这里**语义上更对**:`Signal` 句柄只是个 slot index,
+index 只在签发它的那个 slab 里有意义。线程 A 的 slot 3 和线程 B 的 slot 3 是两个不同的
+signal;进程级 slab 让每个线程都看得见别人的 signal。per-thread slab 让句柄**构造上就无歧义**。
+
+### 把 `&'static mut T` 换成闭包式访问器
+
+`RwLock`/`RefCell` 都不能把 `&mut` 借出到闭包外(生命周期过不了)。
+正确形状是**把整块业务逻辑塞进闭包**,并且给一个显式 fallback:
+
+```rust
+fn with_slab<F, R>(operation: F, fallback: R) -> R
+where F: FnOnce(&mut SignalSlab) -> R
+{
+    SIGNAL_SLAB
+        .try_with(|cell| match cell.try_borrow_mut() {
+            Ok(mut guard) => operation(&mut guard),
+            Err(_refused) => fallback,      // 重入降级,不 panic
+        })
+        .unwrap_or(fallback)
+}
+```
+
+- 返回 `T`/`R` 且没有廉价默认值 → 闭包包 `Some(..)`,fallback 传 `None`,
+  外面 `.unwrap_or_else(|| unreachable!(..))`。
+- `try_borrow_mut` 而不是 `borrow_mut`:重入时降级成 fallback,
+  而不是 panic 到一半、留下改坏一半的容器。
+
+### 致命陷阱:持锁期间调用用户回调
+
+`Signal::update` 里 `listener()` 必须在**锁释放之后**跑。监听器可以
+`get`/`set` 任意 signal(including 自己);持锁调用会撞上 `try_borrow_mut` 拒绝,
+然后**静默 no-op** —— 没有任何报错,reactive 更新就是丢了。
+
+所以 `update` 必须拆成两段 `with_slab`:phase 1 改值 + `notifying(true)` + `swap` 出监听器;
+`for` 循环在锁外;phase 2 合并回去 + 清 `notifying`。
+**改完必须验证:监听器真的被调用了,值真的传播了**(写一个会级联 `set` 的测试)。
+
+### `Lazy instance has previously been poisoned` 可能是 `js_sys` 的,不是你的
+
+`wasm-bindgen` 传递依赖 `once_cell`,而 `js_sys::global()` / `web_sys::window()`
+在**非 wasm32 目标**上不是返回 `None`,是 **panic**。那个 panic 会毒化 `js_sys`
+内部的**进程级** `once_cell::Lazy`,于是同一测试进程里**其他线程**全部报
+"Lazy instance has previously been poisoned",落在毫不相干的测试上 —— 失败测试名
+每次都不同,这是识别特征。
+
+`cargo test` 跑在 host 上,`euv` 这类 wasm crate 也在 host 上编译,所以这条路径
+在测试里是活的。修法是在唯一触达 JS 的入口加编译期 guard:
+
+```rust
+fn js_reachable() -> bool { cfg!(target_arch = "wasm32") }
+// ...
+if !Self::js_reachable() { return; }   // 在任何 js_sys 调用之前
+```
+
+`cfg!` 是编译期常量,wasm 上整个分支被优化掉,零成本。**关键:panic 才是 bug,
+poisoning 只是它的副作用** —— 不要去"修" poisoning,要去掉那个 panic。
+
+定位手法:`RUST_BACKTRACE=1` 跑编译好的测试二进制,panic 栈会直接指出是
+`js_sys::global` 还是自己的代码。
+
+### `RefCell` 化会暴露嵌套调用,`with_slab` 会静默 abort
+
+`RefCell` 不 reentrant。把「持锁调用用户回调」改成闭包式访问器时,原来在
+`&'static mut` 下能跑的**嵌套读**会开始炸:
+
+```rust
+// I18n::t —— 外层 with 没释放 borrow,内层 with 的 try_borrow_mut 被拒
+self.get_locale().with(|active: &String| {
+    self.get_fallback_locale().with(|fallback: &String| { ... })
+});
+```
+
+症状是内层 `try_borrow_mut` 返回 `Err` → 走 `fallback` → 外层
+`unwrap_or_else(|| unreachable!(..))` → abort。**而且它看起来跟你的改动无关**
+(报错的 `signal/impl.rs` 可能根本没被这次任务碰过),单线程也稳定复现。
+
+修法与 `update()` 同构:拆两段。phase 1 在 borrow 内把值 `clone` 出来,
+phase 2 无 borrow 时再跑用户闭包:
+
+```rust
+let staged: Option<T> = Self::with_slab(|slab| { ...; Some(v.clone()) }, None);
+let Some(value) = staged else { unreachable!(..) };
+f(&value)          // 无 borrow
+```
+
+代价是一次 `T::clone` —— 但 `T: Clone` 本来就是 impl 的 bound,不是新增约束。
+
+### `crate fmt` 内部跑 `cargo clippy --fix`,会静默改坏刚写的代码
+
+`crate fmt`(crate-cli)不只是 rustfmt,它先跑 `cargo clippy --fix`。你刚写的
+`and_then(|x| Some(y))` 会被自动改成 `map(|x| y)` 并顺手改掉推断出的类型,下
+一次 `cargo check` 就报 E0308,而 diff 里看不出是谁动的(fmt 之后立刻 check,
+不要先 fmt 再攒着改)。
+
+**排查手法:看到 clippy 建议类的类型错误、而你明明写对了 —— 先 `git diff` 看这一行
+是不是刚被 `crate fmt` 动过。** 修法是改成 clippy 满意的形状(用 `match`
+而不是 `and_then`/`map` 硬凑),而不是回退成 clippy 不喜欢的写法。
+
+### 排查手法
+
+```bash
+cargo test -p <crate> --test mod --no-run
+BIN=$(ls -t target/debug/deps/<name>-* | grep -v '\.d$' | head -1)
+for i in $(seq 60); do $BIN --test-threads=8 >/dev/null 2>&1 || echo "crash $i"; done
+```
+
+直接循环跑**编译好的二进制**,比反复 `cargo test` 快得多,而且能拿到干净的
+`returncode`(`-11` = SIGSEGV,`101` = panic)。**别用 `cargo test` 的 exit code 判断**,
+它会包装 panic。
+
+**先分清「真并发 UB」和「测试自己共享全局状态」——修法完全不同。**
+前半段讲的 `static mut` + `unsafe impl Sync` 是**真 UB**(改生产代码)。但若被测模块
+自己持有进程级全局(实测 `ui/src/hook/i18n/struct.rs` 的
+`pub(crate) static I18N_MESSAGES: OnceLock<RwLock<HashMap<..>>>`,来自 PR #185),
+**并行跑多个 test 共享这份状态**同样表现为随机失败、`--test-threads=1` 必过 ——
+但修法是**测试隔离**,不是改生产代码。判据:
+
+| 症状 | 分类 | 修法 |
+| --- | --- | --- |
+| 并行随机挂 + 被测模块**无**进程级全局 | 真并发 UB | 迁 `thread_local!` + `RefCell`(见上) |
+| 并行随机挂 + 失败集中在用到某全局的测试 | 测试共享全局 | 测试加串行锁,或让 fixture 每次建独立实例 |
+
+判定「这全局是历史遗留还是本轮引入」的最快路径:
+`git log -S '<全局名>' -- <file>` + `git show HEAD:<file> | grep <全局名>`。
+若 `git diff HEAD --stat -- <dir>` 为空而全局已存在于 HEAD,就是**历史债**——
+不计入本轮成绩,也不要在本轮 PR 里顺手改它。
+
+### 陷阱:批量删测试注释时,`//` 可能根本不在注释里
+
+用 verifier 的行号批量删行时,判定条件必须是「去掉缩进后**整行**以 `//` 开头」,
+**不能**「verifier 报了它就删」。verifier 是正则,不解析 Rust 词法,以下**代码行**
+会被误报成注释:
+
+- `let raw: RawHtml = unsafe_no_inline!(r#"<a href="https://x">y</a>"#);`
+  —— raw string 里的 `//` 被当成行注释起点
+- 任何行内 `//` 出现在字符串字面量里的 `let` / `assert!` 语句
+
+误删只在**编译时**暴露为 `E0425 cannot find value 'x' in this scope`,而 `git diff`
+看着像"只删了注释"、没毛病。安全写法:
+
+```python
+if i in flagged and line.strip().startswith("//"):
+    continue   # 只删真正整行都是注释的
+```
+
+若那条测试**必须**保留带 `//` 的 payload,不要改测试,记为 verifier false positive
+走 audit-pitfalls;若只是顺带断言,把 payload 换成不含 `//`、也不含会提前闭合
+`r#"` 的 `"` 的等价 HTML——注意 `href="#anchor"` 里的 `"#` 会**提前结束 raw string**,
+报 `unexpected token`。
+
+### 陷阱:用 Mutex 串行化共享全局的测试 —— 别用「整文件正则替换」改 fixture
+
+给共享全局的测试加 `static M: Mutex<()> = Mutex::new(())`、让 fixture 返回
+`MutexGuard` 绑到 `_guard`(裸 `_` 会立刻 drop,等于没加),是正解。但**改 fixture
+本身时不要用全局正则替换** —— 本次实测把
+`i18n_reset_for_tests(); let i18n = I18n::new(..);` 这段「内联构造」模式
+`str.replace(old, new)` 掉,**结果连 3 个 fixture 函数的定义体内部也一起被替换**,
+`locked_empty_i18n()` 变成了**调用自己** → 无限递归 + 二次加锁。
+
+**症状很有欺骗性**:前 20 次跑全过(递归还没把栈打爆),第 200 次左右直接
+**挂住 60s 超时** —— 表现为「死锁」,但根因是递归,不是锁竞争。
+`--test-threads=1` 也会挂,所以「单线程能过 ⇒ 只是并发问题」的判据会误判。
+
+**定位方法**(按顺序,别跳步):
+1. `binary --test-threads=8 <module>::` **单独跑一个模块** —— 缩小到具体模块
+   (本次:gesture 单独过、i18n 单独挂 ⇒ 问题在 i18n,不是 gesture 全局)
+2. `--nocapture` 跑,看**最后输出到哪个 test** —— 挂住的那个 test 名是关键线索
+3. 打印所有 fixture 的**函数体全文**看有没有自引用/互调
+
+**预防**:
+- 改 fixture 用 `re.sub(r"fn NAME\(\)[\s\S]*?\n\}\n", new_body, count=1)` 精确匹配**整个函数**,
+  不用「内联代码片段」当 pattern
+- 改完**立刻打印改后的 fixture 全文**读一遍,不要只看 `assert count == 1` 通过就继续
+- 改完必须跑**两种模式**:`module::` 单独跑(查死锁/递归)+ 全量 `--test-threads=8` 跑 200+ 次
+  (查竞态)。只跑全量会把「递归」误判成「偶发竞态」,然后继续在错误方向上加锁
+
+**样本量**:量级不够就加到 150 次 —— 6/120 的失败率在 80 次里可能只出现 0 次,
+**「80 次全过」不等于没有 race**,必须看比例而不是绝对次数。
+
+### 别为了消 warning 删掉 load-bearing 的 import
+
+`core/src/lib.rs` 有 `pub(crate) use std::iter::Iterator;` 且 clippy 报
+`hidden_glob_reexports`(private item shadows public glob re-export)。看着像纯冗余,
+删掉后**全仓 3 处 `impl Iterator<Item = ..>` 立刻 E0404 `expected trait, found
+struct Iterator`** —— 因为 `web_sys::*` glob 导入了一个**同名的 struct**
+`Iterator`(JS 绑定),把 trait 遮住了。判据:删之前先确认该名字在**依赖 glob 里
+是否有同名非 trait 项**;有的话这行 import 就是必要的,记为 false positive 走
+audit-pitfalls,不要动。
+
+### 陷阱:audit 多数 check 只看**已提交**状态,不是工作区
+
+`audit_rust_standards.py` 里大部分 check 跑的是
+`git diff origin/master HEAD` —— **`HEAD` 而不是工作区**。所以**未 commit 的修复
+不会被 audit 看见**,表现为「明明改了,FAIL 计数一点没动」:
+
+```bash
+git diff origin/master HEAD -- <file> | grep '<pattern>'   # audit 看到的(已提交)
+git diff origin/master     -- <file> | grep '<pattern>'   # 你实际改的(工作区)
+```
+
+前者非零、后者为零 = 已修好但未提交。**别为了「让数字好看」去 commit 一个还没
+验证的树** —— 先跑完 fmt / clippy / test 四个 gate,再 commit,让 audit 的 diff
+反映真实状态。另按 hunk 定位的 check(空行类)在 `git mv` 后坐标会漂移到别的文件,
+每次改动后重新读明细行。完整判定流程与并发写入的处理见
+`rust-audit-fix-workflow`「The audit is blind to uncommitted work」。
+
+**区分「我没修好」和「这是既有问题」**:用 `git diff HEAD --name-only` 确认出错的文件
+在不在你的 diff 里;再用文件 mtime 对比你的第一次编辑时间。都不在 → 既有问题,
+照实报告,别揽到自己头上。反过来,**既有文件里的真 bug 只要挡住了验收门禁就得修**,
+并说明它是既有问题。
+
+### 陷阱:fallback 参数是**急切求值**的
+
+`with_slab(op, fallback)` 里 `fallback` 是普通实参,**在调用点就被求值**。
+所以:
+
+```rust
+// 错:永远 panic,闭包根本没机会跑
+Self::with_slab(|slab| ..., unreachable!("slot missing"))
+```
+
+fallback 写成 `unreachable!(..)` 的话,panic 发生在进入 `with_slab` 之前,
+闭包永远不执行。编译器会报 `warning: unreachable expression` 提示你 ——
+**看到这个 warning 就要立刻检查是不是这种形状**(clippy 未必报)。
+
+正确做法:闭包返回 `Option<T>`,外面再解包。
+
+```rust
+Self::with_slab::<_, Option<T>>(
+    |slab| { let Some(inner) = slab.get_mut::<T>(idx) else { unreachable!(..) }; Some(inner.get_value().clone()) },
+    None,
+).unwrap_or_else(|| unreachable!("slot missing"))
+```
+
+只有当 fallback 有廉价且语义正确的值时(`()` / `false` / `usize::MAX`)才直接传。

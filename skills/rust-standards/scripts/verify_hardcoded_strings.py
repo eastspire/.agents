@@ -352,6 +352,43 @@ def _comment_start(line: str) -> int | None:
     return None
 
 
+def _style_macro_block_lines(lines: list[str]) -> set[int]:
+    """1-based line numbers inside a `class! { ... }` style block.
+
+    `class!` is the CSS-class DSL this repo uses to declare style rules.
+    Its string literals ARE the class declarations — `"flex"`,
+    `"100%"`, `":hover"` are the payload, not incidental program data.
+    Hoisting them into `const.rs` would replace a readable CSS table with
+    several thousand lines of `const DISPLAY_FLEX: &str = "flex";`
+    indirection and change nothing about the rendered result.
+
+    This is the same reasoning as the `vars! { .. }` exemption below:
+    both macros exist so a design system's literals live in one
+    declarative place instead of being scattered through logic.
+
+    The scan re-arms on every `class!` line, so a file may declare
+    several blocks. Nesting is tracked by brace depth, so `@media { .. }`
+    inside a class is covered and the exemption stops at the matching
+    close brace rather than at end-of-file.
+    """
+    inside = False
+    depth = 0
+    marked: set[int] = set()
+    for i, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not inside:
+            if re.match(r"^class!\s*\{", stripped):
+                inside = True
+                depth = stripped.count("{") - stripped.count("}")
+                marked.add(i)
+            continue
+        marked.add(i)
+        depth += stripped.count("{") - stripped.count("}")
+        if depth <= 0:
+            inside = False
+    return marked
+
+
 def _vars_block_lines(lines: list[str]) -> set[int]:
     """1-based line numbers inside a `vars! { ... }` design-token block.
 
@@ -396,6 +433,7 @@ def audit_one(path: Path) -> list[str]:
         return []
     lines = text.splitlines()
     exempt_lines = _exempt_format_string_lines(lines)
+    style_lines = _style_macro_block_lines(lines)
     vars_lines = _vars_block_lines(lines)
     violations: list[str] = []
     for i, line in enumerate(lines, start=1):
@@ -404,6 +442,10 @@ def audit_one(path: Path) -> list[str]:
             continue
         # Skip design-token literals declared inside `vars! { .. }`
         if i in vars_lines:
+            continue
+        # Skip CSS declarations inside a `class! { .. }` style block (§1.3c
+        # exemption): those literals ARE the class definitions.
+        if i in style_lines:
             continue
         # Skip attribute lines (#[doc = "..."], #[serde(...)])
         if ATTR_LINE.match(line):

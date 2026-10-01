@@ -83,6 +83,17 @@ VERIFIERS = {
     "verify_ci_no_bump": "CI version bump / version write §17",
     "verify_module_imports_centralized": "module imports centralized §6.1/§6.3/§6.4",
     "verify_lib_rs_order": "lib.rs import group order §6.1",
+    # §1.3 / §1.4. Was missing here, which is why cli/src/build/inline.rs
+    # survived every commit: the audit script ran the check and the
+    # pre-commit hook did not. A rule enforced in one caller and not the
+    # other is not a rule. Covers both the filename (§1.4) and the
+    # declaration-purity / use-centralization rules (§1.3) already
+    # implemented inside the same script.
+    "verify_keyword_file_purity": "keyword file purity §1.3 / non-keyword filename §1.4",
+    # R11.4. Also previously audit-only: the rule existed as an inline shell
+    # pipeline over `git diff origin/master HEAD`, with no per-file script for
+    # the gate to drive, so the hook could not enforce it. Same gap as §1.4.
+    "verify_no_production_panic": "production panic!/expect/unwrap R11.4",
 }
 
 # Verifiers that only make sense for a specific file name.

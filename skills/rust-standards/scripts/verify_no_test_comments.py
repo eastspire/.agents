@@ -47,7 +47,29 @@ def list_test_files(root: Path) -> list[Path]:
     return [Path(line) for line in result.stdout.splitlines() if line.strip()]
 
 
+def is_test_path(path: Path) -> bool:
+    """True when §14.5 owns this file.
+
+    The rule is scoped to test files only: production sources under `src/`
+    are explicitly exempt, and a `#[cfg(test)]` block inside a production
+    file belongs to the audit's check 14, not here.
+
+    `audit_one` is also called directly by `staged_file_gate.py`, which
+    passes any staged `.rs` path without going through the `find -path
+    "*/tests/*"` filter the CLI uses. Without this guard the gate reports
+    every `///` doc comment in `src/` as a §14.5 violation, so any commit
+    that documents a function gets blocked. Keep the path test here so both
+    entry points agree on ownership.
+    """
+    parts = {part.lower() for part in path.parts}
+    if "target" in parts or ".cargo" in parts:
+        return False
+    return "tests" in parts
+
+
 def audit_one(path: Path) -> list[str]:
+    if not is_test_path(path):
+        return []
     try:
         lines = path.read_text().splitlines()
     except (OSError, UnicodeDecodeError):

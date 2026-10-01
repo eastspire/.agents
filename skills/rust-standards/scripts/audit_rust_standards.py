@@ -84,6 +84,14 @@ git diff origin/master HEAD -- "*.rs" 2>/dev/null | while read line; do
   if [[ "$line" == "+++ b/"* ]]; then
     current_file=$(echo "$line" | sed "s|+++ b/||")
   fi
+  # A `+` line whose content is only a comment describes code, it is not
+  # code. Prose about a *removed* panic ("the old `x().expect(..)` could
+  # panic") was counted as a live panic. Skip comment-only lines before the
+  # pattern match, so a real call on a `// code` line is still caught.
+  added="${line#+}"
+  if [[ "$added" =~ ^[[:space:]]*(//|/\*|\*) ]]; then
+    continue
+  fi
   if echo "$line" | grep -qE "^\+.*(panic!\(|\.expect\(|\.unwrap\(\))"; then
     if [[ ! "$current_file" == *"/tests/"* ]]; then
       # Per audit-pitfalls #41: `try_X().unwrap()` in `get_X` wrappers
@@ -572,7 +580,39 @@ exit "$exit_code"
 # Base branch: prefer the merge-base between HEAD and upstream/master when
 # present (Track 2 fork + PR setup). Falls back to `origin/master`.
 python3 - <<'PY'
-import re, subprocess, sys
+import os, re, subprocess, sys
+
+
+def _mask_string_literals(line):
+    """Blank out the inside of every string literal on a line.
+
+    Returns `line` with each literal's contents replaced by spaces, keeping
+    column positions so indices stay valid. Raw strings are not masked --
+    this check's own `in_raw` tracking already skips them.
+    """
+    out = list(line)
+    i = 0
+    n = len(line)
+    while i < n:
+        ch = line[i]
+        if ch not in "\"'":
+            i += 1
+            continue
+        quote = ch
+        i += 1
+        while i < n:
+            if line[i] == "\\":
+                i += 2
+                continue
+            if line[i] == quote:
+                break
+            out[i] = " "
+            i += 1
+        else:
+            break
+        i += 1
+    return "".join(out)
+
 root = subprocess.run(
     ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
 upstream_remote = subprocess.run(
@@ -607,7 +647,7 @@ for f in files:
         capture_output=True, text=True, cwd=root)
     hunk_ranges = []  # list of (start, end) inclusive new-file line numbers
     for line in diff_proc.stdout.splitlines():
-        m = re.match(r'^@@\\s+-\\d+(?:,\\d+)?\\s+\\+(\\d+)(?:,(\\d+))?\\s+@@', line)
+        m = re.match(r'^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@', line)
         if m:
             new_start = int(m.group(1))
             new_len = int(m.group(2)) if m.group(2) else 1
@@ -615,10 +655,13 @@ for f in files:
     if not hunk_ranges:
         continue
     try:
-        text = open(f).read()
+        # `f` is relative to the repo root, and this template has no
+        # `cd {{target}}` of its own, so reading it depended on the caller's
+        # cwd. Join it to `root` or the check silently inspected nothing.
+        text = open(os.path.join(root, f)).read()
     except FileNotFoundError:
         continue
-    lines = text.split("\\n")
+    lines = text.split("\n")
     stack = []  # each entry: "fn" | "test" | "other"
     in_raw = False
     raw_delim = ""
@@ -644,17 +687,34 @@ for f in files:
             in_raw = True
             raw_delim = m.group(1)
             continue
-        opens = line.count("{")
-        closes = line.count("}")
+        # Count braces OUTSIDE string literals. A `format!` template that
+        # embeds JS carries `{{` / `}}` for literal braces, and those are
+        # not Rust block delimiters. Counting them drove the depth to +5 in
+        # `cli/src/build/fn.rs` and it never came back, so every blank line
+        # after the first JS-emitting fn read as a blank line inside that
+        # fn's body -- 11 phantom hits on a file with no new blank line in
+        # any fn body. Same masking the let-annotation and hardcoded-string
+        # verifiers already do.
+        masked = _mask_string_literals(line)
+        opens = masked.count("{")
+        closes = masked.count("}")
         if opens > 0:
             pre = line[: line.find("{")].rstrip()
             for _ in range(opens):
                 if re.search(r'\\bfn\\b|\\basync\\s+fn\\b|\\bconst\\s+fn\\b|\\bunsafe\\s+fn\\b', pre):
                     stack.append("fn")
-                elif re.search(r'#\\[cfg\\s*\\(test\\)\\]|#\\[test\\]|mod\\s+tests', "\\n".join(lines[max(0,i-3):i])):
+                elif re.search(r'#\\[cfg\\s*\\(test\\)\\]|#\\[test\\]|mod\\s+tests', "\n".join(lines[max(0,i-3):i])):
                     stack.append("test")
                 else:
                     stack.append("other")
+        elif closes > 0 and stack and stack[-1] == "other":
+            # A wrapped signature can put the body brace on its own line
+            # (`... .position(..)\n    {`). That line carries no signature
+            # text, so it pushed a bare "other" nothing ever popped. If the
+            # line above it opens a fn signature, this brace is that fn body.
+            back = [l for l in lines[max(0, i - 4):i] if l.strip() and not l.strip().startswith(("//", "#["))]
+            if back and re.search(r'\\bfn\\b|\\basync\\s+fn\\b|\\bconst\\s+fn\\b|\\bunsafe\\s+fn\\b', back[-1]):
+                stack[-1] = "fn"
         # Only flag blank lines inside the diff hunks
         if (stripped == ""
             and stack

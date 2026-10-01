@@ -155,13 +155,63 @@ def _has_type_annotation(pat: str) -> bool:
     return False
 
 
+def _string_literal_lines(text: str) -> set[int]:
+    """Line numbers that live INSIDE a string/char literal.
+
+    A Rust file can embed a whole second language as a raw string --
+    the repo's WGSL shaders under `example/src/page/*/hook/const.rs`
+    are `let ball = u_balls.balls[vi / 6u];` inside `r#"..."#`.  That
+    is shader source, not a Rust `let` binding, so §5.1 does not apply
+    to it.  Scanning those lines produced 104 phantom violations.
+
+    Tracks raw strings (any `r` / `r#`..`r##` hash count) and ordinary
+    strings, so multi-line and single-line literals are both covered.
+    Doc comments are NOT masked: they are Rust source position, and the
+    doc-format verifier is the one that owns them.
+    """
+    lines = text.splitlines()
+    masked: set[int] = set()
+    in_raw = False
+    raw_close = ""
+    in_str = False
+    for idx, line in enumerate(lines, start=1):
+        if in_raw:
+            masked.add(idx)
+            if raw_close in line:
+                in_raw = False
+            continue
+        if in_str:
+            masked.add(idx)
+            # a plain string ends on this line unless it escapes the newline
+            if re.search(r'(?<!\\)"', line.split("//", 1)[0]):
+                in_str = False
+            continue
+        m = re.search(r'r(#*)"', line)
+        if m:
+            in_raw = True
+            raw_close = '"' + m.group(1)
+            masked.add(idx)
+            if raw_close in line[m.end():]:
+                in_raw = False
+            continue
+        if '"' in line:
+            masked.add(idx)
+            body = line.split("//", 1)[0]
+            if not re.search(r'(?<!\\)"\s*($|;|\)|,)', body):
+                in_str = True
+    return masked
+
+
 def audit_one(path: Path) -> list[str]:
     try:
         text = path.read_text()
     except (OSError, UnicodeDecodeError):
         return []
     violations: list[str] = []
+    string_lines = _string_literal_lines(text)
     for i, line in enumerate(text.splitlines(), start=1):
+        if i in string_lines:
+            continue
         # Skip `if let` / `while let` pattern guards
         stripped = line.lstrip()
         if stripped.startswith(("if let ", "while let ", "} else if let ")):
