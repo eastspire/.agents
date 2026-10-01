@@ -43,6 +43,28 @@ SNAPSHOT = """(() => {
   return window.__seenEditors.size;
 })()""" % json.dumps(DRAFT_CLS)
 
+# Bring the target into view first. A post can sit in the DOM 31000px below
+# the fold, where its reply control is off-screen and a click lands on
+# nothing — which is why opening once succeeded and produced no box. A scroll
+# is not a navigation, so the rest of the rules still stand.
+SCROLL_INTO_VIEW = """(() => {
+  for (const a of document.querySelectorAll('article')) {
+    const own = [...a.querySelectorAll("a[href*='/status/']")]
+      .find(x => x.getAttribute('href').split('/').pop() === SID
+                && !/\\/(analytics|photo|video|retweets|likes)/.test(
+                      x.getAttribute('href')));
+    if (!own) continue;
+    const box = a.getBoundingClientRect();
+    if (box.top > -80 && box.top < window.innerHeight - 80) {
+      return JSON.stringify({moved: false, top: Math.round(box.top)});
+    }
+    a.scrollIntoView({block: 'center', behavior: 'instant'});
+    const after = a.getBoundingClientRect();
+    return JSON.stringify({moved: true, top: Math.round(after.top)});
+  }
+  return JSON.stringify({moved: false, why: 'not on page'});
+})()"""
+
 # Click the reply control on the article that OWNS this status id. Matching any
 # status link picks up a quoted post or a reply context instead, which is how a
 # reply once targeted a stranger's post.
@@ -265,6 +287,17 @@ def main() -> int:
             row["who"], sid, " (declared)" if for_sid else ""), flush=True)
         print("  %s" % row["text"][:140], flush=True)
 
+    for _ in range(3):
+        pos = js(c, SCROLL_INTO_VIEW, sid)
+        if pos.get("why"):
+            break
+        time.sleep(1.2)
+        if not pos.get("moved"):
+            break
+    if pos.get("moved"):
+        print("  scrolled the post into view (top %s)" % pos.get("top"),
+              flush=True)
+
     c.js(SNAPSHOT, wait=25, retries=4)
     opened = js(c, OPEN_REPLY, sid)
     print("open reply:", opened, flush=True)
@@ -330,9 +363,14 @@ def main() -> int:
                    code="Enter", windowsVirtualKeyCode=13, text="\r")
             c.send("Input.dispatchKeyEvent", type="keyUp", key="Enter",
                    code="Enter", windowsVirtualKeyCode=13)
-        else:
+        elif ord(ch) < 0x80:
             c.send("Input.dispatchKeyEvent", type="keyDown", key=ch, text=ch)
             c.send("Input.dispatchKeyEvent", type="keyUp", key=ch)
+        else:
+            # No keyboard key produces an em dash or any CJK character, so a
+            # key event drops it. `char` is the event that carries text with
+            # no key behind it.
+            c.send("Input.dispatchKeyEvent", type="char", text=ch)
         if i % 25 == 24:
             time.sleep(0.4)
     time.sleep(2.5)
