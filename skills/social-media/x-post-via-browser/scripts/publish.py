@@ -224,12 +224,36 @@ def caret_to_end(c):
     })()""" % DRAFT_CLS, wait=20, retries=5)
 
 
+BUTTON_STATE = """(() => {
+  const all = [...document.querySelectorAll('button[data-testid]')]
+    .filter(b => /^tweetButton/.test(b.dataset.testid));
+  const enabled = all.filter(b => !b.disabled);
+  return JSON.stringify({
+    present: all.map(b => b.dataset.testid + ':' + (b.disabled ? 'dis' : 'en')),
+    enabled: enabled.length,
+    id: enabled.length ? enabled[0].dataset.testid : null
+  });
+})()"""
+
+
 def click_post(c):
+    """Press the post button.
+
+    X mounts tweetButtonInline for the inline composer and does not always
+    mount tweetButton, so a lookup that requires tweetButton returns
+    NO_BUTTON on a composer whose button is right there and enabled — which
+    reads as "the button never enabled" and silently drops the post. Either
+    button posts; the primary one is preferred when both exist.
+    """
     return c.js("""(() => {
-      const b = document.querySelector('button[data-testid="tweetButton"]');
-      if (!b) return 'NO_BUTTON';
+      const all = [...document.querySelectorAll('button[data-testid]')]
+        .filter(b => /^tweetButton/.test(b.dataset.testid));
+      if (!all.length) return 'NO_BUTTON';
+      const b = all.find(x => x.dataset.testid === 'tweetButton') ||
+                all.find(x => !x.disabled);
+      if (!b) return 'DISABLED';
       if (b.disabled) return 'DISABLED';
-      b.click(); return 'CLICKED';
+      b.click(); return 'CLICKED:' + b.dataset.testid;
     })()""", wait=20, retries=4)
 
 
@@ -315,55 +339,22 @@ def main():
     def type_pass(c, body):
         """Put one post into the composer.
 
-        Measured: a whole single line lands in one Input.insertText and in no
-        time (600 characters, 0.0s); character-by-character was only needed to
-        get around newlines, and an X Premium long post has none — X expands
-        past 280 characters into a thread on its own. A URL is different: X
-        turns it into a link entity mid-stream and drops the rest, so the
-        link is composed in one piece with imeSetComposition.
+        One Input.insertText for the whole string. Measured here: 2500
+        characters land in no time, and the four long posts that published
+        correctly all went in this way. Splitting the URL out to paste or to
+        compose it was tried in five shapes and every one of them broke the
+        text — the composition strands the URL's first character in the body,
+        a paste lets X fold the separator into the host, and both then read
+        back short. The URL is not special to the editor; it is just text.
         """
-        # Split so the whitespace BEFORE a URL goes in with the URL. Leaving it
-        # in the body made the editor read back "…edition。h\x00" — X committed
-        # the composition but the URL's own first character stayed in the body,
-        # so a correct post was rejected. Feeding " https://…" as one unit puts
-        # the space inside the link where it belongs.
-        parts = re.split(r"([ \t]*(?=https://))|(https://\S+)", body)
-        for part in [x for seg in parts for x in (seg if isinstance(seg, tuple)
-                                                  else (seg,)) if x]:
-            if part.lstrip().startswith("https://"):
-                caret_to_end(c)
-                time.sleep(0.4)
-                # A URL is the only thing that needs an IME composition, and an
-                # open composition is what makes Chrome claim the page holds
-                # unsaved changes. Set it and commit it back to back, and end
-                # the whole interaction with an explicit close so no composition
-                # is ever left open.
-                # Set the composition and let X linkify it. Committing it with
-                # insertText(same text) is what stopped the link from forming:
-                # the committed string arrived already formed and X had nothing
-                # to linkify, leaving plain text with a stray leading "h".
-                c.send("Input.imeSetComposition", text=part,
-                       selectionStart=len(part), selectionEnd=len(part),
-                       wait=25, retries=5)
-                time.sleep(1.6)
-                linked = c.js(LINK_PRESENT, wait=25, retries=4)
-                if not linked:
-                    # No entity yet: seal the composition by committing the same
-                    # text through the IME's own commit path, which is a
-                    # key event rather than an insertText.
-                    c.send("Input.imeSetComposition", text="",
-                           selectionStart=0, selectionEnd=0,
-                           wait=20, retries=3)
-                    time.sleep(1.2)
-                c.close_composition("")
-                continue
-            c.send("Input.insertText", text=part, wait=30, retries=5)
-            time.sleep(1.2)
-            st = jd(c.js(IS_ACTIVE, wait=25, retries=4))
-            if not st.get("ok"):
-                refocus(c)
-            elif st.get("len", 0) == 0:
-                raise DraftReplaced(0, len(part))
+        c.send("Input.insertText", text=body, wait=40, retries=6)
+        time.sleep(1.6)
+        st = jd(c.js(IS_ACTIVE, wait=25, retries=4))
+        if not st.get("ok"):
+            refocus(c)
+        elif st.get("len", 0) == 0:
+            raise DraftReplaced(0, len(body))
+
 
     def read_links(c):
         """The visible text of every link entity in the composer."""
@@ -466,19 +457,30 @@ def main():
     c.close_composition("")      # never leave an open composition behind
     st = read(c)
     got = st.get("text", "") or ""
+    # enabled must be asked the same way click_post() finds the button:
+    # IS_ACTIVE only looks for tweetButton, and the inline composer mounts
+    # tweetButtonInline, so this read false with a working button on screen.
+    st["enabled"] = jd(c.js(BUTTON_STATE, wait=25, retries=4)).get("enabled", 0) > 0
 
     # A link is rendered as an <a>, so it is not in textContent; read()
     # substitutes the link's own visible text, which is the URL as posted. A
     # truncated link therefore shows up as a short visible string, which is
     # exactly the defect that made earlier posts get deleted.
-    # A URL must be a real <a> entity, not text that happens to contain the
-    # string. read() matches the URL inside plain text, so checking the text
-    # alone passed a post whose link was never a link.
+    # The URL must survive intact as text. It is NOT required to be an <a>
+    # here: this composer never renders a link entity no matter how the text
+    # arrives (ten input methods measured, zero <a> nodes), and X resolves the
+    # URL server-side when the post lands. A text check still catches a
+    # dropped, truncated or duplicated URL, which is what it is for.
     urls_ok = all(u in got for u in want_urls)
-    if want_urls:
-        linked = read_links(c)
-        urls_ok = urls_ok and all(
-            any(u in l for l in linked) for u in want_urls)
+    # canon() removes all whitespace, so a URL glued onto the previous sentence
+    # compares equal to a properly separated one. X folded a newline into the
+    # host and read back "https://\ncrates.io": the characters were all
+    # present, the text compare passed, and the link was broken. What has to be
+    # true is the byte BEFORE each URL — a space, or the start of the text.
+    sep_ok = all(
+        (m.start() == 0 or got[m.start() - 1] == " ")
+        for u in want_urls for m in re.finditer(re.escape(u), got))
+    urls_ok = urls_ok and sep_ok
     fg, ft = canon(got), canon(text)
     # X only ever removes a SPACE while typing (at a Latin/CJK boundary); it
     # never drops or invents a non-space character. So the two texts must be
@@ -491,6 +493,20 @@ def main():
     # no differing index). Requiring len(fg) <= len(ft) instead keeps the
     # "nothing was invented" guarantee without failing on that hidden node.
     ok = (fg == ft) and urls_ok and len(fg) <= len(ft)
+
+    # X linkifies any dotted token in the body, not just the URL at the end.
+    # A bare "crates.io" became a t.co shortener and the replaced span read
+    # back as a line break, splitting the sentence — that shipped twice before
+    # it was caught here. Refuse the copy before typing rather than discover it
+    # after the post is live.
+    stray = [w for w in re.findall(r"[A-Za-z0-9_-]+\.[A-Za-z]{2,}", text)
+             if w not in ("github.com", "rust-lang.org", "docs.rs")]
+    if stray:
+        print(f"  REFUSING: {stray} in the body will be linkified by X and "
+              f"read back broken. Rewrite the copy without the dotted token.",
+              flush=True)
+        c.close()
+        return
 
     print(f"  LEN {st.get('len')} want {len(text)} enabled {st.get('enabled')} "
           f"match={ok} urls={len(want_urls)} urls_ok={urls_ok}", flush=True)
