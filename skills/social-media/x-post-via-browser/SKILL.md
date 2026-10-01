@@ -231,6 +231,28 @@ evaluate — or more than a second — is racing it. That is also why the drafts
 are dangerous to automate against, independent of any typing problem: a
 mistimed click publishes somebody's unfinished text.
 
+### Driving Draft through React directly — also dead
+
+The obvious next idea is to reach Draft's own handler through React instead of
+the DOM, since the DOM path is ignored. It is worth recording exactly what the
+tree looks like, because it is the same in every run:
+
+- The composer element's own `__reactProps$` has **`handlers: []`**. So does
+  every ancestor up the `parentElement` chain (depth 0-4, all empty). Draft
+  mounts its editor in a different subtree, not above this node.
+- Its `__reactFiber$` chain carries only `onClick`, `onEntityClick`,
+  `onShowMoreClick` — **no input handler anywhere**, so there is no `onChange`
+  to call.
+- No page globals match `/draft|editor|tweet|compose/i`, and there is no
+  `webpackChunkX` / `__webpack_require__` handle to reach the module.
+- A full breadth-first walk of the fiber tree from the root visits **13,764
+  nodes and finds zero** whose name matches `/editor|draft|compose|textarea/i`.
+  The production build is minified, so the component names that would identify
+  Draft are stripped.
+
+There is no hook to drive. React 17+ also only puts `__reactProps$` on nodes
+it created, and X's editor is not one of them.
+
 **Conclusion: post through `xurl` with a registered app.** The browser is for
 reading only. If that is not acceptable, the only safe route is a human at the
 keyboard.
