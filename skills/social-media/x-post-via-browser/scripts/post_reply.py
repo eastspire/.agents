@@ -54,13 +54,20 @@ SCROLL_INTO_VIEW = """(() => {
                 && !/\\/(analytics|photo|video|retweets|likes)/.test(
                       x.getAttribute('href')));
     if (!own) continue;
-    const box = a.getBoundingClientRect();
-    if (box.top > -80 && box.top < window.innerHeight - 80) {
+    // The reply control sits at the bottom of a post, so a post whose top is
+    // technically in view can still have its control below the fold. Scroll
+    // the control, not the article.
+    const btn = a.querySelector('[data-testid="reply"]');
+    const box = btn ? btn.getBoundingClientRect() : a.getBoundingClientRect();
+    const vh = window.innerHeight;
+    if (box.top > 40 && box.bottom < vh - 40) {
       return JSON.stringify({moved: false, top: Math.round(box.top)});
     }
     a.scrollIntoView({block: 'center', behavior: 'instant'});
-    const after = a.getBoundingClientRect();
-    return JSON.stringify({moved: true, top: Math.round(after.top)});
+    const after = (a.querySelector('[data-testid="reply"]')
+                   || a).getBoundingClientRect();
+    return JSON.stringify({moved: true, top: Math.round(after.top),
+                           vh: vh});
   }
   return JSON.stringify({moved: false, why: 'not on page'});
 })()"""
@@ -68,7 +75,14 @@ SCROLL_INTO_VIEW = """(() => {
 # Click the reply control on the article that OWNS this status id. Matching any
 # status link picks up a quoted post or a reply context instead, which is how a
 # reply once targeted a stranger's post.
-OPEN_REPLY = """(() => {
+# Open the reply box the way a pointer does, without a pointer.
+# element.click() only fires `click`, and X's controls act on the
+# mousedown/mouseup pair — so the first version reported CLICKED and opened
+# nothing. Dispatching that sequence on the element needs no coordinates and
+# takes neither the user's mouse nor the OS keyboard, which is exactly what
+# the no-mouse-keyboard rule protects. Clicking a stale position straight
+# after a scroll is what raised the draft prompt, so the caller waits first.
+REPLY_POINT = """(() => {
   for (const a of document.querySelectorAll('article')) {
     const own = [...a.querySelectorAll("a[href*='/status/']")]
       .find(x => x.getAttribute('href').split('/').pop() === SID
@@ -76,11 +90,22 @@ OPEN_REPLY = """(() => {
                       x.getAttribute('href')));
     if (!own) continue;
     const btn = a.querySelector('[data-testid="reply"]');
-    if (!btn) return 'NO_REPLY_BUTTON';
-    btn.click();
-    return 'CLICKED';
+    if (!btn) return JSON.stringify({why: 'no reply button'});
+    const box = btn.getBoundingClientRect();
+    if (!box.width) return JSON.stringify({why: 'reply button has no size'});
+    if (box.top < 0 || box.top > window.innerHeight) {
+      return JSON.stringify({why: 'reply control is off screen',
+                            top: Math.round(box.top)});
+    }
+    const at = {bubbles: true, cancelable: true, view: window,
+                clientX: box.left + box.width / 2,
+                clientY: box.top + box.height / 2, button: 0};
+    btn.dispatchEvent(new MouseEvent('mousedown', at));
+    btn.dispatchEvent(new MouseEvent('mouseup', at));
+    btn.dispatchEvent(new MouseEvent('click', at));
+    return JSON.stringify({opened: true, top: Math.round(box.top)});
   }
-  return 'TARGET NOT ON PAGE';
+  return JSON.stringify({why: 'target not on page'});
 })()"""
 
 # The reply editor is the one that was not on the page before the click. The
@@ -92,13 +117,20 @@ STATE = """(() => {
                  && n.offsetParent !== null);
   const seen = window.__seenEditors || new Set();
   const fresh = now.filter(n => !seen.has(n));
-  const inDialog = (list) => list.filter(n => n.closest('[role="dialog"]'));
+  // A leftover "keep your draft" prompt can sit on top of the reply box, and
+  // the first dialog on the page is then the wrong one. Scope by which dialog
+  // holds a visible editor, not by which came first.
+  const dialogs = [...document.querySelectorAll('[role="dialog"]')]
+    .filter(d => d.offsetParent !== null
+                 && d.querySelector('[data-testid="tweetTextarea_0"]'));
+  const inDialog = (list) => list.filter(n => dialogs.some(
+    d => d === n.closest('[role="dialog"]')));
   const e = inDialog(fresh)[0] || fresh[0] || inDialog(now)[0] || now[0];
   if (!e) return {ok: false, why: 'no visible editor'};
   e.focus();
   let text = '';
   for (const n of e.childNodes) text += n.textContent || '';
-  let scope = e.closest('[role="dialog"]') || e.closest('form')
+  let scope = dialogs.find(d => d.contains(e)) || e.closest('form')
               || e.parentElement;
   let send = null;
   while (scope && scope !== document.body) {
@@ -114,8 +146,10 @@ STATE = """(() => {
 })()""" % json.dumps(DRAFT_CLS)
 
 CLOSE = """(() => {
-  const d = document.querySelector('[role="dialog"]');
-  if (!d) return 'no dialog';
+  const d = [...document.querySelectorAll('[role="dialog"]')]
+    .filter(x => x.offsetParent !== null
+                 && x.querySelector('[data-testid="tweetTextarea_0"]'))[0];
+  if (!d) return 'no dialog with an editor';
   const btn = d.querySelector('[data-testid="app-bar-close"]');
   if (!btn) return 'no close button';
   btn.click();
@@ -126,9 +160,15 @@ SEND = """(() => {
   const now = [...document.querySelectorAll('[data-testid="tweetTextarea_0"]')]
     .filter(n => n.className && n.className.indexOf(%s) >= 0
                  && n.offsetParent !== null);
-  const e = now.find(n => n.closest('[role="dialog"]')) || now[0];
+  // Same scoping as STATE: the dialog that holds a visible editor, not
+  // whichever dialog the page happens to list first.
+  const dialogs = [...document.querySelectorAll('[role="dialog"]')]
+    .filter(d => d.offsetParent !== null
+                 && d.querySelector('[data-testid="tweetTextarea_0"]'));
+  const e = now.find(n => dialogs.some(d => d === n.closest('[role="dialog"]')))
+          || now[0];
   if (!e) return {sent: null, why: 'reply editor is gone'};
-  let scope = e.closest('[role="dialog"]') || e.closest('form')
+  let scope = dialogs.find(d => d.contains(e)) || e.closest('form')
               || e.parentElement;
   while (scope && scope !== document.body) {
     const btn = [...scope.querySelectorAll('button[data-testid]')]
@@ -250,9 +290,20 @@ def main() -> int:
         return 1
     c = C.Cdp(tabs[0]["webSocketDebuggerUrl"])
 
+    # A reply here has two jobs: it has to answer the post it sits under, and
+    # it has to carry one of the organisation's repos. A reply that does
+    # neither is an interruption with a link on it.
+    url = re.search(r"https://github\.com/([\w.-]+/[\w.-]+)", text)
+    if not url:
+        print("REFUSING - no repository from the organisation in this reply",
+              flush=True)
+        c.close()
+        return 1
+
     # X linkifies any dotted token and the replaced span reads back as a line
     # break, which splits the sentence. Refuse before typing, not after.
-    stray = re.findall(r"[A-Za-z0-9_-]+\.[A-Za-z]{2,}", text)
+    stray = [w for w in re.findall(r"[A-Za-z0-9_-]+\.[A-Za-z]{2,}", text)
+             if not w.startswith("github")]
     if stray:
         print("REFUSING: %s will be linkified and read back broken" % stray,
               flush=True)
@@ -299,11 +350,20 @@ def main() -> int:
               flush=True)
 
     c.js(SNAPSHOT, wait=25, retries=4)
-    opened = js(c, OPEN_REPLY, sid)
-    print("open reply:", opened, flush=True)
+    # A scroll needs time to settle. The virtual list re-renders, and a click
+    # into the old position is read as leaving the editor — the prompt that
+    # appeared when this was done in one step.
+    time.sleep(2.0)      # let a scroll settle before aiming at the control
+    pt = js(c, REPLY_POINT, sid)
+    print("open reply:", pt, flush=True)
+    if not pt.get("opened"):
+        print("NOT SENDING -", pt.get("why"), flush=True)
+        c.close()
+        return 1
+    opened = pt
     # Nothing is typed when the target is not on this page: a missing reply
     # control once let the flow fall through to the main composer.
-    if opened.get("_raw") != "CLICKED":
+    if not opened.get("opened"):
         print("NOT SENDING - target post is not on the open page", flush=True)
         c.close()
         return 1
@@ -341,7 +401,7 @@ def main() -> int:
         time.sleep(2.0)
         st = {}
         for _ in range(8):
-            js(c, OPEN_REPLY, sid)
+            js(c, REPLY_POINT, sid)
             time.sleep(1.5)
             st = js(c, STATE)
             if st.get("ok") and st.get("len", 0) == 0:
