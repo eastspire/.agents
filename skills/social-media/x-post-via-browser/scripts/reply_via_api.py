@@ -26,11 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ORG_REPOS = (
-    "github.com/crates-dev/",
-    "github.com/euv-dev/",
-    "github.com/hyperlane-dev/",
-)
+import org_repos                                          # noqa: E402
 
 DECL = re.compile(r"^#\s*target-status:\s*(\d{15,25})\s*$", re.M)
 HDR = re.compile(r"^#.*$\n?", re.M)
@@ -85,9 +81,10 @@ def main() -> int:
         # The two rules the browser path enforces, kept here too: the reply
         # carries a repository from the organisation, and it is not longer
         # than X allows. Neither is worth sending a broken reply for.
-        if not any(r in body for r in ORG_REPOS):
-            print("SKIP %s — no organisation repository in the reply"
-                  % f.name, flush=True)
+        repo = org_repos.find_repo(body)
+        if not repo:
+            print("SKIP %s — %s" % (f.name, org_repos.check(body)),
+                  flush=True)
             continue
         if len(body) > 280:
             print("SKIP %s — %d characters, over the limit"
@@ -111,8 +108,8 @@ def main() -> int:
             print("  FAILED: %s" % (out or err)[:200], flush=True)
             continue
         res = json.loads(out).get("data", {})
-        print("  sent %s -> https://x.com/i/status/%s\n"
-              % (res.get("id", "?"), res.get("id", "?")), flush=True)
+        print("  sent %s -> https://x.com/i/status/%s (carrying %s)\n"
+              % (res.get("id", "?"), res.get("id", "?"), repo), flush=True)
         sent += 1
     print("%d sent" % sent, flush=True)
     return 0 if sent else 1

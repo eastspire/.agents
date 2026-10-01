@@ -31,6 +31,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cdp as C                                          # noqa: E402
+import org_repos                                          # noqa: E402
 
 DRAFT_CLS = "public-DraftEditor-content"
 ME = "eastspire_sheng"
@@ -291,14 +292,15 @@ def main() -> int:
     c = C.Cdp(tabs[0]["webSocketDebuggerUrl"])
 
     # A reply here has two jobs: it has to answer the post it sits under, and
-    # it has to carry one of the organisation's repos. A reply that does
-    # neither is an interruption with a link on it.
-    url = re.search(r"https://github\.com/([\w.-]+/[\w.-]+)", text)
-    if not url:
-        print("REFUSING - no repository from the organisation in this reply",
-              flush=True)
+    # it has to carry a repository this account owns. A github.com link to
+    # somewhere else is not a promotion of this account's work, so the owners
+    # are matched rather than the host.
+    repo = org_repos.find_repo(text)
+    if not repo:
+        print("REFUSING - %s" % org_repos.check(text), flush=True)
         c.close()
         return 1
+    print("  carries %s" % repo, flush=True)
 
     # X linkifies any dotted token and the replaced span reads back as a line
     # break, which splits the sentence. Refuse before typing, not after.
