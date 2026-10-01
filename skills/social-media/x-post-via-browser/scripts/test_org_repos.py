@@ -34,21 +34,23 @@ CASES = [
 ]
 
 
-# A reply is capped at 280 characters; a post is not. Every draft written for
-# this was between 560 and 860, so none of it could have been sent, and
-# nothing caught it because the drafts were checked by eye.
+# The reply cap for this account is the member limit, not the 280 that free
+# accounts get. Checking against 280 once meant trimming every draft to a
+# number that never applied here.
+REPLY_LIMIT = 25000
 LENGTH_CASES = [
-    ("short enough", 279, True),
-    ("exactly at the limit", 280, True),
-    ("one over", 281, False),
+    ("a short reply", 200, True),
+    ("a long reply", 1167, True),
+    ("at the member limit", REPLY_LIMIT, True),
+    ("over the member limit", REPLY_LIMIT + 1, False),
 ]
 
 
 def check_length() -> int:
     bad = 0
-    print("\nreply length limit")
+    print("\nreply length limit (%d characters)" % REPLY_LIMIT)
     for name, n, want in LENGTH_CASES:
-        got = n <= 280
+        got = n <= REPLY_LIMIT
         if got != want:
             bad += 1
         print("  %s %-22s %d characters" % ("ok " if got == want else "FAIL",

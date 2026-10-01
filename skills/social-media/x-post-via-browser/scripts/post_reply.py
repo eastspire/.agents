@@ -34,6 +34,9 @@ import cdp as C                                          # noqa: E402
 import org_repos                                          # noqa: E402
 
 DRAFT_CLS = "public-DraftEditor-content"
+# The member reply cap. The 280 that free accounts get does not apply here,
+# and checking against it once meant trimming drafts to a fifth of an answer.
+REPLY_LIMIT = 25000
 ME = "eastspire_sheng"
 
 SNAPSHOT = """(() => {
@@ -300,7 +303,12 @@ def main() -> int:
         print("REFUSING - %s" % org_repos.check(text), flush=True)
         c.close()
         return 1
-    print("  carries %s" % repo, flush=True)
+    if len(text) > REPLY_LIMIT:
+        print("REFUSING - %d characters, over the %d limit"
+              % (len(text), REPLY_LIMIT), flush=True)
+        c.close()
+        return 1
+    print("  carries %s, %d characters" % (repo, len(text)), flush=True)
 
     # X linkifies any dotted token and the replaced span reads back as a line
     # break, which splits the sentence. Refuse before typing, not after.
