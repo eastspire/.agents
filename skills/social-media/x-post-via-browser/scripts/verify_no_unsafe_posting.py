@@ -5,7 +5,13 @@ Each rule here exists because breaking it had a concrete, measured cost. They
 are not style preferences.
 
   no page load      every refresh, navigate or tab spawn makes the user
-                    confirm it in their UI
+                    confirm it in their UI. One named exemption:
+                    ensure_browser.py may launch the browser and open the
+                    single tab the flow needs, because without it a nightly
+                    run dies whenever the browser is closed — and it is a
+                    separate file with one job so the exemption cannot
+                    spread. The self-test asserts that the same code under
+                    any other name is still blocked.
   no clearing       clearing the composer raises Chrome's unsaved-changes
                     dialog (系统可能不会保存您所做的更改), and that modal then
                     blocks every later CDP call until the user dismisses it
@@ -156,6 +162,19 @@ def check_syntax(path: Path) -> list[str]:
     return []
 
 
+# The ONE file allowed to load a page. Launching a browser and opening a
+# composer is a different act from driving one: it happens once, before
+# anything is typed, and it is what makes a nightly run possible at all. Every
+# other script stays forbidden, so "the publisher opened a tab" is still a
+# defect rather than a shortcut — and a new script cannot opt in by naming
+# itself, because the exemption is by exact filename here.
+PAGE_LOAD_EXEMPT = {"ensure_browser"}
+
+
+def _may_load_pages(path: Path) -> bool:
+    return path.stem in PAGE_LOAD_EXEMPT
+
+
 def check_file(path: Path) -> list[str]:
     """Report every banned call in one file, with its real line number.
 
@@ -191,6 +210,8 @@ def check_file(path: Path) -> list[str]:
             continue
         if rid == "no-open-ime" and COMMIT_EVIDENCE.search(code):
             continue                      # committed, therefore fine
+        if rid == "no-page-load" and _may_load_pages(path):
+            continue                      # bringing the browser up is its job
         shown = sorted(lines)[:6]
         problems.append(
             f"{path}: [{rid}] {banned} — {why}"
@@ -273,6 +294,27 @@ def self_test() -> int:
                 f"rule {rid} did NOT fire on fixture {name} "
                 f"(got: {hits or 'nothing'})")
         p.unlink(missing_ok=True)
+    # The page-load exemption is by exact filename, so the same code under
+    # any other name must still be blocked. Without this the exemption is a
+    # hole: a new script could name itself whatever it liked.
+    body = FIXTURES["no-page-load"]
+    d = Path("/tmp/_xguard_exempt")
+    d.mkdir(exist_ok=True)
+    for fname, should_fire in (("ensure_browser.py", False),
+                               ("publish.py", True),
+                               ("ensure_browser_helper.py", True)):
+        p = d / fname
+        p.write_text("import time\n" + body + "\n", encoding="utf-8")
+        hits = [h for h in check_file(p) if "[no-page-load]" in h]
+        p.unlink(missing_ok=True)
+        if should_fire and not hits:
+            failures.append(
+                f"page-load exemption leaked: {fname} was allowed to load a "
+                f"page")
+        if not should_fire and hits:
+            failures.append(
+                f"page-load exemption did not apply to {fname}: {hits}")
+
     for name, body in CLEAN.items():
         p = Path(f"/tmp/_xguard_clean_{name}.py")
         p.write_text(body, encoding="utf-8")

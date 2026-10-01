@@ -27,8 +27,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cdp as C                                          # noqa: E402
@@ -195,9 +197,23 @@ def main() -> int:
         return 1
 
     C.set_port(port)
+    # Bring the browser up if it is down, and open a tab if none exists. This
+    # is the only page load the flow ever performs, and it lives in
+    # ensure_browser.py because that is the one script the commit gate lets
+    # load a page. It runs before anything is typed, so it cannot race the
+    # composer or leave unsaved input behind.
+    ensure = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("ensure_browser.py")),
+         str(port)], capture_output=True, text=True, timeout=600)
+    for line in (ensure.stdout + ensure.stderr).strip().splitlines():
+        print("  " + line, flush=True)
+    if ensure.returncode != 0:
+        print("could not get a usable x.com tab", flush=True)
+        return 1
+
     pages = [t for t in C.tabs("page") if "x.com" in t.get("url", "")]
     if not pages:
-        print("no x.com tab open — open one first", flush=True)
+        print("no x.com tab open after ensure_browser", flush=True)
         return 1
     c = C.Cdp(pages[0]["webSocketDebuggerUrl"])
 

@@ -18,10 +18,24 @@ characters published and verified, then a 27-post series published on a timer.
 
 ## The path
 
-One tab, already open on x.com. Nothing navigates, nothing clears, nothing
-touches the mouse. For a series, `run_queue_tick.py` does this once per
-invocation and a cron job calls it on the interval — the queue's spacing is
-the cron's, not the script's.
+One tab, on x.com. Nothing navigates, nothing clears, nothing touches the
+mouse. For a series, `run_queue_tick.py` does this once per invocation and a
+cron job calls it on the interval — the queue's spacing is the cron's, not the
+script's.
+
+`publish.py` calls `ensure_browser.py` first, which handles the two states
+that used to need a human:
+
+| State | What happens |
+|---|---|
+| browser down | launched through the real-profile launcher, headed, `--no-tab` |
+| up, no x.com tab | ONE tab opened at the composer, then given time to paint |
+| up, with a tab | nothing at all |
+
+That is the only page load the flow performs, and it lives in its own script
+because that is the one file the commit gate lets load a page. Every other
+script stays forbidden, so "the publisher opened a tab" is still a defect
+rather than a shortcut.
 
 1. `python3 scripts/publish.py <port> --post N` — types, compares, does not click.
 2. Read the line it prints. `match=True` and `urls_ok=True`, or it stops.
@@ -33,9 +47,12 @@ types into it. That is the whole loop.
 
 ## Never navigate, never clear
 
-**No `location.assign`, no `Page.reload`, no `Page.navigate`, no second tab.**
-Every page load makes the user confirm it in their UI. If the composer is not
-open, click the control already on screen — `[data-testid="SideNav_NewTweetButton"]`,
+**No `location.assign`, no `Page.reload`, no `Page.navigate`, no second tab**
+— with one named exception, `ensure_browser.py`, which may open the single tab
+the flow needs and may launch the browser if it is down. Every page load makes
+the user confirm it in their UI, so the exception is one file with one job
+rather than a relaxation. If the composer is not open, click the control
+already on screen — `[data-testid="SideNav_NewTweetButton"]`,
 `a[href*="/compose/post"]`, `[data-testid="appTabBarPostBtn"]` — which opens it
 in place.
 
@@ -211,6 +228,7 @@ every call site checks it.
 |---|---|
 | `scripts/cdp.py` | CDP client: control frames, retrying `js()`, auto-reconnect, `close_composition()`. **No `new_tab()`** — a client that offers the call is a client that gets used. |
 | `scripts/publish.py` | The publisher. `--show` the copy, `--tabs` the X tab, `--post N` type and compare, `--go` click. |
+| `scripts/ensure_browser.py` | Launches the browser if it is down; opens one composer tab if there is none. The only script allowed to load a page. |
 | `scripts/verify_post.py` | Proves one post landed: author, text prefix, link card. |
 | `scripts/whose_posts.py` | What is on screen, split by author. |
 | `scripts/run_queue_tick.py` | Idempotent queue runner — one item per invocation, for a cron series. Verifies on the timeline **before** recording an item as posted, so a click that did not land stays queued instead of being counted as done. |
