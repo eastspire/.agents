@@ -8,7 +8,7 @@ platforms: [macos, linux]
 metadata:
   hermes:
     tags: [twitter, x, posting, cdp, browser-automation, real-profile]
-    related_skills: [chrome-real-profile-launch, chrome-devtools-protocol, xurl]
+    related_skills: [chrome-real-profile-launch, chrome-devtools-protocol]
 ---
 
 # Posting to X from the user's logged-in browser
@@ -285,10 +285,56 @@ The same single tab, no navigation: open the status, the article's `caret`
 button, 删除 in the menu, 删除 in the confirmation dialog. Verify the article is
 gone. The user may prefer to do this by hand.
 
-## The alternative, and when it is better
+## There is no API path for this account
 
-`xurl` posts through the official API: fast, retryable, and it cannot touch the
-browser, the drafts, or the profile. It needs the user to register an app once
-(pasting a Client Secret, which the agent cannot do). When a run is long, the
-draft pool is rotating, or the user wants posts queued rather than typed, that
-is the better tool — reach for it rather than fighting the composer.
+Do not reach for the official X API, `xurl`, or any other credentialed
+alternative. The user has ruled it out, and it stays ruled out regardless of
+what fails in the DOM path below: a dead end in the composer is not an argument
+for introducing a channel the user has closed.
+
+The cost of that ruling is written down here so the next run does not re-derive
+it. The reply path is the one place this skill cannot complete unattended, and
+the reason is specific, not a general one about automation.
+
+## Why the reply path stops where it does
+
+Measured on this build, 2026-10-01, on the live timeline. The reply box opens
+fine — that part works, and a probe that reports otherwise is measuring the
+wrong thing. It is a visible `[data-testid="tweetTextarea_0"]` inside a
+`[role="dialog"]`, empty, labelled 回复. The failure is one step later, and it
+is the input channel:
+
+| activation tried | result |
+|---|---|
+| `element.click()` | fires `click` only; X acts on mousedown/mouseup |
+| synthetic mousedown + mouseup + click on the element | no new editor, watched 12s |
+| full PointerEvent sequence (pointerdown included) | no new editor |
+| focus the editor, then Enter / Space | focus lands (`document.activeElement === el`), X ignores it |
+| focus the editor, then real CDP `dispatchKeyEvent` per character | `focused: true`, 41 characters sent, editor length stays 0 |
+
+That last row is the one that settles it. The editor takes focus — so a
+leftover overlay is not holding it — and then accepts nothing. X is refusing
+synthetic input, not the script being wrong. The routes that remain are a real
+pointer and a real keyboard, both of which this skill's boundaries forbid, and
+the API, which this account has closed.
+
+**A leftover dialog is still worth clearing before any of this.** An
+editor-less `[role="dialog"]` captures focus, `btn.focus()` returns without
+throwing, and `document.activeElement === btn` is false. Every later synthetic
+input then goes into the void and reads as "X ignores automation". Two of them
+were open at once. Clear dialogs that contain no editable element first, and
+only then conclude anything about the input channel.
+
+**Do not open several tabs to work around this.** A new tab does not change
+what X accepts, and the user's rule is one X tab.
+
+Two further corrections that cost real time, recorded so they are not repeated:
+
+- **Counting editors does not detect the reply box.** The main composer is
+  already in any page-wide list of editables, so a reply box appearing does not
+  change the count. Find the editor by scoping to a visible dialog, not by
+  comparing totals.
+- **The composer is not the reply box, and a cleared composer proves nothing.**
+  X empties the composer after a successful send. Composer length zero is
+  ambiguous between "sent" and "never typed". Verify against the target's
+  social context, a returned status id, and `in_reply_to`.
