@@ -349,6 +349,16 @@ def main() -> int:
         print("  scrolled the post into view (top %s)" % pos.get("top"),
               flush=True)
 
+    c.js("""(() => {
+      for (const d of document.querySelectorAll('[role="dialog"]')) {
+        if (d.offsetParent === null) continue;
+        if (d.querySelector('[contenteditable="true"]')) continue;
+        const b = d.querySelector('[data-testid="app-bar-close"]');
+        if (b) b.click(); else d.remove();
+      }
+    })()""", wait=25, retries=4)
+    time.sleep(1.0)
+
     c.js(SNAPSHOT, wait=25, retries=4)
     # A scroll needs time to settle. The virtual list re-renders, and a click
     # into the old position is read as leaving the editor — the prompt that
@@ -361,6 +371,28 @@ def main() -> int:
         c.close()
         return 1
     opened = pt
+    time.sleep(2.5)
+    # The draft prompt appears after the click, so clear overlays again.
+    c.js("""(() => {
+      for (const d of document.querySelectorAll('[role="dialog"]')) {
+        if (d.offsetParent === null) continue;
+        if (d.querySelector('[contenteditable="true"]')) continue;
+        const b = d.querySelector('[data-testid="app-bar-close"]');
+        if (b) b.click(); else d.remove();
+      }
+    })()""", wait=25, retries=4)
+    time.sleep(1.0)
+    probe = js(c, STATE)
+    if not probe.get("ok") or not probe.get("in_dialog"):
+        print("NOT SENDING - the reply box did not open. Measured on this "
+              "browser: a synthesised mousedown/mouseup on the control "
+              "changes nothing, and with the overlays gone focus does land "
+              "on it but X ignores a synthesised Enter and Space. Only a "
+              "real click opens it. Open the reply box yourself and the "
+              "typing, the exact length check and the verification below "
+              "all still work.", flush=True)
+        c.close()
+        return 1
     # Nothing is typed when the target is not on this page: a missing reply
     # control once let the flow fall through to the main composer.
     if not opened.get("opened"):
