@@ -208,15 +208,10 @@ that is the better tool — reach for it rather than fighting the composer.
 
 | Script | Purpose |
 |---|---|
-| `scripts/cdp.py` | CDP client: control-frame handling, retrying `js()`, auto-reconnect on send, `set_port()`, `close_composition()`. |
-| `scripts/selftest.py` | Verifies the client before trusting it. **Run this first.** |
-| `scripts/bench.py` | Measures evaluate latency, to tell warm-up from a real stall. |
-| `scripts/publish.py` | The publisher. `--post N` reads the box and posts only on an exact match; `--go` clicks. `--show` prints the copy, `--tabs` the X tabs. |
-| `scripts/top_of_timeline.py` | Reads the newest posts off the profile with their ids and text. This is the verification step — run it after every post. |
-
-`publish.py` takes its copy from `x_copy_long.json` next to it. It opens
-nothing, navigates nowhere, clears nothing, and never touches the mouse or the
-OS focus; the tab must already be on `x.com/compose/post`.
+| `scripts/cdp.py` | CDP client: control-frame handling, retrying `js()`, auto-reconnect on send, `set_port()`, `close_composition()`. **No `new_tab()`** — see below. |
+| `scripts/publish.py` | The publisher. `--show` prints the copy, `--tabs` the X tabs, `--post N` types and verifies, `--go` clicks. |
+| `scripts/top_of_timeline.py` | Reads the newest posts off the profile with ids and text. The verification step — run it after every post. Reuses the open tab. |
+| `scripts/verify_no_unsafe_posting.py` | The commit gate. `--self-test` proves every rule fires. |
 
 ```bash
 # once, and only if no instance is up
@@ -228,14 +223,41 @@ python3 scripts/publish.py 9240 --post 0          # type and verify, no click
 python3 scripts/publish.py 9240 --post 0 --go     # click
 python3 scripts/top_of_timeline.py 9240           # confirm it landed
 
-# a different set of posts
 X_COPY=/path/to/other.json python3 scripts/publish.py 9240 --post 0 --go
 ```
 
-The copy defaults to `scripts/x_copy_example.json` next to the script, which is
-the set that was actually published. Replace it, or point `X_COPY` elsewhere;
-the content is yours, not the skill's.
+The copy defaults to `scripts/x_copy_example.json` next to the script — the set
+that was actually published. Replace it or point `X_COPY` elsewhere; the
+content is yours, not the skill's.
 
-`selftest.py` earns its place: on its first run it reported `close_tab` as
-broken when the check's own arithmetic was wrong, and it flagged a "slow"
-client that was really just doing its warm-up.
+## The gate is registered, not just written
+
+`verify_no_unsafe_posting.py` runs from the **global pre-commit hook**
+(`~/.git-hooks/pre-commit`, installed via `core.hooksPath`), before the Rust
+detection, so it applies to every repo — including the skills repo, which the
+existing hook skips for having no `Cargo.toml`. A rule that lives only in this
+document is a rule that gets broken by the next person who does not read it;
+that has happened to every rule on this list.
+
+It blocks, on staged `.py` files under a `scripts/` or `hooks/` directory:
+
+| Rule | What it stops |
+|---|---|
+| `no-page-load` | `location.assign`, `Page.reload`, `Page.navigate`, `new_tab`, `Target.createTarget` |
+| `no-clearing` | `clear(c)`, `execCommand('delete'/'selectAll')`, a Backspace loop |
+| `no-open-ime` | `imeSetComposition` with nothing that commits it |
+| `no-mouse-keyboard` | `Page.bringToFront`, `Input.dispatchMouseEvent`, `bring_to_front`, `click_at_xy` |
+| `no-clipboard` | `pbcopy`, `pbpaste`, a paste key event |
+
+Two properties make it usable rather than merely present. It tokenizes the
+source instead of regexing raw text, so prose that *mentions* a banned call
+(this document's own notes do) is not a violation while a real call is, and
+line numbers are true — `ast.unparse()` was tried first and reported a clean
+file as violating at lines 382/574/789. And `--self-test` runs twelve
+violating fixtures and three clean ones, asserting that each rule fires on its
+own fixture and that none fires on the clean set, because a gate that has never
+been shown to fail is indistinguishable from a gate that does nothing.
+
+It caught a real violation on first run: `top_of_timeline.py` was opening a new
+tab on every verification run, so the verification step was breaking the rule
+it existed to confirm.

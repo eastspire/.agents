@@ -47,8 +47,9 @@ def tabs(kind=None):
     return [t for t in out if kind is None or t.get("type") == kind]
 
 
-def new_tab(url):
-    return http("/json/new?" + urllib.parse.quote(url, safe=""), method="PUT")
+# There is deliberately no new_tab() here. Opening a tab is a page load, and
+# every page load makes the user confirm it in their UI. A client that offers
+# the call is a client that gets used; the caller reuses the tab already open.
 
 
 def close_tab(target_id):
