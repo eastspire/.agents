@@ -188,20 +188,27 @@ AI_WORDS = ("rust", "agent", "llm", "token", "context", "cargo", "wasm",
             "inference", "编程", "模型", "编译", "工具", "宏", "上下文", "智能体")
 
 
-def pick_target(c):
-    """Choose a live target from the page as it is right now.
+def pick_target(c, want=""):
+    """Find the post on the page that a reply was written for.
 
-    The status id has to come from this read, not from a file written by an
+    The status id comes from this read, never from a file written by an
     earlier scroll: the timeline replaces posts continuously, so an id read
-    minutes ago names something no longer on screen.
+    minutes ago names something no longer on screen. When the reply names its
+    target, only that post qualifies — searching for a keyword instead is how
+    a reply ends up under the wrong post.
     """
     r = c.js(PICK, wait=30, retries=5)
     rows = json.loads(r) if isinstance(r, str) else r
+    if not isinstance(rows, list):
+        return "", None
     for row in rows:
         if row.get("who") == ME or not row.get("text"):
             continue
-        low = row["text"].lower()
-        if any(w in low for w in AI_WORDS):
+        if want:
+            if row["sid"] == want:
+                return row["sid"], row
+            continue
+        if any(w in row["text"].lower() for w in AI_WORDS):
             return row["sid"], row
     return "", None
 
@@ -209,6 +216,11 @@ def pick_target(c):
 def main() -> int:
     port, sid, arg = int(sys.argv[1]), sys.argv[2], sys.argv[3]
     text = open(arg, encoding="utf-8").read() if os.path.exists(arg) else arg
+    for_sid = ""
+    m = re.search(r"^#\s*target-status:\s*(\d{15,25})\s*$", text, re.M)
+    if m:
+        for_sid = m.group(1)
+        text = re.sub(r"^#.*$\n?", "", text, flags=re.M)
     C.set_port(port)
     tabs = [t for t in C.tabs("page") if "x.com" in t.get("url", "")]
     if not tabs:
@@ -226,14 +238,32 @@ def main() -> int:
         return 1
 
     if sid == "auto":
-        sid, row = pick_target(c)
+        sid, row = pick_target(c, for_sid)
         if not sid:
-            print("NO TARGET — nothing AI-related on the page right now",
-                  flush=True)
+            if for_sid:
+                # Say which post is missing. "nothing relevant" would send
+                # the reader looking for a topic problem that is not there.
+                print("NOT ON THE PAGE - this reply is written for %s and "
+                      "that post is not in view; scroll to it and run again"
+                      % for_sid, flush=True)
+            else:
+                print("NO TARGET - the reply names no post, and nothing on "
+                      "the page matches the AI/tooling vocabulary", flush=True)
             c.close()
             return 1
-        print("target: @%s %s" % (row["who"], sid), flush=True)
-        print("  %s" % row["text"][:120], flush=True)
+        # A reply is written for one post. A reply file says which, and the
+        # post on screen has to be that one. "auto" once answered a post about
+        # quant trading with an argument about compile-time checks, so the
+        # target is chosen from the reply rather than the other way round.
+        if for_sid and for_sid != sid:
+            print("NOT THE POST THIS REPLY WAS WRITTEN FOR", flush=True)
+            print("  reply targets  %s" % for_sid, flush=True)
+            print("  page shows     %s @%s" % (sid, row["who"]), flush=True)
+            c.close()
+            return 1
+        print("target: @%s %s%s" % (
+            row["who"], sid, " (declared)" if for_sid else ""), flush=True)
+        print("  %s" % row["text"][:140], flush=True)
 
     c.js(SNAPSHOT, wait=25, retries=4)
     opened = js(c, OPEN_REPLY, sid)
