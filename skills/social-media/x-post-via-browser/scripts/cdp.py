@@ -52,13 +52,6 @@ def tabs(kind=None):
 # the call is a client that gets used; the caller reuses the tab already open.
 
 
-def close_tab(target_id):
-    try:
-        return http(f"/json/close/{target_id}", method="GET")
-    except Exception:
-        return None
-
-
 class Cdp:
     def __init__(self, ws_url, timeout=30):
         # Chrome rejects websocket upgrades from an Origin header it does not
@@ -174,9 +167,3 @@ class Cdp:
             self.ws.close()
         except Exception:
             pass
-
-
-def composer_text(c):
-    """The composer's current text, or None when it is empty."""
-    return c.js("""(() => { const e = document.querySelector('[data-testid="tweetText"]');
-               return e ? e.textContent : null; })()""")
