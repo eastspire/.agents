@@ -216,6 +216,14 @@ All five fail, and none of them is a selector problem.
 clipboard is empty, and populating it with `pbcopy` hung outright in this
 environment.
 
+The rate matters as much as the mechanism. Across one session the restored
+draft changed on every single composer open: a grokbot billing note, a
+"Trump/AI czar" post, a DeepSeek/Ascend thread, a Hengdian actor interview, a
+Netflix architecture note, a Gemini 4 story, an Omarchy desktop post, an
+NVIDIA agent-safety post, a 42-character "雷电芽衣" line, and more. Each is
+somebody's unfinished work, and the pool rotates faster than any multi-step
+automation can complete.
+
 The blocker underneath all of them: **the draft pool rotates while you work.**
 A fresh composer, a re-render, or a slow typing run can each replace the
 editor contents with a different draft. Anything that takes more than one
