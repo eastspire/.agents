@@ -253,9 +253,51 @@ tree looks like, because it is the same in every run:
 There is no hook to drive. React 17+ also only puts `__reactProps$` on nodes
 it created, and X's editor is not one of them.
 
-**Conclusion: post through `xurl` with a registered app.** The browser is for
-reading only. If that is not acceptable, the only safe route is a human at the
-keyboard.
+### The actual cause: `[data-testid="tweetText"]` is a decoy
+
+Every failure above shares one root cause, and finding it makes the composer
+drivable. There are two nodes and only one of them is real:
+
+| node | contenteditable | role | holds the text? |
+|---|---|---|---|
+| `[data-testid="tweetText"]` | **`null`** | none | no — a display layer, and its textContent goes stale |
+| `[data-testid="tweetTextarea_0"]` | `true` | `textbox` | **yes** |
+
+Measured on the live page:
+
+```
+find_editable: wrapperTestId tweetTextarea_0, totalNodes 6, editableCount 6
+  depth 0 DIV tweetTextarea_0 role=textbox ce=true   <- the real editor
+  depth 1..5 DIV/SPAN                                 <- Draft's internals
+```
+
+So all six "input" attempts were aimed at a node that cannot hold text. What
+actually works, measured end to end:
+
+1. **CDP clears the editor** — select all, `execCommand('delete')`, caret to end.
+   This is reliable and is the only way to be sure a restored draft is gone.
+2. **computer_use `set_value` writes it** — the AX tree exposes the real
+   editor as `AXTextArea '帖子文本'`, and setting its AXValue replaces the
+   whole content.
+3. **CDP verifies and clicks** — read `textContent` back and compare against
+   the intended copy, then click the enabled button.
+
+A full post was verified this way: composer cleared, 135 characters written,
+matched character for character, `发帖` enabled, click accepted, and the post
+appeared on the profile 13 seconds later as
+`@eastspire_sheng · 13秒`.
+
+**Two things that made it look impossible:**
+
+- Real OS keystrokes land, but `type` cannot send CJK: a 159-character
+  Chinese post delivered `0 of 159` via `key_events_fg`. Use `set_value` for
+  non-ASCII; keystrokes are fine for ASCII.
+- Reading through the decoy node made working input look broken. The first
+  computer_use keystroke (`X`) *did* land — the decoy just never showed it.
+
+**A post has been published this way**, so the browser is not read-only after
+all. The rest of this document is kept because each dead end is a thing worth
+not re-trying, and because the decoy node explains most of them.
 
 ## `--headless` gets 403; `--headed` does not
 
