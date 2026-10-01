@@ -62,15 +62,28 @@ class Cdp:
     def __init__(self, ws_url, timeout=30):
         # Chrome rejects websocket upgrades from an Origin header it does not
         # expect; suppress it.
-        self.ws = websocket.create_connection(
-            ws_url, timeout=timeout, origin=None,
-            suppress_origin=True, enable_multithread=True)
+        # url and timeout are kept so _reconnect() can rebuild the socket with
+        # the same settings after Chrome drops an idle connection.
+        self.url = ws_url
+        self.timeout = timeout
+        self.ws = self._connect()
         self.id = 0
+
+    def _connect(self):
+        return websocket.create_connection(
+            self.url, timeout=self.timeout, origin=None,
+            suppress_origin=True, enable_multithread=True)
 
     def send(self, method, wait=20, **params):
         self.id += 1
         mine = self.id
-        self.ws.send(json.dumps({"id": mine, "method": method, "params": params}))
+        try:
+            self.ws.send(json.dumps({"id": mine, "method": method,
+                                     "params": params}))
+        except Exception:
+            self._reconnect()
+            self.ws.send(json.dumps({"id": mine, "method": method,
+                                     "params": params}))
         end = time.time() + wait
         while time.time() < end:
             try:
@@ -123,6 +136,37 @@ class Cdp:
                 return n
             time.sleep(3)
         return n
+
+    def _reconnect(self):
+        """Re-open the socket after Chrome closed an idle connection.
+
+        A long settle() leaves the socket untouched for minutes and Chrome
+        eventually drops it, which surfaced as
+        WebSocketConnectionClosedException in the middle of a post while the
+        browser itself was still healthy. Reconnecting once and retrying the
+        call is enough; the page state is untouched.
+        """
+        try:
+            self.ws.close()
+        except Exception:
+            pass
+        self.ws = self._connect()
+        return self
+
+    def close_composition(self, final=""):
+        """End any open IME composition.
+
+        imeSetComposition STARTS a composition. Leaving it open makes Chrome
+        treat the page as holding unsaved input, which is what produces the
+        "系统可能不会保存您所做的更改" dialog on any later unload — and Escape
+        discards the whole composition, not one character. An insertText
+        carrying the final text commits it once and closes it.
+        """
+        self.send("Input.imeSetComposition", text=final, selectionStart=len(final),
+                  selectionEnd=len(final), wait=15, retries=2)
+        if final:
+            self.send("Input.insertText", text=final, wait=15, retries=2)
+        return True
 
     def close(self):
         try:

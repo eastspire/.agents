@@ -281,6 +281,25 @@ echo "run.sh: copy verified (Default/Cookies present)"
 
 # --- step 3: launch
 echo "run.sh: step 3/3 — launching Chrome on the copy"
+# Clash Verge Rev (and Clash for Windows / v2rayN) expose a local HTTP proxy.
+# Without it a browser launched with its own --user-data-dir cannot complete a
+# TLS handshake to any HTTPS host on this machine, because only the TUN route
+# that the daily browser uses is available. Probe for the port and pass it
+# explicitly; the system proxy settings are deliberately left alone.
+PROXY_FLAG=""
+if [ -n "${HERMES_CHROME_PROXY:-}" ]; then
+  PROXY_FLAG="--proxy-server=${HERMES_CHROME_PROXY}"
+  echo "run.sh: proxy from HERMES_CHROME_PROXY=${HERMES_CHROME_PROXY}"
+else
+  for p in 7897 7890 7891 8080 10809 1080; do
+    if nc -z -G 1 127.0.0.1 "$p" 2>/dev/null; then
+      PROXY_FLAG="--proxy-server=http://127.0.0.1:$p"
+      echo "run.sh: using local proxy http://127.0.0.1:$p"
+      break
+    fi
+  done
+  [ -z "$PROXY_FLAG" ] && echo "run.sh: no local proxy port found" >&2
+fi
 T_LAUNCH=$(date +%s)
 LOG="$WORK/chrome.log"
 if [ "$PLATFORM" = "windows" ]; then
@@ -296,6 +315,7 @@ else
     --profile-directory="Default" \
     --safebrowsing-disable-download-protection \
     --disable-features=InsecureDownloadWarnings \
+    ${PROXY_FLAG:-} \
     > "$LOG" 2>&1 &
   disown $! 2>/dev/null || true
 fi

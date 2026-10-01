@@ -1,374 +1,241 @@
 ---
 name: x-post-via-browser
-description: "Use when posting to X/Twitter through the user's logged-in browser, or when xurl has no registered app. Covers what is proven, what is forbidden, and the draft-destroying failure that must be avoided."
-version: 1.0.0
+description: "Use when posting to X/Twitter through the user's logged-in browser. The proven path, and the four things that raise an unsaved-changes dialog."
+version: 2.0.0
 author: local
 license: MIT
 platforms: [macos, linux]
 metadata:
   hermes:
-    tags: [twitter, x, posting, cdp, browser-automation, real-profile, xurl, graphql, drafts]
-    related_skills: [xurl, chrome-real-profile-launch, chrome-devtools-protocol, twitter-no-login]
+    tags: [twitter, x, posting, cdp, browser-automation, real-profile, drafts]
+    related_skills: [chrome-real-profile-launch, chrome-devtools-protocol, xurl]
 ---
 
-# Posting to X from a logged-in browser
+# Posting to X from the user's logged-in browser
 
-## What this skill actually concludes
+Verified 2026-10-01 on a Premium account: four long posts of 608–1060
+characters published, each verified character-for-character on the profile
+timeline afterwards.
 
-Two separate findings, both measured on 2026-09-30 against a logged-in
-`@eastspire_sheng` session. The first was wrong in this skill's earlier
-revision and is corrected below; the correction matters more than the
-conclusion.
+## The shortest path that works
 
-1. **The restored drafts are SERVER-side and cannot be cleared from the
-   client.** Two measurements point opposite ways and the second settles it:
-   the drafts dialog is empty (`emptyState`: "保留想法 / 还没有准备好发帖？"),
-   which suggests nothing is stored on x.com; but
-   `Storage.clearDataForOrigin` (local_storage, indexeddb, cache_storage,
-   service_workers) returns success and a brand new composer still comes back
-   with a *different* draft every time. So the pool lives server-side, and the
-   empty dialog is a view filter, not the store.
-2. **Posting still needs an API app.** The internal endpoints refuse a web
-   session even with a valid bearer, so the browser is for reading.
+1. Launch the profile copy (headed — see below).
+2. Open **one** tab on `x.com/compose/post`. This is the only page load.
+3. Focus the editor, read what is in it.
+4. If it is empty, put the whole post in with **one** `Input.insertText`.
+5. Read it back and compare against the source, normalised.
+6. If it matches and the button is enabled, click `[data-testid="tweetButton"]`.
+7. Read the profile timeline and confirm the status id. `CLICKED` is not proof.
+8. Post the next one the same way — X empties the composer itself after a post,
+   so step 3 finds it empty and step 4 types into it.
 
-Use **`xurl`** for posting. Use the browser only to *read*.
+## Never refresh, never clear, never navigate
 
-## The failure that matters: X restores drafts into every new composer tab
+These are the rules, and they are not stylistic.
 
-Measured directly.
+**No `location.assign`, no `Page.reload`, no `Page.navigate`, no `one_tab.py`
+style reopen, no second tab.** Every page load makes the user confirm it in
+their UI. If the composer is not open, click the compose control already on
+screen — `[data-testid="SideNav_NewTweetButton"]`, `a[href*="/compose/post"]`,
+or `[data-testid="appTabBarPostBtn"]` — which opens it in place.
 
-1. The user had 10 composer tabs open, each holding an unfinished tweet of
-   their own (grokbot billing, GLM-5.3, OpenAI revenue, GPT-6.1, a Hengdian
-   actor interview, and so on).
-2. Opening a **fresh** tab on `https://x.com/compose/post` came back with the
-   editor **pre-filled from X's server**. Different tab, different draft each
-   time — the second probe loaded an "AI czar" draft that had not been open
-   in any local tab.
-3. Ruled out the obvious explanations:
-   - `location.href` was the tab we opened, so the CDP target was correct.
-   - The new target id was not in the pre-existing target list, so it was
-     genuinely a new tab.
-   - `localStorage` and `sessionStorage` held no draft-like key, which at the
-     time looked like proof they were local. **That inference was also wrong**,
-     and was corrected by the successful `clearDataForOrigin` above.
+**Never empty the composer.** Clearing it, reloading, navigating and pressing
+Escape all raise Chrome's own dialog, 「系统可能不会保存您所做的更改」, and that
+modal then blocks every later CDP call until the user dismisses it. X sets no
+`onbeforeunload` handler (verified `window.onbeforeunload === null`); the dialog
+is Chrome's, caused by an IME composition left open on a contenteditable.
 
-Each open produced a *different* draft, so it is a pool, not one slot. Closing
-composer tabs does not help: after closing every composer tab on a freshly
-launched instance, a new composer still came back with text. Discarding the
-restored draft via `app-bar-close` also does not help.
+So the flow is read-only about the box: **read it; type only into an empty one;
+if it already holds exactly the requested post, post it as it stands; if it
+holds anything else, leave it and report.** There is no retry that does not
+involve clearing, so a failure here is a stop, not a loop.
 
-Consequence: **any "open a new tab, type, click Post" automation will overwrite
-and publish whichever draft X happens to restore.** There is no selector that
-avoids this; the selector finds a real editor that already has text in it.
+**Close the IME composition.** `Input.imeSetComposition` STARTS one. Always
+follow it with `Input.insertText` carrying the same text, which commits it
+once. Sending the composition twice duplicated a post to 376 characters. End
+every run with an explicit close.
 
-What saved the drafts was a content assertion, not a better selector: the script
-compared the editor's text against what it was about to type and refused. If
-that check is missing, the user's unfinished tweet goes out under automation.
+## Never take the mouse or the keyboard
 
-## Clearing the local drafts (the actual fix)
+No `Page.bringToFront`, no `Input.dispatchMouseEvent`, no computer_use
+`bring_to_front`, no OS clicks. Focus is set with `el.focus()` inside the page.
+The user's pointer and OS focus are never moved.
 
-Because the drafts are local, `Storage.clearDataForOrigin` over CDP removes
-them and leaves the login alone — **do not include `cookies` in
-`storageTypes`** or the session is lost and has to be re-established.
+## A long post is ONE insertText
 
-```python
-c.send("Storage.clearDataForOrigin",
-       origin="https://x.com",
-       storageTypes="local_storage,indexeddb,cache_storage,service_workers")
-```
+Measured: 2500 characters land in 0.0s, with newlines and all. Character-by-
+character typing was only ever needed to work around a whole-string insert on
+a **short** post, which X treated as a submit — that does not apply to a long
+one. X expands past 280 characters into a thread on its own, so a long post
+does not have to be split, and the paragraph breaks can stay.
 
-Then verify: open a composer and read
-`document.querySelector('[data-testid="tweetText"]').textContent`. Empty means
-the pool is clear.
+A URL is the exception. Typed per character, X turns it into a link entity
+mid-stream and the rest is dropped (`https://github.c` was all that survived).
+`Input.imeSetComposition` with the whole URL delivers all of it. Put URLs near
+the end, and check the link card after posting.
 
-**Do not use `indexedDB.databases()` in the page.** It hangs indefinitely
-under headless Chrome — measured twice, each time a multi-minute stall. The
-protocol method does not depend on the page and is the one to use.
+## Two traps in the editor
 
-With a clean pool the composer is safe to drive: type with
-`document.execCommand('insertText')`, re-read the editor and compare it to
-what was intended, then click `[data-testid="tweetButton"]`.
+**Two nodes share `data-testid="tweetTextarea_0"`.** One is real (its `class`
+contains `public-DraftEditor-content`), one is an empty duplicate.
+`querySelector` returns whichever is first in document order, which changes
+between renders. That alone produced writes that vanished and a click that
+posted a single stray character. Address `document.activeElement` and refuse to
+act when it is not the Draft editor.
 
-## Two CDP client bugs that cost hours here
+`[data-testid="tweetText"]` is a **decoy** — a display layer whose
+`textContent` goes stale. Never write to it and never read it to decide whether
+text landed.
 
-Both were silent, which is what made them expensive. Use a client that handles
-them, or copy `scripts/cdp.py` from this skill.
+**The raw length lies.** X's Draft editor keeps hidden text nodes of its own,
+so it reports 860 characters against an 859-character source even when the
+visible text matches exactly. Gate on the normalised text compare, not on
+length; a raw-length check rejects posts that are perfect.
 
-**WebSocket control frames are not JSON.** opcodes 8/9/10 (close/ping/pong) and
-2 (binary) share the framing but not the payload. Parsing a ping as JSON raises
-`UnicodeDecodeError`; swallowing that as "no reply" makes every
-`Runtime.evaluate` look like it never ran. Check `b1 & 0x0F` before decoding.
+## Verifying
 
-**The first few evaluates on a new tab lose their replies.** While the renderer
-swaps execution contexts the reply never comes back. Measured: 33 s of warm-up
-on a fresh target, then 0.5 s per call. Fail fast (a 6 s wait) and retry
-immediately — a long wait per attempt turns this into minutes of apparent
-hang, and an unbounded wait produced a 14-minute freeze here. Budget ~35 s of
-warm-up per new tab and reuse one tab when several calls are needed.
+Normalise both sides the same way: drop all whitespace, drop the space X
+removes at a Latin/CJK boundary while typing (`AI 时代` becomes `AI时代`), and
+strip URLs before comparing — then require every expected URL present verbatim
+as the link's own **visible text**, since X rewrites the href to a `t.co`
+shortener. A URL is stored as an `<a>` and is not in `textContent`.
 
-A `js()` that returns `None` on failure is the root of a whole class of false
-conclusions. It must return a distinguishable error marker, and every caller
-must check it. Two separate rounds concluded "the click did nothing" when the
-real problem was a lost reply.
+Three rules that came from a post getting it wrong:
 
-## Why not the internal API
+- A length check alone once passed a post with eight stray characters.
+- A compare that ignores the link's visible text passes a truncated link.
+- `CLICKED` proves nothing. Read the profile timeline and require the status id.
 
-Both routes were tried against the live session.
-
-**The bearer token cannot be hardcoded.** X rotates it. The public token copied
-from a logged-out page returned `error 89 "Invalid or expired token"`.
-Recovering the real one works: enable CDP `Network.enable` on a logged-in tab
-and read the `Authorization` header off x.com's own GraphQL requests. The live
-token differs from the well-known one only in its tail.
-
-**With a valid bearer, the internal endpoints still refuse posting:**
-
-| Route | Result |
-|---|---|
-| `api.x.com/1.1/account/verify_credentials.json` | `401`, error 89 with the stale token |
-| `POST x.com/i/api/2/tweets` (REST) | `403 Unsupported Authentication` — "Authenticating with Unknown is forbidden for this endpoint. Supported authentication types are [OAuth 1.0a User Context, OAuth 2.0 User Context]." |
-| `POST x.com/i/api/graphql/<qid>/CreateTweet` | needs the per-deployment query id |
-
-The 403 is the important line: **the browser session can read, but posting
-requires OAuth 1.0a or OAuth 2.0 user context.** A bearer from a logged-in web
-session is not that. So the browser cannot post even with correct credentials,
-and guessing `CreateTweet`'s query id — a per-deployment constant, not a secret
-— is not a workaround worth relying on.
-
-**Conclusion: posting goes through `xurl`.** Register an app, authenticate once,
-and every post is a clean API call that cannot touch the browser, the drafts,
-or the 4 GB profile.
-
-## Setup: xurl, once, by the user
-
-The agent cannot do this part — it involves pasting a Client Secret.
-
-```bash
-brew install --cask xdevplatform/tap/xurl   # or the install.sh / go / npm route
-xurl auth apps add my-app --client-id <ID> --client-secret <SECRET>
-xurl auth oauth2 --app my-app <USERNAME>
-xurl auth default my-app
-xurl auth status      # the default app must show an oauth2 token
-```
-
-Set the app's type to "Web app, automated app or bot" in the X dashboard;
-Native App fails with `unauthorized_client`. If OAuth appears to succeed but
-requests then fail, the token was saved to the built-in `default` profile
-instead of the named one — re-run with `--app my-app`.
-
-`xurl auth status` is the only safe way to check. Never read `~/.xurl`, never
-pass secrets on a command line, never use `--verbose` in an agent session.
-
-## Posting
-
-```bash
-xurl post "text"
-xurl post "text" --media-id MEDIA_ID
-xurl reply POST_ID "text"
-xurl delete POST_ID
-```
-
-Read before writing — `xurl whoami`, `xurl user <handle>`, `xurl search ... -n 3`.
-It confirms the account is the intended one, which matters when a thread must
-continue a specific conversation.
-
-To post a thread: post the root, take `data.id` from the JSON, then
-`xurl reply <root-id>` for each follow-up. Every response is JSON, so the ids
-can be piped rather than retyped.
-
-## Reading through the browser is fine
-
-For anything that only needs to look at X, the browser is the better tool
-because it needs no app registration. **Launch it headed:**
+## Launching: headed, and through the local proxy
 
 ```bash
 bash ~/.agents/skills/software-development/chrome-real-profile-launch/scripts/run.sh \
-  --headed --port 9232 --no-tab
+  --headed --port 9240 --fresh --no-tab
 ```
 
-Headless gets a 403 (see above). Then read the DOM.
+`run.sh` probes 7897/7890/7891/8080/10809/1080 and passes `--proxy-server` for
+the first that answers. This is not optional on this machine. Without it a
+browser launched with its own `--user-data-dir` cannot complete a TLS
+handshake to any HTTPS host: DNS resolves, the TCP connection opens, and then
+the handshake is cut — `curl` reports `SSL_ERROR_SYSCALL`, Chrome reports
+`net_error -100` (ERR_CONNECTION_CLOSED). The daily browser works because Clash
+Verge Rev routes it through a TUN interface, which a separate user-data-dir
+does not get. It looks like a crash and is not; the Crashpad pending directory
+is empty and no crash report is written. **Check the log for `net_error -100`
+before concluding anything died.**
 
-Guardrails when reading:
+`--fresh` also matters: it drops the scratch profile and re-copies, and it
+excludes the `Singleton*` files.
 
-- Open a tab on `/home`, not `/compose/post`. The composer is the only page
-  that carries a restorable draft.
-- Wait for real content: `document.body.innerText.length > 400`, not
-  `readyState === "complete"`. X is a SPA and both a logged-out and a
-  logged-in page can report complete with an empty body.
-- A login check that only looks for the absence of a login link is not proof.
-  Verify with body text, and prefer an element the logged-out page lacks, such
-  as `[data-testid="SideNav_AccountSwitcher_Button"]`.
+## Do not inject to defeat headless detection
 
-## The composer cannot be driven: five failures, all measured
+X blocks headless browsers; `--headed` is the answer. Injecting a spoofed
+fingerprint to get past the detection is circumventing an access control, and
+this skill does not do it. Driving the composer's own input path in a browser
+the user is logged into is a different thing from impersonating a human client
+to the server, and only the first is in scope here.
 
-Every way of putting text into the X composer was tried against the live one.
-All five fail, and none of them is a selector problem.
+## Two CDP client bugs that cost hours
 
-| Approach | Result |
-|---|---|
-| `execCommand('insertText')` | returns `false`, inserts nothing |
-| `el.textContent = t` + `beforeinput`/`input` events | text lands and verifies, but Draft.js's React state never sees it — the Post button stays `disabled` forever |
-| `Input.insertText` (whole string) | only the last line survives: a 159-char post left `"I suggest using 硅头."` |
-| `Input.insertText` (per line) | the restored draft rotates underneath and ends up being what would be posted |
-| real key events, one char at a time | same — mid-typing the editor swapped to a different draft (a 42-character "雷电芽衣" post) |
+Both are silent. `scripts/cdp.py` handles them; use it or copy its patterns.
 
-`Input.dispatchKeyEvent` with `commands: ["paste"]` pastes nothing because the
-clipboard is empty, and populating it with `pbcopy` hung outright in this
-environment.
+**WebSocket control frames are not JSON.** opcodes 8/9/10 (close/ping/pong) and
+2 (binary) share the framing but not the payload. Check `b1 & 0x0F` before
+decoding. Parsing a ping as JSON raises `UnicodeDecodeError`; swallowing that
+as "no reply" makes every `Runtime.evaluate` look like it never ran.
 
-The rate matters as much as the mechanism. Across one session the restored
-draft changed on every single composer open: a grokbot billing note, a
-"Trump/AI czar" post, a DeepSeek/Ascend thread, a Hengdian actor interview, a
-Netflix architecture note, a Gemini 4 story, an Omarchy desktop post, an
-NVIDIA agent-safety post, a 42-character "雷电芽衣" line, and more. Each is
-somebody's unfinished work, and the pool rotates faster than any multi-step
-automation can complete.
+**The first evaluates on a new tab lose their replies.** While the renderer
+swaps execution contexts the reply never comes. Measured: ~33 s of warm-up on a
+fresh target, then 0.5 s per call. Fail fast (6 s) and retry immediately — a
+long wait per attempt turns this into minutes of apparent hang, and an
+unbounded wait produced a 14-minute freeze. Reuse one tab.
 
-The blocker underneath all of them: **the draft pool rotates while you work.**
-A fresh composer, a re-render, or a slow typing run can each replace the
-editor contents with a different draft. Anything that takes more than one
-evaluate — or more than a second — is racing it. That is also why the drafts
-are dangerous to automate against, independent of any typing problem: a
-mistimed click publishes somebody's unfinished text.
+**Long idles kill the socket.** A `settle()` that leaves the connection
+untouched for minutes gets dropped by Chrome, and the browser stays perfectly
+healthy while the Python client raises
+`WebSocketConnectionClosedException` mid-post. Reconnect on send.
 
-### Driving Draft through React directly — also dead
+A `js()` that returns `None` on failure is the root of a whole class of false
+conclusions — two separate rounds concluded "the click did nothing" when the
+real problem was a lost reply. Return a distinguishable error marker and check
+it at every call site.
 
-The obvious next idea is to reach Draft's own handler through React instead of
-the DOM, since the DOM path is ignored. It is worth recording exactly what the
-tree looks like, because it is the same in every run:
+## Dead ends, so they are not re-tried
 
-- The composer element's own `__reactProps$` has **`handlers: []`**. So does
-  every ancestor up the `parentElement` chain (depth 0-4, all empty). Draft
-  mounts its editor in a different subtree, not above this node.
-- Its `__reactFiber$` chain carries only `onClick`, `onEntityClick`,
-  `onShowMoreClick` — **no input handler anywhere**, so there is no `onChange`
-  to call.
-- No page globals match `/draft|editor|tweet|compose/i`, and there is no
-  `webpackChunkX` / `__webpack_require__` handle to reach the module.
-- A full breadth-first walk of the fiber tree from the root visits **13,764
-  nodes and finds zero** whose name matches `/editor|draft|compose|textarea/i`.
-  The production build is minified, so the component names that would identify
-  Draft are stripped.
+- `execCommand('insertText')` — returns false, inserts nothing.
+- `textContent = t` plus `beforeinput`/`input` events — text appears and
+  verifies, but Draft's state never sees it and the button stays disabled.
+- `computer_use set_value` — the AX tree exposes the editor as `AXTextArea`,
+  and setting its value changes the DOM, but the button stays disabled and a
+  post went out as the single character `e`. Real OS keystrokes also cannot
+  send CJK: a 159-character Chinese post delivered `0 of 159`.
+- React internals — the composer's `__reactProps$` has `handlers: []` at every
+  depth, `__reactFiber$` carries only click handlers, and a breadth-first walk
+  of 13,764 nodes finds no input handler. The production build is minified, so
+  the component names that would identify Draft are stripped.
+- `Input.dispatchKeyEvent` with `commands: ["paste"]`, and `pbcopy` — both hang
+  or insert nothing here.
+- The restored-draft pool was once thought to be server-side and unclearable.
+  That was wrong. The drafts are X's own, restored into the composer by X, and
+  the whole problem is avoided by never clearing and never racing the box.
 
-There is no hook to drive. React 17+ also only puts `__reactProps$` on nodes
-it created, and X's editor is not one of them.
+## Guardrails
 
-### The actual cause: `[data-testid="tweetText"]` is a decoy
+- Never drive the composer while the user has their own drafts open, unless the
+  box is empty or already holds exactly the intended text. A mistimed click
+  publishes somebody's unfinished tweet — that is what happened once here
+  (`2105508309361217688`, a stray `e`, since deleted).
+- Never claim a post happened without the timeline read-back.
+- Never close or reuse the user's tabs to "clean up".
+- Never read credentials. Do not put cookies, tokens or a Client Secret in the
+  conversation; write them as `[REDACTED]`.
 
-Every failure above shares one root cause, and finding it makes the composer
-drivable. There are two nodes and only one of them is real:
+## Deleting a post
 
-| node | contenteditable | role | holds the text? |
-|---|---|---|---|
-| `[data-testid="tweetText"]` | **`null`** | none | no — a display layer, and its textContent goes stale |
-| `[data-testid="tweetTextarea_0"]` | `true` | `textbox` | **yes** |
+The same single tab, no navigation: open the status, the article's `caret`
+button, 删除 in the menu, 删除 in the confirmation dialog. Verify the article is
+gone before moving on. The user may prefer to do this by hand.
 
-Measured on the live page:
+## The alternative, and when it is better
 
-```
-find_editable: wrapperTestId tweetTextarea_0, totalNodes 6, editableCount 6
-  depth 0 DIV tweetTextarea_0 role=textbox ce=true   <- the real editor
-  depth 1..5 DIV/SPAN                                 <- Draft's internals
-```
+`xurl` posts through the official API: fast, retryable, and it cannot touch the
+browser, the drafts, or the profile. It needs the user to register an app once
+(pasting a Client Secret, which the agent cannot do). When a run is long, the
+draft pool is rotating, or the user wants the posts queued rather than typed,
+that is the better tool — reach for it rather than fighting the composer.
 
-So all six "input" attempts were aimed at a node that cannot hold text. What
-actually works, measured end to end:
-
-1. **CDP clears the editor** — select all, `execCommand('delete')`, caret to end.
-   This is reliable and is the only way to be sure a restored draft is gone.
-2. **computer_use `set_value` writes it** — the AX tree exposes the real
-   editor as `AXTextArea '帖子文本'`, and setting its AXValue replaces the
-   whole content.
-3. **CDP verifies and clicks** — read `textContent` back and compare against
-   the intended copy, then click the enabled button.
-
-A full post was verified this way: composer cleared, 135 characters written,
-matched character for character, `发帖` enabled, click accepted, and the post
-appeared on the profile 13 seconds later as
-`@eastspire_sheng · 13秒`.
-
-**Two things that made it look impossible:**
-
-- Real OS keystrokes land, but `type` cannot send CJK: a 159-character
-  Chinese post delivered `0 of 159` via `key_events_fg`. Use `set_value` for
-  non-ASCII; keystrokes are fine for ASCII.
-- Reading through the decoy node made working input look broken. The first
-  computer_use keystroke (`X`) *did* land — the decoy just never showed it.
-
-**A post has been published this way**, so the browser is not read-only after
-all. The rest of this document is kept because each dead end is a thing worth
-not re-trying, and because the decoy node explains most of them.
-
-## `--headless` gets 403; `--headed` does not
-
-Worth its own note because it is easy to misdiagnose. After a long session, the
-headless instance stopped serving x.com entirely:
-
-```
-href: chrome-error://chromewebdata/
-body: 访问 x.com 的请求遭到拒绝 / HTTP ERROR 403
-```
-
-A plain `curl https://x.com/` from the same machine returned **200**, so this is
-not a rate limit and not an IP block — x.com is rejecting the headless
-fingerprint. `run.sh --headed` fixed it immediately: 2527 body characters,
-logged in as `@eastspire_sheng`.
-
-A 403 page reports ~53 body characters and no composer element, so an
-"is the composer empty?" check answers "empty" and looks like success. Always
-confirm the page is really x.com first:
-
-```python
-href = c.js("location.href")
-assert href.startswith("https://x.com"), f"blocked or error page: {href}"
-```
-
-## Rate limiting and the 403 wall
-
-After a long session of opening and closing composer tabs, x.com stopped
-serving the headless instance entirely:
-
-```
-href:  chrome-error://chromewebdata/
-body:  访问 x.com 的请求遭到拒绝 / HTTP ERROR 403
-```
-
-The user's own Chrome was unaffected — the block applies to the copied
-profile's instance, not the account.
-
-This matters beyond publishing: **a 403 error page reports a tiny body
-(`bodyChars: 53`) and no composer element**, so a "is the composer empty?"
-check answers "empty" and looks like success. Always confirm the page really
-is x.com before trusting anything read from it:
-
-```python
-href = c.js("location.href")
-assert href.startswith("https://x.com"), f"blocked or error page: {href}"
-```
-
-Re-launching the instance does not clear it; it needs time. Treat a burst of
-tab churn as the trigger and pace the work accordingly.
-
-## The scripts
+## Scripts
 
 | Script | Purpose |
 |---|---|
-| `scripts/cdp.py` | Minimal CDP client. Control-frame handling, retrying `js()`, `set_port()`, `composer_text()`. |
+| `scripts/cdp.py` | CDP client: control-frame handling, retrying `js()`, auto-reconnect on send, `set_port()`, `close_composition()`. |
 | `scripts/selftest.py` | Verifies the client before trusting it. **Run this first.** |
-| `scripts/bench.py` | Measures evaluate latency. Use it to tell warm-up from a real stall. |
-| `scripts/probe_draft_restore.py` | Re-derives the draft-restore finding and refuses rather than acting. |
+| `scripts/bench.py` | Measures evaluate latency, to tell warm-up from a real stall. |
+| `scripts/publish.py` | The publisher. `--post N` reads the box and posts only on an exact match; `--go` clicks. `--show` prints the copy, `--tabs` the X tabs. |
+| `scripts/top_of_timeline.py` | Reads the newest posts off the profile with their ids and text. This is the verification step — run it after every post. |
+
+`publish.py` takes its copy from `x_copy_long.json` next to it. It opens
+nothing, navigates nowhere, clears nothing, and never touches the mouse or the
+OS focus; the tab must already be on `x.com/compose/post`.
+
+```bash
+# once, and only if no instance is up
+bash ~/.agents/skills/software-development/chrome-real-profile-launch/scripts/run.sh \
+  --headed --port 9240 --fresh --no-tab
+
+python3 scripts/publish.py 9240 --show            # read the copy first
+python3 scripts/publish.py 9240 --post 0          # type and verify, no click
+python3 scripts/publish.py 9240 --post 0 --go     # click
+python3 scripts/top_of_timeline.py 9240           # confirm it landed
+
+# a different set of posts
+X_COPY=/path/to/other.json python3 scripts/publish.py 9240 --post 0 --go
+```
+
+The copy defaults to `scripts/x_copy_example.json` next to the script, which is
+the set that was actually published. Replace it, or point `X_COPY` elsewhere;
+the content is yours, not the skill's.
 
 `selftest.py` earns its place: on its first run it reported `close_tab` as
-broken when the check's own arithmetic was wrong (the preceding open had
-already restored the count), and it flagged a "slow" client that was really
-just doing its warm-up. Both were faults in the check, and neither was
-visible without running it.
-
-## Never
-
-- Never drive `x.com/compose/post` with automation while the user has drafts
-  open. It publishes one of them.
-- Never read `~/.xurl`, or accept a Client Secret in chat.
-- Never claim a post happened without the JSON response from `xurl` as proof.
-- Never close or reuse the user's tabs to "clean up" — the draft content is
-  bound to the tab, and 10 compose tabs is a working state, not litter.
+broken when the check's own arithmetic was wrong, and it flagged a "slow"
+client that was really just doing its warm-up.
