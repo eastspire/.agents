@@ -151,6 +151,52 @@ def js(c, tpl, sid=None):
     return {"_raw": str(r)[:160]}
 
 
+PICK = """(() => {
+  const out = [];
+  const seen = new Set();
+  for (const a of document.querySelectorAll('article')) {
+    const own = [...a.querySelectorAll("a[href*='/status/']")]
+      .find(x => x.getAttribute('href').split('/').pop()
+                && !/\\/(analytics|photo|video|retweets|likes)/.test(
+                      x.getAttribute('href')));
+    if (!own) continue;
+    const sid = own.getAttribute('href').split('/').pop();
+    if (seen.has(sid)) continue;
+    seen.add(sid);
+    const who = a.querySelector("a[href^='/']");
+    const box = a.querySelector('[data-testid="tweetText"]');
+    out.push({sid: sid,
+              who: who ? who.getAttribute('href').split('/').pop() : '?',
+              text: box ? box.innerText.replace(/\\s+/g, ' ').trim() : ''});
+  }
+  return JSON.stringify(out);
+})()"""
+
+# Pick a target on the page that is actually about AI, tooling or code, and is
+# written by someone else. The account's own posts are never a reply target.
+AI_WORDS = ("rust", "agent", "llm", "token", "context", "cargo", "wasm",
+            "compile", "macro", "mcp", "tool call", "code", "model", "prompt",
+            "inference", "编程", "模型", "编译", "工具", "宏", "上下文", "智能体")
+
+
+def pick_target(c):
+    """Choose a live target from the page as it is right now.
+
+    The status id has to come from this read, not from a file written by an
+    earlier scroll: the timeline replaces posts continuously, so an id read
+    minutes ago names something no longer on screen.
+    """
+    r = c.js(PICK, wait=30, retries=5)
+    rows = json.loads(r) if isinstance(r, str) else r
+    for row in rows:
+        if row.get("who") == ME or not row.get("text"):
+            continue
+        low = row["text"].lower()
+        if any(w in low for w in AI_WORDS):
+            return row["sid"], row
+    return "", None
+
+
 def main() -> int:
     port, sid, arg = int(sys.argv[1]), sys.argv[2], sys.argv[3]
     text = open(arg, encoding="utf-8").read() if os.path.exists(arg) else arg
@@ -169,6 +215,16 @@ def main() -> int:
               flush=True)
         c.close()
         return 1
+
+    if sid == "auto":
+        sid, row = pick_target(c)
+        if not sid:
+            print("NO TARGET — nothing AI-related on the page right now",
+                  flush=True)
+            c.close()
+            return 1
+        print("target: @%s %s" % (row["who"], sid), flush=True)
+        print("  %s" % row["text"][:120], flush=True)
 
     c.js(SNAPSHOT, wait=25, retries=4)
     opened = js(c, OPEN_REPLY, sid)
@@ -204,7 +260,14 @@ def main() -> int:
         c.send("Input.insertText", text=text, wait=40, retries=6)
         time.sleep(2.0)
     c.close_composition("")
-    time.sleep(1.0)
+    # A reply box closed without the post landing twice with insertText alone.
+    # One real keypress commits the draft the way a person's keystroke does.
+    ch = text[-1]
+    for kind, args in (("rawKeyDown", {"key": ch, "text": ch}),
+                       ("keyUp", {"key": ch})):
+        c.send("Input.dispatchKeyEvent", type=kind, **args)
+        time.sleep(0.25)
+    time.sleep(2.5)
 
     st = js(c, STATE)
     ok = canon(st.get("text", "")) == canon(text)
