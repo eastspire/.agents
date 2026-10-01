@@ -1,6 +1,25 @@
 # Prompt Writing Guide
 
-This reference helps construct high-quality music generation prompts.
+This reference helps construct high-quality music generation prompts for the MiniMax
+`POST /v1/music_generation` API.
+
+## API reality check
+
+- The `prompt` field is the **only** free-text control. There are no separate
+  `--genre` / `--mood` / `--vocals` / `--bpm` / `--key` / `--tempo` / `--structure` /
+  `--references` / `--avoid` / `--use-case` fields — pack those details into the prompt text
+  using the vocabulary below.
+- **Prompt length**: up to 2000 characters. For a cover style description: 10-300 characters.
+- **Lyrics length**: 1-3500 characters for text-to-music; 10-1000 for covers. The API
+  documents these structure tags: `[Intro]`, `[Verse]`, `[Pre Chorus]`, `[Chorus]`,
+  `[Interlude]`, `[Bridge]`, `[Outro]`, `[Post Chorus]`, `[Transition]`, `[Break]`,
+  `[Hook]`, `[Build Up]`, `[Inst]`, `[Solo]`.
+- **Models**: `music-3.0` (recommended), `music-2.6`, `music-cover`. The `-free` variants
+  (`music-3.0-free`, `music-2.6-free`, `music-cover-free`) were discontinued 2026-08-20,
+  and the paid music API is closed to new users — see the main SKILL.md for the full access
+  situation and what to do when a call returns `410` / `status_code 2153`.
+- **No seed**: the music API has no `seed` field, so you cannot reproduce a take from a
+  seed. Persist prompts and lyrics next to saved audio if the user may want to re-run.
 
 ## Core Principle
 

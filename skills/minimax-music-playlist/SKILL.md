@@ -20,9 +20,33 @@ user invocation — adapt interaction style to context.
 
 ## Prerequisites
 
-- **mmx CLI** — music & image generation. Install: `npm install -g mmx-cli`. Auth: `mmx auth login --api-key <key>`.
-- **Python 3** — for scanning scripts you write on the fly (stdlib only, no pip).
+- **Python 3** — runs the music helper and any scanning scripts you write on the fly
+  (stdlib only, no pip).
+- **MiniMax API key with music access** — M Plan or an existing paying account.
+  The paid music API is **closed to new users** since 2026-08-20 and the free tier
+  (`music-3.0-free`, `music-2.6-free`, `music-cover-free`) is being discontinued, so a fresh
+  key gets `HTTP 410` / `base_resp.status_code 2153`. **Run the preflight below before
+  promising the user a playlist.** Keys: https://platform.minimaxi.com/user-center/basic-information/interface-key (China) or https://platform.minimax.io/user-center/basic-information/interface-key (global)
+- **mmx CLI** — album cover art only (`npm install -g mmx-cli`, `mmx auth login --api-key <key>`).
+  The CLI has **no music resource**; music comes from the HTTP API below.
 - **Audio player** — `mpv`, `ffplay`, or `afplay` (macOS built-in).
+
+## How music is generated (read this first)
+
+There is no `mmx music generate`. Music is the platform HTTP API
+`POST /v1/music_generation` (global `https://api.minimax.io`, cn `https://api.minimax.cn`),
+driven by the helper bundled with the `minimax-music-gen` skill:
+`../minimax-music-gen/scripts/minimax_music.py`. Docs:
+https://platform.minimax.io/docs/api-reference/music-generation
+
+**Preflight (no charge):**
+```bash
+python3 <SKILL_DIR>/../minimax-music-gen/scripts/minimax_music.py \
+  --prompt "probe" --instrumental --out /tmp/music-preflight.mp3 --quiet
+```
+Exit `0` → proceed. Exit `2` with `410` / `2153` → the music API is unavailable for this key.
+Stop and tell the user, offering https://www.minimax.io/audio or the open-source
+MiniMax Music 3 model (https://huggingface.co/MiniMaxAI/MiniMax-Music3). Do not retry in a loop.
 
 ## Language
 
@@ -31,7 +55,7 @@ in the same language as the user's prompt** — do not mix languages. If the use
 writes in Chinese, all output (profile summary, theme suggestions, playlist plan,
 playback info) must be fully in Chinese. If in English, all in English.
 
-All `mmx` generation prompts should be in English for best quality.
+All music-generation prompts should be in English for best quality.
 Each song's lyrics language follows its genre (K-pop → Korean, J-pop → Japanese, etc.),
 NOT the user's UI language.
 
@@ -41,7 +65,8 @@ NOT the user's UI language.
 
 ```
 1. Scan local music apps → 2. Build taste profile → 3. Plan playlist
-→ 4. Generate songs (mmx music) → 5. Generate cover (mmx image) → 6. Play → 7. Save & feedback
+→ 4. Generate songs (music_generation API) → 5. Generate cover (mmx image generate)
+→ 6. Play → 7. Save & feedback
 ```
 
 ---
@@ -177,7 +202,7 @@ Determine playlist parameters:
 | Latin pop, bossa nova | Spanish/Portuguese |
 | Instrumental, lo-fi, ambient | No lyrics (`--instrumental`) |
 
-Embed language naturally into the mmx prompt via vocal description:
+Embed language naturally into the music prompt via vocal description:
 - Good: `"A melancholy Chinese R&B ballad with a gentle introspective male voice, electric piano, bass, slow tempo"`
 - Bad: `"R&B ballad, melancholy... sung in Chinese"`
 
@@ -185,7 +210,7 @@ Embed language naturally into the mmx prompt via vocal description:
 the first line shows genre, mood, and vocal/language tag; the second line shows
 a short description of the song. **All user-facing text (plan, descriptions, moods,
 labels) must be in the same language as the user's prompt.** Only the actual `--prompt`
-passed to `mmx` should be in English — this is internal and should NOT be shown to
+sent to the music API should be in English — this is internal and should NOT be shown to
 the user. Example:
 
 ```
@@ -214,31 +239,49 @@ The user has already chosen the theme; the plan is shown for transparency, not a
 
 ## Step 4: Generate Songs
 
-Use `mmx music generate` to create all songs. **Generate concurrently** (up to 5 in parallel).
+Use the music helper to create all songs. **Generate concurrently** (up to 5 in parallel).
+Each call is an independent HTTP POST to `/v1/music_generation`; there is no batch endpoint.
 
 ```bash
 # Example: 5 songs in parallel
-mmx music generate --prompt "<english_prompt_1>" --lyrics-optimizer \
-  --out ~/Music/minimax-gen/playlists/<name>/01_desc.mp3 --quiet --non-interactive &
-mmx music generate --prompt "<english_prompt_2>" --instrumental \
-  --out ~/Music/minimax-gen/playlists/<name>/02_desc.mp3 --quiet --non-interactive &
+HELPER=<SKILL_DIR>/../minimax-music-gen/scripts/minimax_music.py
+python3 "$HELPER" --prompt "<english_prompt_1>" --auto-lyrics \
+  --out ~/Music/minimax-gen/playlists/<name>/01_desc.mp3 --quiet &
+python3 "$HELPER" --prompt "<english_prompt_2>" --instrumental \
+  --out ~/Music/minimax-gen/playlists/<name>/02_desc.mp3 --quiet &
 # ... more songs ...
 wait
 ```
 
-**Key flags:**
-- `--lyrics-optimizer` — auto-generate lyrics from prompt (for vocal tracks)
-- `--instrumental` — no vocals
-- `--vocals "<description>"` — vocal style (e.g., "warm Chinese male baritone")
-- `--genre`, `--mood`, `--tempo`, `--instruments` — fine-grained control
-- `--quiet --non-interactive` — suppress interactive output for batch mode
-- `--out <path>` — save to file
+**Key flags** (all verified against the music API schema):
+- `--prompt "<english>"` — style/mood/scene. Required for every song; max 2000 characters.
+- `--auto-lyrics` — `lyrics_optimizer: true`, the model writes lyrics from the prompt
+  (vocal tracks). Mutually exclusive with `--instrumental`.
+- `--instrumental` — `is_instrumental: true`, no vocals, lyrics not required.
+- `--lyrics` / `--lyrics-file` — supply your own lyrics with `[Section]` tags, 1-3500 chars.
+  Required for a vocal track unless `--auto-lyrics` is set.
+- `--format mp3|wav|pcm`, `--sample-rate 16000|24000|32000|44100`,
+  `--bitrate 32000|64000|128000|256000` — the `audio_setting` object.
+- `--region global|cn` — defaults to `$MINIMAX_REGION` then `~/.mmx/config.json`, else
+  `global` (`https://api.minimax.io` / `https://api.minimax.cn`).
+- `--out <path>` — save to file; `--quiet` for script-readable output.
+
+**There are no separate `--genre`, `--mood`, `--vocals`, `--tempo`, or `--instruments`
+flags.** The API takes one `prompt` string — fold those details into the prompt using the
+vocabulary in `minimax-music-gen/references/prompt_guide.md`. Vocals, for example, are
+described as `", featuring a warm Chinese male baritone"` inside the prompt, not passed
+separately.
+
+**Rate limits**: `music-3.0` allows RPM 120 on a paying plan. Generating 5 songs in parallel
+is fine; generating hundreds is not.
 
 **File naming:** `<NN>_<short_desc>.mp3` (e.g., `01_rnb_midnight.mp3`)
 
 **Output directory:** `~/Music/minimax-gen/playlists/<playlist_name>/`
 
 If a song fails, **retry once** before skipping. Log the error and continue with the rest.
+If failures come back with `HTTP 410` / `status_code 2153`, the key lost music access — stop
+the whole run and report it rather than retrying each song.
 
 ---
 
@@ -322,4 +365,4 @@ available ones, and play the selected one.
   Use Python stdlib only. Cache results to avoid redundant work.
 - **Skill directory**: `<SKILL_DIR>` = the directory containing this SKILL.md file.
   Data/cache files go in `<SKILL_DIR>/data/`.
-- **All mmx prompts in English** for best generation quality.
+- **All generation prompts in English** for best generation quality.
