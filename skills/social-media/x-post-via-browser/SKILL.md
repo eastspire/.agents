@@ -19,7 +19,9 @@ characters published and verified, then a 27-post series published on a timer.
 ## The path
 
 One tab, already open on x.com. Nothing navigates, nothing clears, nothing
-touches the mouse.
+touches the mouse. For a series, `run_queue_tick.py` does this once per
+invocation and a cron job calls it on the interval — the queue's spacing is
+the cron's, not the script's.
 
 1. `python3 scripts/publish.py <port> --post N` — types, compares, does not click.
 2. Read the line it prints. `match=True` and `urls_ok=True`, or it stops.
@@ -211,7 +213,7 @@ every call site checks it.
 | `scripts/publish.py` | The publisher. `--show` the copy, `--tabs` the X tab, `--post N` type and compare, `--go` click. |
 | `scripts/verify_post.py` | Proves one post landed: author, text prefix, link card. |
 | `scripts/whose_posts.py` | What is on screen, split by author. |
-| `scripts/run_ctares_tick.py` | Idempotent queue runner — one crate per invocation, for a cron series. |
+| `scripts/run_queue_tick.py` | Idempotent queue runner — one item per invocation, for a cron series. Verifies on the timeline **before** recording an item as posted, so a click that did not land stays queued instead of being counted as done. |
 | `scripts/verify_no_unsafe_posting.py` | The commit gate. `--self-test` proves every rule fires. |
 
 ```bash
