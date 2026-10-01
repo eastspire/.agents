@@ -34,6 +34,28 @@ CASES = [
 ]
 
 
+# A reply is capped at 280 characters; a post is not. Every draft written for
+# this was between 560 and 860, so none of it could have been sent, and
+# nothing caught it because the drafts were checked by eye.
+LENGTH_CASES = [
+    ("short enough", 279, True),
+    ("exactly at the limit", 280, True),
+    ("one over", 281, False),
+]
+
+
+def check_length() -> int:
+    bad = 0
+    print("\nreply length limit")
+    for name, n, want in LENGTH_CASES:
+        got = n <= 280
+        if got != want:
+            bad += 1
+        print("  %s %-22s %d characters" % ("ok " if got == want else "FAIL",
+                                            name, n))
+    return bad
+
+
 def main() -> int:
     bad = 0
     for text, want, why in CASES:
@@ -42,8 +64,10 @@ def main() -> int:
         if got != want:
             bad += 1
         print("  %s %-58s %s" % (mark, repr(text[:56]), why))
+    bad += check_length()
     print("\n%d case(s) failed" % bad if bad else
-          "\nall %d cases correct" % len(CASES))
+          "\nall %d owner cases and %d length cases correct"
+          % (len(CASES), len(LENGTH_CASES)))
     return 1 if bad else 0
 
 
