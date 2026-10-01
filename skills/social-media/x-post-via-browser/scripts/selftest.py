@@ -17,6 +17,11 @@ import cdp as C  # noqa: E402
 
 if len(sys.argv) > 1:
     C.set_port(sys.argv[1])
+try:
+    import websocket  # noqa: F401
+except ImportError:
+    print("websocket-client is required:  pip3 install websocket-client")
+    raise SystemExit(2)
 
 fails = []
 
@@ -78,6 +83,16 @@ while time.time() < deadline:
 check("x.com renders", isinstance(n, int) and n > 400, f"bodyChars={n}")
 check("logged in", c.js(
     '!!document.querySelector(\'[data-testid="SideNav_AccountSwitcher_Button"]\')') is True)
+
+# 5b. A blocked or error page must be detected, not mistaken for "empty".
+#     A 403 from x.com reports ~53 body chars and no composer element, so an
+#     "is the draft empty?" check answers yes and looks like success.
+href = c.js("location.href")
+check("page is really x.com (not a 403 page)",
+      isinstance(href, str) and href.startswith("https://x.com"), repr(href)[:80])
+if isinstance(href, str) and not href.startswith("https://x.com"):
+    print("  !! x.com is refusing this instance — stop and wait, "
+          "do not treat any read as meaningful")
 
 # 6. Closing must actually close, or orphans accumulate until the browser
 #    stops responding.

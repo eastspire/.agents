@@ -20,11 +20,14 @@ Two separate findings, both measured on 2026-09-30 against a logged-in
 revision and is corrected below; the correction matters more than the
 conclusion.
 
-1. **The restored drafts are LOCAL, not on x.com.** The drafts dialog is
-   empty (`emptyState`: "保留想法 / 还没有准备好发帖？") while a new composer
-   still comes back with text. X is restoring unsent content out of this
-   machine's own browser storage. Therefore the drafts *can* be cleared, and
-   clearing them cannot destroy anything on the account.
+1. **The restored drafts are SERVER-side and cannot be cleared from the
+   client.** Two measurements point opposite ways and the second settles it:
+   the drafts dialog is empty (`emptyState`: "保留想法 / 还没有准备好发帖？"),
+   which suggests nothing is stored on x.com; but
+   `Storage.clearDataForOrigin` (local_storage, indexeddb, cache_storage,
+   service_workers) returns success and a brand new composer still comes back
+   with a *different* draft every time. So the pool lives server-side, and the
+   empty dialog is a view filter, not the store.
 2. **Posting still needs an API app.** The internal endpoints refuse a web
    session even with a valid bearer, so the browser is for reading.
 
@@ -46,10 +49,8 @@ Measured directly.
    - The new target id was not in the pre-existing target list, so it was
      genuinely a new tab.
    - `localStorage` and `sessionStorage` held no draft-like key, which at the
-     time looked like proof the drafts were server-side. **That inference was
-     wrong.** The storage is in IndexedDB, and the drafts dialog being empty
-     while a composer restores text is what actually settles it: nothing is
-     stored on x.com.
+     time looked like proof they were local. **That inference was also wrong**,
+     and was corrected by the successful `clearDataForOrigin` above.
 
 Each open produced a *different* draft, so it is a pool, not one slot. Closing
 composer tabs does not help: after closing every composer tab on a freshly
@@ -178,8 +179,14 @@ can be piped rather than retyped.
 ## Reading through the browser is fine
 
 For anything that only needs to look at X, the browser is the better tool
-because it needs no app registration. Use `chrome-real-profile-launch` to get
-the shared instance, then read the DOM.
+because it needs no app registration. **Launch it headed:**
+
+```bash
+bash ~/.agents/skills/software-development/chrome-real-profile-launch/scripts/run.sh \
+  --headed --port 9232 --no-tab
+```
+
+Headless gets a 403 (see above). Then read the DOM.
 
 Guardrails when reading:
 
@@ -191,6 +198,84 @@ Guardrails when reading:
 - A login check that only looks for the absence of a login link is not proof.
   Verify with body text, and prefer an element the logged-out page lacks, such
   as `[data-testid="SideNav_AccountSwitcher_Button"]`.
+
+## The composer cannot be driven: five failures, all measured
+
+Every way of putting text into the X composer was tried against the live one.
+All five fail, and none of them is a selector problem.
+
+| Approach | Result |
+|---|---|
+| `execCommand('insertText')` | returns `false`, inserts nothing |
+| `el.textContent = t` + `beforeinput`/`input` events | text lands and verifies, but Draft.js's React state never sees it — the Post button stays `disabled` forever |
+| `Input.insertText` (whole string) | only the last line survives: a 159-char post left `"I suggest using 硅头."` |
+| `Input.insertText` (per line) | the restored draft rotates underneath and ends up being what would be posted |
+| real key events, one char at a time | same — mid-typing the editor swapped to a different draft (a 42-character "雷电芽衣" post) |
+
+`Input.dispatchKeyEvent` with `commands: ["paste"]` pastes nothing because the
+clipboard is empty, and populating it with `pbcopy` hung outright in this
+environment.
+
+The blocker underneath all of them: **the draft pool rotates while you work.**
+A fresh composer, a re-render, or a slow typing run can each replace the
+editor contents with a different draft. Anything that takes more than one
+evaluate — or more than a second — is racing it. That is also why the drafts
+are dangerous to automate against, independent of any typing problem: a
+mistimed click publishes somebody's unfinished text.
+
+**Conclusion: post through `xurl` with a registered app.** The browser is for
+reading only. If that is not acceptable, the only safe route is a human at the
+keyboard.
+
+## `--headless` gets 403; `--headed` does not
+
+Worth its own note because it is easy to misdiagnose. After a long session, the
+headless instance stopped serving x.com entirely:
+
+```
+href: chrome-error://chromewebdata/
+body: 访问 x.com 的请求遭到拒绝 / HTTP ERROR 403
+```
+
+A plain `curl https://x.com/` from the same machine returned **200**, so this is
+not a rate limit and not an IP block — x.com is rejecting the headless
+fingerprint. `run.sh --headed` fixed it immediately: 2527 body characters,
+logged in as `@eastspire_sheng`.
+
+A 403 page reports ~53 body characters and no composer element, so an
+"is the composer empty?" check answers "empty" and looks like success. Always
+confirm the page is really x.com first:
+
+```python
+href = c.js("location.href")
+assert href.startswith("https://x.com"), f"blocked or error page: {href}"
+```
+
+## Rate limiting and the 403 wall
+
+After a long session of opening and closing composer tabs, x.com stopped
+serving the headless instance entirely:
+
+```
+href:  chrome-error://chromewebdata/
+body:  访问 x.com 的请求遭到拒绝 / HTTP ERROR 403
+```
+
+The user's own Chrome was unaffected — the block applies to the copied
+profile's instance, not the account.
+
+This matters beyond publishing: **a 403 error page reports a tiny body
+(`bodyChars: 53`) and no composer element**, so a "is the composer empty?"
+check answers "empty" and looks like success. Always confirm the page really
+is x.com before trusting anything read from it:
+
+```python
+href = c.js("location.href")
+assert href.startswith("https://x.com"), f"blocked or error page: {href}"
+```
+
+Re-launching the instance does not clear it; it needs time. Treat a burst of
+tab churn as the trigger and pace the work accordingly.
 
 ## The scripts
 
