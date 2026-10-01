@@ -91,6 +91,15 @@ STATE = """(() => {
           enabled: !!(send && !send.disabled)};
 })()""" % json.dumps(DRAFT_CLS)
 
+CLOSE = """(() => {
+  const d = document.querySelector('[role="dialog"]');
+  if (!d) return 'no dialog';
+  const btn = d.querySelector('[data-testid="app-bar-close"]');
+  if (!btn) return 'no close button';
+  btn.click();
+  return 'closed';
+})()"""
+
 SEND = """(() => {
   const now = [...document.querySelectorAll('[data-testid="tweetTextarea_0"]')]
     .filter(n => n.className && n.className.indexOf(%s) >= 0
@@ -256,22 +265,53 @@ def main() -> int:
         c.close()
         return 1
 
-    if st.get("len", 0) == 0:
-        c.send("Input.insertText", text=text, wait=40, retries=6)
+    # A leftover draft from a previous run is appended to rather than replaced,
+    # and the result posts as somebody else's sentence. Start from empty.
+    if st.get("len", 0) != 0:
+        # A leftover draft must not be edited, appended to, or deleted: the
+        # composer is the user's, and clearing it is exactly what the gate
+        # forbids. Close this box and open a fresh one instead — a new reply
+        # composer starts empty.
+        print("  reply box already holds %s characters, reopening a clean one"
+              % st.get("len"), flush=True)
+        js(c, CLOSE)
         time.sleep(2.0)
-    c.close_composition("")
-    # A reply box closed without the post landing twice with insertText alone.
-    # One real keypress commits the draft the way a person's keystroke does.
-    ch = text[-1]
-    for kind, args in (("rawKeyDown", {"key": ch, "text": ch}),
-                       ("keyUp", {"key": ch})):
-        c.send("Input.dispatchKeyEvent", type=kind, **args)
-        time.sleep(0.25)
+        st = {}
+        for _ in range(8):
+            js(c, OPEN_REPLY, sid)
+            time.sleep(1.5)
+            st = js(c, STATE)
+            if st.get("ok") and st.get("len", 0) == 0:
+                break
+        if not st.get("ok") or st.get("len", 0) != 0:
+            print("  NOT SENDING - no empty reply box could be opened, and "
+                  "the existing draft is not ours to touch", flush=True)
+            c.close()
+            return 1
+        print("  clean reply box open", flush=True)
+
+    # insertText writes to the DOM without touching the editor state, so the
+    # send button lights up while the handler behind it still sees an empty
+    # draft and posts nothing. Real key events are the path a person uses.
+    print("  typing %d characters" % len(text), flush=True)
+    for i, ch in enumerate(text):
+        if ch == "\n":
+            c.send("Input.dispatchKeyEvent", type="keyDown", key="Enter",
+                   code="Enter", windowsVirtualKeyCode=13, text="\r")
+            c.send("Input.dispatchKeyEvent", type="keyUp", key="Enter",
+                   code="Enter", windowsVirtualKeyCode=13)
+        else:
+            c.send("Input.dispatchKeyEvent", type="keyDown", key=ch, text=ch)
+            c.send("Input.dispatchKeyEvent", type="keyUp", key=ch)
+        if i % 25 == 24:
+            time.sleep(0.4)
     time.sleep(2.5)
 
     st = js(c, STATE)
-    ok = canon(st.get("text", "")) == canon(text)
-    print("  LEN %s want %s match=%s" % (st.get("len"), len(text), ok),
+    # canon() strips whitespace, so anything appended to the source still
+    # compared equal. Compare the text itself.
+    ok = (st.get("text") or "").strip() == text.strip()
+    print("  LEN %s want %s exact=%s" % (st.get("len"), len(text), ok),
           flush=True)
     if not ok:
         print("  text does not match, not sending", flush=True)
