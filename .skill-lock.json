@@ -136,8 +136,8 @@
       "sourceType": "github",
       "skillPath": "skills/buddy-sings/SKILL.md",
       "installedAt": "2026-07-16T04:07:58.236Z",
-      "updatedAt": "2026-08-15T01:09:15.607Z",
-      "skillFolderHash": "06405bedb6671b1ff9f212f21d5cf30d13e5cb85",
+      "updatedAt": "2026-10-01T13:03:04.877Z",
+      "skillFolderHash": "259f7dd93941fbfc21e8eeb7447e066b704e3e88",
       "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
       "ref": "main"
     },
@@ -767,8 +767,8 @@
       "sourceType": "github",
       "skillPath": "skills/minimax-music-gen/SKILL.md",
       "installedAt": "2026-07-16T04:09:34.147Z",
-      "updatedAt": "2026-08-15T01:09:15.607Z",
-      "skillFolderHash": "221c2fbb6d0569f09cfcb2f709fe641d7bd44971",
+      "updatedAt": "2026-10-01T13:03:04.877Z",
+      "skillFolderHash": "ebde9bf97295b62c764a53347fc18949b09169c0",
       "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
       "ref": "main"
     },
@@ -777,8 +777,8 @@
       "sourceType": "github",
       "skillPath": "skills/minimax-music-playlist/SKILL.md",
       "installedAt": "2026-07-16T04:09:45.747Z",
-      "updatedAt": "2026-08-15T01:09:15.607Z",
-      "skillFolderHash": "06afe49e742b21ab6ca9b8ec7c442f8542cad63d",
+      "updatedAt": "2026-10-01T13:03:04.877Z",
+      "skillFolderHash": "ff8f68413c98f6b6f69ba577515b377b84acf3b2",
       "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
       "ref": "main"
     },
@@ -815,8 +815,8 @@
       "sourceType": "github",
       "skillPath": "skills/mmx-cli/SKILL.md",
       "installedAt": "2026-07-07T23:38:09.226Z",
-      "updatedAt": "2026-08-15T01:09:15.607Z",
-      "skillFolderHash": "68b8e2b48b288fb9e8b2e0f4b0de021fe785d9f4",
+      "updatedAt": "2026-10-01T13:01:29.704Z",
+      "skillFolderHash": "d9fdbc23f78613d6c43ae5d557d32fe3c6c1660d",
       "sourceUrl": "https://github.com/MiniMax-AI/skills.git",
       "ref": "main"
     },
@@ -1103,8 +1103,8 @@
       "sourceType": "local",
       "skillPath": "skills/rust-standards/SKILL.md",
       "installedAt": "2026-07-10T13:50:00.000Z",
-      "updatedAt": "2026-09-30T14:22:35.368Z",
-      "skillFolderHash": "b36dae4a51e0421fa8d75122debdfa79e246ce06"
+      "updatedAt": "2026-10-01T13:01:29.704Z",
+      "skillFolderHash": "d49a1dda35007b3909e81d4e7196d9c2dfafe848"
     },
     "rust-toolchain-macos": {
       "source": "local",
@@ -1185,8 +1185,8 @@
       "sourceType": "local",
       "skillPath": "skills/social-media/x-post-via-browser/SKILL.md",
       "installedAt": "2026-09-30T15:23:19.476Z",
-      "updatedAt": "2026-09-30T15:23:19.476Z",
-      "skillFolderHash": "084293adbc6b50d317f8b29a2adaba355289d974"
+      "updatedAt": "2026-10-01T13:01:29.704Z",
+      "skillFolderHash": "2faeff1f43bbd8c86b7aa459adf7f5b9f324a2fd"
     },
     "xurl": {
       "source": "local",

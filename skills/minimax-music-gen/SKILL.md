@@ -9,65 +9,121 @@ description: >
   questions, or music recommendation without generation.
 license: MIT
 metadata:
-  version: "1.1"
+  version: "1.2"
   category: creative
 ---
 
 # MiniMax Music Generation Skill
 
-Generate songs (vocal or instrumental) using the MiniMax Music API. Supports two creation
-modes: **Basic** (one-sentence-in, song-out) and **Advanced Control** (edit lyrics, refine
-prompt, plan before generating).
+Generate songs (vocal or instrumental) using the MiniMax platform Music Generation API.
+Supports two creation modes: **Basic** (one-sentence-in, song-out) and **Advanced Control**
+(edit lyrics, refine prompt, plan before generating).
+
+## How music is actually generated (read this first)
+
+**There is no `mmx music` command.** The `mmx` CLI (mmx-cli 1.0.27) has these resources only:
+`auth`, `text`, `speech`, `image`, `video`, `search`, `vision`, `quota`, `config`, `agent`,
+`file`, `update`. `mmx music generate` and `mmx music cover` do not exist — the CLI fails with
+`Unknown command: mmx music generate`.
+
+Music is a **platform HTTP API**, not a CLI subcommand:
+
+| | |
+|---|---|
+| Endpoint | `POST /v1/music_generation` |
+| Global | `https://api.minimax.io/v1/music_generation` |
+| China | `https://api.minimax.cn/v1/music_generation` |
+| Auth | `Authorization: Bearer <your MiniMax API key>` |
+| Docs | https://platform.minimax.io/docs/api-reference/music-generation |
+
+This skill drives that API with a bundled script:
+**`scripts/minimax_music.py`** (Python 3 stdlib only, no pip install).
+
+### API availability (important — verify before promising a song)
+
+From the official docs (https://platform.minimax.io/docs/api-reference/music-generation,
+page last modified 2026-08-18):
+
+- **Starting 2026-08-20**, the **paid** Music Generation and Lyrics Generation APIs are
+  **no longer available to new users**. Existing paying users can keep using them.
+- The **free** music models (`Music-3.0-free`, `Music-2.6-free`, `music-cover-free`)
+  **will be discontinued** — the docs state this without naming a separate date, so do not
+  attribute the 2026-08-20 date to them.
+
+In practice a fresh API key gets:
+
+```
+HTTP 410
+{"base_resp":{"status_code":2153,"status_msg":"This Music API is no longer available to new users..."}}
+```
+
+**So: run a cheap preflight before you tell the user you can make them a song.** If the call
+returns `410` / `status_code 2153`, the API is unavailable for that key. Do not retry, do not
+loop, and do not silently fall back. Tell the user plainly and offer the official alternatives:
+
+- **MiniMax Audio** (consumer product): https://www.minimax.io/audio
+- **Open-source MiniMax Music 3** (weights you can self-host):
+  https://huggingface.co/MiniMaxAI/MiniMax-Music3
+  (self-hosting guide: https://platform.minimax.io/docs/guides/local-deploy-music-3)
+
+A key from a MiniMax **M Plan** or existing paying account still works against
+`music-3.0` / `music-2.6` / `music-cover`. Everything else in this skill assumes that case.
+
+## Models
+
+Current model ids, from the Music Generation API `model` enum:
+
+| Model | Use | Access |
+|---|---|---|
+| `music-3.0` | Text-to-music (recommended) | M Plan / paying users, RPM 120 |
+| `music-2.6` | Previous-gen text-to-music | M Plan / paying users, RPM 120 |
+| `music-cover` | Cover from reference audio | M Plan / paying users, RPM 120 |
+| `music-3.0-free` / `music-2.6-free` / `music-cover-free` | Free tier | **Being discontinued** (date not stated in the docs) |
+
+The script defaults to `music-3.0` for text-to-music and `music-cover` for cover mode, and
+rejects any other id with a clear error.
 
 ## Prerequisites
 
-- **mmx CLI** (required): Music generation uses the `mmx` command-line tool.
+- **Python 3** (required) — runs `scripts/minimax_music.py`. Stdlib only, no pip install.
 
-  **Check if installed:**
   ```bash
-  command -v mmx && mmx --version || echo "mmx not found"
+  python3 --version
   ```
 
-  **Install (requires Node.js):**
-  ```bash
-  npm install -g mmx-cli
-  ```
+- **A MiniMax API key with music access** (M Plan or an existing paying account). Get one at
+  [MiniMax Platform](https://platform.minimax.io/user-center/basic-information/interface-key).
 
-  **Authenticate (first time only):**
+  The script resolves the key in this order: `--api-key` → `$MINIMAX_API_KEY` →
+  `~/.mmx/config.json`. If you use `mmx` for other resources, its login already wrote the key
+  there:
+
   ```bash
   mmx auth login --api-key <your-minimax-api-key>
   ```
-  The API key can be obtained from [MiniMax Platform](https://platform.minimaxi.com/).
-  Credentials are saved to `~/.mmx/credentials.json` and persist across sessions.
 
-  **Verify:**
-  ```bash
-  mmx quota show
-  ```
+  `mmx config show` (or read `~/.mmx/config.json`) confirms the key and the region.
+  `mmx quota show` confirms account quota.
+
+- **Region** — `global` (`https://api.minimax.io`) or `cn` (`https://api.minimax.cn`), the same
+  two values the `mmx` CLI uses. The script reads `$MINIMAX_REGION` then
+  `~/.mmx/config.json`, defaulting to `global`. Override with `--region`.
 
 - **Audio player** (recommended): `mpv`, `ffplay`, or `afplay` (macOS built-in) for local
   playback. `mpv` is preferred for its interactive controls.
 
-## CLI Tool
+### Preflight
 
-This skill uses the `mmx` CLI for all music generation:
+Confirm the key reaches the music API before promising anything. This makes no charge:
 
-- **Music Generation**: `mmx music generate` — model: `music-2.6-free`
-  - Supports `--lyrics-optimizer` to auto-generate lyrics from prompt
-  - Supports `--instrumental` for instrumental tracks
-  - Supports `--lyrics` for user-provided lyrics
-  - Structured params: `--genre`, `--mood`, `--vocals`, `--instruments`, `--bpm`, `--key`, `--tempo`, `--structure`, `--references`
-  
-- **Cover**: `mmx music cover` — model: `music-cover-free`
-  - Takes reference audio via `--audio-file <path>` or `--audio <url>`
-  - `--prompt` describes the target cover style
+```bash
+python3 <SKILL_DIR>/scripts/minimax_music.py \
+  --prompt "probe" --instrumental --out /tmp/music-preflight.mp3 --quiet
+```
 
-**Agent flags**: Always add `--quiet --non-interactive` when calling mmx from agents.
-
-**Pipeline**:
-- Vocal: `User description -> mmx music generate --lyrics-optimizer -> MP3`
-- Instrumental: `User description -> mmx music generate --instrumental -> MP3`
-- Cover: `Source audio + style -> mmx music cover -> MP3`
+- Exit `0` → music is available, proceed with the workflow.
+- Exit `2` with `HTTP 410` / `status_code 2153` → not available for this key. Report the
+  alternatives above and stop.
 
 ## Storage
 
@@ -143,12 +199,14 @@ the API.
    document for style vocabulary, genre/instrument references, and prompt structure.
    **The API prompt should always be written in English** for best generation quality,
    regardless of the user's language.
-   
+
    Follow this pattern:
    ```
    A [mood] [BPM optional] [genre] song, featuring [vocal description],
    about [narrative/theme], [atmosphere], [key instruments and production].
    ```
+
+   Keep the prompt under the API's 2000-character limit (the script enforces it).
 
 2. **Show the user a preview** before generating. Translate all labels AND the prompt
    description into the user's language. The English prompt is only used internally when
@@ -159,12 +217,12 @@ the API.
    About to generate:
    Type: Vocal / Instrumental
    Description: indie folk, melancholy, acoustic guitar, gentle female voice
-   Lyrics: Auto-generated (--lyrics-optimizer)
-   
+   Lyrics: Auto-generated by the model
+
    Confirm? (press enter to confirm, or tell me what to change)
    ```
 
-3. **Call mmx**: Generate the music directly.
+3. **Call the API** (see Step 3).
 
 ---
 
@@ -174,18 +232,25 @@ the API.
 
 1. **Lyrics phase**:
    - If user provided lyrics: display them formatted with section markers, ask for edits.
-     The final lyrics will be passed via `--lyrics` to mmx.
-   - If user has a theme but no lyrics: will use `--lyrics-optimizer` to auto-generate.
+     The final lyrics are passed to the API via `--lyrics` / `--lyrics-file`.
+   - If user has a theme but no lyrics: use `--auto-lyrics` (`lyrics_optimizer`) to have the
+     model write them, or call the separate Lyrics Generation endpoint first
+     (see "Optional: standalone lyrics generation" below).
    - Support iterative editing: "change the second chorus" -> only rewrite that section.
-   - User can also write lyrics themselves and pass via `--lyrics`.
+   - User can also write lyrics themselves and pass them via `--lyrics`.
 
 2. **Prompt phase**:
    - Generate a recommended prompt based on the lyrics' mood and content.
    - Present it as editable tags the user can add/remove/modify.
    - Refer to the **Prompt Writing Guide** appendix for the full vocabulary.
 
+   Note: the music API has no separate `--genre` / `--mood` / `--vocals` / `--bpm` fields.
+   There is one `prompt` string — pack the structured details into the prompt text itself,
+   using the guide's vocabulary to keep it natural.
+
 3. **Advanced planning** (optional, offer but don't force):
-   - Song structure: verse-chorus-verse-chorus-bridge-chorus or custom
+   - Song structure: verse-chorus-verse-chorus-bridge-chorus or custom, expressed with
+     `[Section]` tags inside the lyrics
    - BPM suggestion (encode in prompt as tempo descriptor)
    - Reference style: "something like X style" -> map to prompt tags
    - Vocal character description
@@ -194,46 +259,63 @@ the API.
 
 ---
 
-### Step 3: Call mmx
+### Step 3: Call the API
 
-Generate music using the mmx CLI:
+`<SKILL_DIR>` = the directory containing this SKILL.md file. All paths below are relative to
+it.
 
-**Vocal with auto-generated lyrics:**
+**Vocal, model writes the lyrics from the prompt** (`lyrics_optimizer: true`):
 ```bash
-mmx music generate \
-  --prompt "<prompt>" \
-  --lyrics-optimizer \
-  --genre "<genre>" --mood "<mood>" --vocals "<vocal style>" \
-  --instruments "<instruments>" --bpm <bpm> \
-  --out ~/Music/minimax-gen/<filename>.mp3 \
-  --quiet --non-interactive
+python3 <SKILL_DIR>/scripts/minimax_music.py \
+  --prompt "<english prompt>" \
+  --auto-lyrics \
+  --out ~/Music/minimax-gen/<filename>.mp3
 ```
 
-**Vocal with user-provided lyrics:**
+**Vocal with user-provided lyrics** (lyrics required unless `--auto-lyrics`):
 ```bash
-mmx music generate \
-  --prompt "<prompt>" \
-  --lyrics "<lyrics with section markers>" \
-  --genre "<genre>" --mood "<mood>" --vocals "<vocal style>" \
-  --out ~/Music/minimax-gen/<filename>.mp3 \
-  --quiet --non-interactive
+python3 <SKILL_DIR>/scripts/minimax_music.py \
+  --prompt "<english prompt>" \
+  --lyrics "<lyrics with [Section] markers>" \
+  --out ~/Music/minimax-gen/<filename>.mp3
 ```
 
-**Instrumental (no vocal):**
+**Instrumental (no vocals)** — `is_instrumental: true`, lyrics not required, prompt required:
 ```bash
-mmx music generate \
-  --prompt "<prompt>" \
+python3 <SKILL_DIR>/scripts/minimax_music.py \
+  --prompt "<english prompt>" \
   --instrumental \
-  --genre "<genre>" --mood "<mood>" --instruments "<instruments>" \
-  --out ~/Music/minimax-gen/<filename>.mp3 \
-  --quiet --non-interactive
+  --out ~/Music/minimax-gen/<filename>.mp3
 ```
 
-Use structured flags (`--genre`, `--mood`, `--vocals`, `--instruments`, `--bpm`, `--key`,
-`--tempo`, `--structure`, `--references`, `--avoid`, `--use-case`) to give the API
-fine-grained control instead of cramming everything into `--prompt`.
+**Audio settings** (`audio_setting`, all optional):
+```bash
+  --format mp3|wav|pcm        # default mp3
+  --sample-rate 16000|24000|32000|44100   # default 44100
+  --bitrate 32000|64000|128000|256000     # default 256000
+```
 
-Display a progress indicator while waiting. Typical generation takes 30-120 seconds.
+**Agent discipline**: add `--quiet` when you need to capture stdout, and redirect stderr
+separately. The script's last stdout line is always the output path, so this is safe to parse:
+
+```bash
+out=$(python3 <SKILL_DIR>/scripts/minimax_music.py \
+  --prompt "<english prompt>" --auto-lyrics \
+  --out ~/Music/minimax-gen/<filename>.mp3 --quiet)
+```
+
+For `mmx` commands (e.g. `mmx image generate` for an album cover), the equivalent discipline is
+the CLI's global flags `--quiet --non-interactive`.
+
+**Generation is synchronous** — the call holds open until the song is finished, typically
+30-120 seconds. There is no task id and no polling endpoint, so don't poll. Show a progress
+indicator while waiting. The script uses a 900-second timeout by default; raise it with
+`--timeout` for long tracks.
+
+**Output**: with `output_format: hex` (what the script uses) the API returns the audio inline
+as a **hex** string in `data.audio`, which the script decodes and writes to `--out`. Using
+`output_format: url` returns a download link that **expires after 24 hours** — don't use it for
+anything you need to keep.
 
 ---
 
@@ -296,69 +378,72 @@ Based on feedback:
 
 ---
 
+## Optional: standalone lyrics generation
+
+`POST /v1/lyrics_generation` (global `https://api.minimax.io`, cn `https://api.minimax.cn`)
+writes lyrics without generating audio. Useful in Advanced mode when the user wants to review
+and edit lyrics before spending on a song.
+
+Request body: `{"mode": "write_full_song" | "edit", "prompt": "<theme, <=2000 chars>"}`, plus
+optional `lyrics` (existing text, only for `edit`, <=3500 chars) and `title` (preserved in the
+output). The response carries `song_title`, `style_tags`, and `lyrics`.
+
+Notes:
+- `lyrics_optimizer: true` on the music endpoint does the same thing in one call — prefer it
+  unless the user wants to edit lyrics first.
+- This endpoint (Lyrics Generation) is closed to new users under the same 2026-08-20
+  restriction as music generation: a new key gets `410` / `status_code 2153`.
+
 ## Cover Mode
 
-Generate a cover version of a song based on reference audio. Model: `music-cover-free`.
+Generate a cover version of a song based on reference audio. Model: `music-cover` (the
+`music-cover-free` tier is discontinued).
 
-**Reference audio requirements**: mp3, wav, flac — duration 6s to 6min, max 50MB.
-If no lyrics are provided, the original lyrics are extracted via ASR automatically.
+**Reference audio requirements**: 6s to 6min, max 50MB, common formats (mp3, wav, flac).
+Provide the reference as `audio_url` or `audio_base64` — exactly one, never both.
 
-### Workflow
-
-When the user selects Cover mode:
-1. Ask for the source audio — a local file path or URL
-2. Ask for the target cover style (e.g., "acoustic cover, stripped-down, intimate vocal")
-3. Optionally ask for custom lyrics or lyrics file
-
-### Commands
-
-**Cover from local file:**
+**Cover from a URL:**
 ```bash
-mmx music cover \
-  --prompt "<cover style description>" \
-  --audio-file <source.mp3> \
-  --out ~/Music/minimax-gen/<filename>.mp3 \
-  --quiet --non-interactive
+python3 <SKILL_DIR>/scripts/minimax_music.py \
+  --cover "<cover style description, 10-300 chars>" \
+  --audio-url "https://example.com/source.mp3" \
+  --out ~/Music/minimax-gen/<filename>.mp3
 ```
 
-**Cover from URL:**
+**Cover from a local file** — base64-encode it first (`base64 -i source.mp3`), then:
 ```bash
-mmx music cover \
-  --prompt "<cover style description>" \
-  --audio <source_url> \
-  --out ~/Music/minimax-gen/<filename>.mp3 \
-  --quiet --non-interactive
+python3 <SKILL_DIR>/scripts/minimax_music.py \
+  --cover "<cover style description>" \
+  --audio-base64 "$(base64 -i ~/source.mp3)" \
+  --out ~/Music/minimax-gen/<filename>.mp3
 ```
 
-**With custom lyrics (text):**
+**With custom lyrics** (10-1000 characters). If you omit them, the API extracts the original
+lyrics from the reference audio via ASR:
 ```bash
-mmx music cover \
-  --prompt "<style>" \
-  --audio-file <source.mp3> \
-  --lyrics "<custom lyrics>" \
-  --out ~/Music/minimax-gen/<filename>.mp3 \
-  --quiet --non-interactive
+python3 <SKILL_DIR>/scripts/minimax_music.py \
+  --cover "<style>" --audio-url "<source_url>" \
+  --lyrics-file ~/lyrics.txt \
+  --out ~/Music/minimax-gen/<filename>.mp3
 ```
 
-**With custom lyrics (file):**
+**Two-step cover** (edit the extracted lyrics before generating). First call the free
+preprocess endpoint `POST /v1/music_cover_preprocess` with
+`{"model": "music-cover", "audio_url": "..."}`; it returns `cover_feature_id` (valid 24 hours),
+`formatted_lyrics`, `structure_result`, and `audio_duration`. Edit the lyrics, then:
 ```bash
-mmx music cover \
-  --prompt "<style>" \
-  --audio-file <source.mp3> \
-  --lyrics-file <lyrics.txt> \
-  --out ~/Music/minimax-gen/<filename>.mp3 \
-  --quiet --non-interactive
+python3 <SKILL_DIR>/scripts/minimax_music.py \
+  --cover "<style>" --cover-feature-id "<id>" \
+  --lyrics "<edited lyrics, 10-1000 chars>" \
+  --out ~/Music/minimax-gen/<filename>.mp3
 ```
+`cover_feature_id` is mutually exclusive with `audio_url` / `audio_base64`, and it requires
+`--lyrics`.
 
-### Optional flags
-
-| Flag | Description |
-|------|-------------|
-| `--seed <number>` | Random seed 0-1000000 for reproducible results |
-| `--channel <n>` | `1` (mono) or `2` (stereo, default) |
-| `--format <fmt>` | `mp3` (default), `wav`, `pcm` |
-| `--sample-rate <hz>` | Sample rate (default: 44100) |
-| `--bitrate <bps>` | Bitrate (default: 256000) |
+**Not available**: the music API has no `seed`, `channel`, or per-request bitrate/samplerate
+overrides beyond `audio_setting`. There is no cover "from a local path" parameter — local audio
+must be base64-encoded first. Each `cover_feature_id` is valid for 24 hours, and identical
+audio content returns the same id.
 
 ### After generation
 Proceed with normal playback and feedback flow (Step 4 & 5).
@@ -367,16 +452,38 @@ Proceed with normal playback and feedback flow (Step 4 & 5).
 
 ## Error Handling
 
+Script exit codes (from `scripts/minimax_music.py`):
+
+| Exit | Meaning | Action |
+|------|---------|--------|
+| 1 | Bad arguments / missing key / failed validation | Fix the invocation; the message names the constraint |
+| 2 | HTTP error from the music API | Read stderr. `410`/`2153` = closed to new users, see above |
+| 3 | Network or timeout error | Retry once, then report failure |
+| 4 | `base_resp.status_code` non-zero | Read the mapped meaning below |
+| 5 | `data.status != 2` | Generation did not complete; no task id exists, so retry |
+| 6 | No `data.audio` in the response | Retry; verify the model id |
+| 7 | `data.audio` was not valid hex | Retry with the default hex output format |
+
+Documented API status codes (`base_resp.status_code`):
+
+| Code | Meaning | Action |
+|------|---------|--------|
+| 0 | success | — |
+| 1002 | Rate limit triggered | Wait and retry; free tier was RPM 3, paid RPM 120 |
+| 1004 | Authentication failed | Check the API key |
+| 1008 | Insufficient balance | Report quota, suggest topping up |
+| 1026 | Content flagged for sensitive material | Reword the prompt/lyrics |
+| 2013 | Invalid parameters | Check lengths and required fields |
+| 2049 | Invalid API key | Re-authenticate |
+| 2153 | Music API not available to this account | Closed to new users since 2026-08-20 — offer the alternatives |
+
+Other conditions:
+
 | Error | Action |
 |-------|--------|
-| mmx not found | `npm install -g mmx-cli` |
-| mmx auth error (exit code 3) | `mmx auth login` |
-| Quota exceeded (exit code 4) | Report quota limit, suggest waiting or upgrading |
-| API timeout (exit code 5) | Retry once, then report failure |
-| Content filter (exit code 10) | Adjust prompt to avoid filtered content |
-| Invalid lyrics format | Auto-fix section markers, warn user |
 | No audio player found | Save file and tell user the path, suggest installing mpv |
-| Network error | Show error detail, suggest checking connection |
+| Lyrics rejected for missing section tags | Add the documented tags, warn user |
+| Python 3 missing | Report it — the script is stdlib-only, no install step needed |
 
 ---
 
@@ -386,19 +493,40 @@ Proceed with normal playback and feedback flow (Step 4 & 5).
   inspired by the song's theme. Explain this to the user.
 - **Prompt language**: The API prompt works best with English tags. Chinese tags are also
   acceptable. Mixing is OK.
-- **Section markers in lyrics**: The API recognizes `[verse]`, `[chorus]`, `[bridge]`,
-  `[outro]`, `[intro]`. Always include them when providing `--lyrics`.
+- **Section markers in lyrics**: The API documents these structure tags — `[Intro]`,
+  `[Verse]`, `[Pre Chorus]`, `[Chorus]`, `[Interlude]`, `[Bridge]`, `[Outro]`,
+  `[Post Chorus]`, `[Transition]`, `[Break]`, `[Hook]`, `[Build Up]`, `[Inst]`, `[Solo]`.
+  Always include them when providing lyrics.
+- **Lyrics limits**: 1-3500 characters for text-to-music; 10-1000 for covers.
+- **Prompt limits**: up to 2000 characters; 10-300 for a cover style description.
+- **No seed parameter**: the music API has no `seed` field, so results are not reproducible
+  from a seed. Save prompts and lyrics alongside saved files if the user may want to re-run.
 - **File management**: If `~/Music/minimax-gen/` has more than 50 files, suggest cleanup
   when starting a new session.
-- **Structured params**: Prefer using `--genre`, `--mood`, `--vocals`, `--instruments`,
-  `--bpm` etc. over embedding everything in `--prompt`. This gives the API better control.
 - **Lyrics language via style**: When the user wants lyrics in a specific language, express
   it through the vocal description or genre (e.g., "Japanese female vocalist", "Mandopop
   ballad") rather than appending a language directive to the prompt.
 
 ---
 
+## Removed / no longer available
+
+These were documented by earlier versions of this skill and **do not exist**. Do not use them:
+
+| Removed | Reality |
+|---------|---------|
+| `mmx music generate` | No `music` resource in the mmx CLI. Use `scripts/minimax_music.py`. |
+| `mmx music cover` | Same — no `mmx music` subcommand exists. |
+| `--lyrics-optimizer` / `--instrumental` / `--genre` / `--mood` / `--vocals` / `--instruments` / `--bpm` / `--key` / `--tempo` / `--structure` / `--references` / `--avoid` / `--use-case` | These were never real `mmx` flags. The API has a single `prompt` string plus `lyrics`, `is_instrumental`, `lyrics_optimizer`, and `audio_setting`. |
+| `--audio-file <path>` for covers | No such field. Use `--audio-url` or `--audio-base64`. |
+| `--seed` / `--channel` | Not in the music API schema. |
+| `music-2.6-free`, `music-cover-free`, `Music-3.0-free` | Free tier is being discontinued; the paid APIs closed to new users on 2026-08-20. |
+| mmx exit codes 3/4/5/10 for music | Those are `mmx` CLI exit codes; music never goes through `mmx`. |
+| API key from `https://platform.minimaxi.com/` | Keys come from platform.minimax.io (global) or platform.minimaxi.com (China). |
+
+---
+
 ## Appendix: Prompt Writing Guide
 
-See [references/prompt_guide.md](references/prompt_guide.md) for the complete prompt writing guide,
-including genre/vocal/instrument references and BPM tables.
+See [references/prompt_guide.md](references/prompt_guide.md) for the complete prompt writing
+guide, including genre/vocal/instrument references, BPM tables, and the API field limits.
